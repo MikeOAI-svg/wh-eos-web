@@ -6,6 +6,11 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # index.html contains the Firebase WEB config (apiKey starting "AIza"). That key is PUBLIC by design —
+  # Firebase security is enforced by Auth + Firestore rules, not by hiding it — but Netlify's secret
+  # scanner flags the pattern. Skip scanning that one known-safe file. The real secret (ANTHROPIC_API_KEY)
+  # lives only in Netlify env vars and is never written to any file, so it isn't affected.
+  SECRETS_SCAN_OMIT_PATHS = "index.html"
 
 [functions]
   directory = "netlify/functions"
