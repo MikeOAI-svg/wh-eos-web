@@ -1,0 +1,12 @@
+# Netlify configuration for the Warriors Heart EOS app.
+# The site is a single static index.html (no build step); the only server code is the AI function.
+[build]
+  publish = "."
+  command = ""
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"

@@ -1,0 +1,8 @@
+# Local test harnesses (generated during development — never deploy these)
+__t.html
+__tm.html
+__tg.html
+
+# Dependencies / build output
+node_modules/
+.netlify/

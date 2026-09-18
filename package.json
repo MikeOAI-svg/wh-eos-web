@@ -1,0 +1,8 @@
+{
+  "name": "wh-eos-web",
+  "private": true,
+  "description": "Warriors Heart EOS app — static site plus one Netlify Function for AI features",
+  "dependencies": {
+    "jose": "^5.9.6"
+  }
+}

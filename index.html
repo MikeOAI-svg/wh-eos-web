@@ -651,6 +651,12 @@
   .tdl-add-row #ids-todo-owner{flex:1;min-width:0}
   .tdl-add-row input[type=date]{max-width:140px;flex:none}
   .tdl-add-row .btn{flex:none}
+  .ai-btn{border-color:var(--accent)!important;color:var(--accent)!important}
+  .ai-btn:disabled{opacity:.65}
+  .ai-status{font-size:12.5px;margin:6px 2px 0}
+  .ai-status.ok{color:var(--accent);font-weight:600}
+  .ai-status.err{color:#c0392b;font-weight:600}
+  .ai-summary{background:var(--accent-soft);border:1px solid var(--accent);border-radius:11px;padding:11px 14px;margin:8px 0;font-size:13px;line-height:1.55;color:var(--text)}
   .ids-lbl{display:block;font-size:12px;font-weight:800;color:var(--muted);margin:13px 0 5px;text-transform:uppercase;letter-spacing:.4px}
   .seg-panel textarea.ids-ta{min-height:56px;margin:0}
   .tdl-list{display:flex;flex-direction:column;gap:6px;margin:2px 0 9px}
@@ -4656,7 +4662,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=130;
+const BUILD=131;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5982,6 +5988,49 @@ function renderRockArchive(a, archives){
     ${rows||`<div class="empty"><span class="emoji">🎯</span>No Rocks were on the board that quarter.</div>`}`;
   const s=$("#rkQuarterSel"); if(s) s.onchange=()=>{ rkQuarter=(s.value==="cur")?null:+s.value; renderRocks(); };
 }
+/* ===== AI features (via the Netlify Function — the Anthropic key stays server-side) =====
+   aiCall invokes an allow-listed task and sends the signed-in user's Firebase ID token, so the server can
+   confirm they belong to this workspace before spending any AI budget. Features fail gracefully (a small
+   inline message) when the function isn't reachable — e.g. opening index.html locally instead of on Netlify. */
+async function aiCall(task, payload){
+  const u=(window.firebase&&firebase.auth&&firebase.auth().currentUser)||null;
+  if(!u) throw new Error("Please sign in first.");
+  const token=await u.getIdToken();
+  const r=await fetch("/.netlify/functions/claude",{ method:"POST",
+    headers:{ "content-type":"application/json", "authorization":"Bearer "+token },
+    body:JSON.stringify({ task, payload }) });
+  const data=await r.json().catch(()=>({error:"Unexpected response from the AI service."}));
+  if(!r.ok) throw new Error(data.error||("AI error ("+r.status+")"));
+  return data.text||"";
+}
+function aiParseJSON(text){                    // model is told to return raw JSON; strip fences/prefix defensively
+  let s=String(text||"").trim();
+  const fence=s.match(/```(?:json)?\s*([\s\S]*?)```/i); if(fence) s=fence[1].trim();
+  const a=s.indexOf("{"), b=s.lastIndexOf("}"); if(a>=0&&b>a) s=s.slice(a,b+1);
+  return JSON.parse(s);
+}
+async function aiRun(btn, statusEl, workingMsg, fn){   // shared button spinner + error handling
+  if(!btn) return; const label=btn.textContent; btn.disabled=true; btn.textContent="✨ Thinking…";
+  if(statusEl){ statusEl.hidden=false; statusEl.className="hint ai-status"; statusEl.textContent=workingMsg||"Working…"; }
+  try{ await fn(); }
+  catch(e){ if(statusEl){ statusEl.hidden=false; statusEl.className="hint ai-status err"; statusEl.textContent="⚠ "+((e&&e.message)||"AI unavailable"); } }
+  finally{ btn.disabled=false; btn.textContent=label; }
+}
+function l10Digest(){                            // plain-text of the current live meeting, to feed the AI recap
+  const m=meeting||{}, n=m.notes||{}, bp=m.byPerson||{}, L=[];
+  const per=(k,title)=>{ const o=bp[k]||{}, names=Object.keys(o).filter(x=>String(o[x]||"").trim());
+    if(!names.length && !n[k]) return; L.push(title+":");
+    names.forEach(x=>L.push("  • "+x+": "+String(o[x]).trim())); if(n[k]) L.push("  "+String(n[k]).trim()); };
+  per("segue","WIFLS / good news");
+  if(n.scorecard) L.push("Scorecard notes: "+n.scorecard);
+  per("headlines","Headlines");
+  const solved=(m.solvedIssues||[]);
+  if(solved.length){ L.push("Issues solved (IDS):"); solved.forEach((s,idx)=>{ const d=s.ids||{};
+    L.push("  "+(idx+1)+". "+(s.text||"")); if(d.discuss) L.push("     Discussion: "+d.discuss); if(d.solve) L.push("     Solve: "+d.solve); }); }
+  const todos=(m.createdTodos||[]).map(id=>((TEAM().todos)||[]).find(x=>x&&x.id===id)).filter(Boolean);
+  if(todos.length){ L.push("New to-dos:"); todos.forEach(t=>L.push("  • "+t.text+(t.owner?" — "+t.owner:"")+(t.due?" (due "+t.due+")":""))); }
+  return L.join("\n");
+}
 function editRock(id){
   if(!canEditTeam()) return;                         // Rock structure = team editors only
   const draft=(rkQuarter==="next");                  // drafting NEXT quarter's Rocks — staged in team.nextRocks, off the live board
@@ -5995,7 +6044,9 @@ function editRock(id){
     <h2>${isNew?"New Rock":"Edit Rock"}${draft?` · ${esc(quarterLabel(nextQuarterFirstMonday(TEAM().week1Start||firstMondayOfQuarter())))} draft`:""}</h2>
     ${draft?`<div class="hint" style="margin:-4px 2px 12px">📋 Drafting for next quarter — this stays off the live board &amp; the L10 until the quarter starts.</div>`:""}
     ${isMirror?`<div class="hint" style="margin:-4px 2px 12px">↔ Shared from <b>${esc(home.name)}</b>. Edits here update it on both boards.</div>`:""}
-    <div class="field"><label>Rock (short title)</label><input id="r-title" value="${esc(rec.title)}" placeholder="e.g. Launch new CRM"></div>
+    <div class="field"><label>Rock (short title)</label><input id="r-title" value="${esc(rec.title)}" placeholder="e.g. Launch new CRM">
+      <button type="button" class="btn ghost sm ai-btn" id="r-ai" style="margin-top:8px">✨ Sharpen with AI</button>
+      <div class="hint ai-status" id="r-ai-status" hidden></div></div>
     <div class="field"><label>Owner</label><input id="r-owner" value="${esc(rec.owner)}" placeholder="Accountable person"></div>
     <div class="field"><label>Due date (end of quarter)</label><input id="r-due" type="date" value="${esc(rec.due)}"></div>
     <div class="field"><label>Status</label><select id="r-status">
@@ -6038,6 +6089,19 @@ function editRock(id){
     const ab=$("#r-ms-add"); if(ab) ab.onclick=addMs;
     const ti=$("#r-ms-text"); if(ti) ti.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addMs(); } }; }
   document.querySelectorAll('#r-share [data-share]').forEach(b=>b.onclick=()=>b.classList.toggle("on"));
+  { const aib=$("#r-ai"); if(aib) aib.onclick=()=>aiRun(aib, $("#r-ai-status"), "Drafting a SMART version…", async ()=>{
+      const idea=($("#r-title").value||"").trim()||rec.title||"";
+      if(!idea){ $("#r-title").focus(); throw new Error("Type a rough idea in the title first."); }
+      const parts=[]; const add=(l,sel)=>{ const v=($(sel).value||"").trim(); if(v) parts.push(l+": "+v); };
+      add("Specific","#r-s"); add("Measurable","#r-m"); add("Achievable","#r-a"); add("Relevant","#r-rel"); add("Time-bound","#r-t");
+      const text=await aiCall("sharpen_rock",{ idea, owner:($("#r-owner").value||""), context:parts.join("\n") });
+      const j=aiParseJSON(text);
+      if(j.title) $("#r-title").value=j.title;
+      if(j.smart){ const S=j.smart; if(S.s)$("#r-s").value=S.s; if(S.m)$("#r-m").value=S.m; if(S.a)$("#r-a").value=S.a; if(S.rel)$("#r-rel").value=S.rel; if(S.t)$("#r-t").value=S.t; }
+      if(Array.isArray(j.milestones)) j.milestones.forEach(m=>{ const t=((m&&(m.text||m.name))||"").trim(); if(t && !msWork.some(x=>x.text===t)) msWork.push({id:uid(),text:t,due:"",done:false}); });
+      renderMsList();
+      const st=$("#r-ai-status"); if(st){ st.className="hint ai-status ok"; st.textContent="✓ Drafted below — review, tweak anything, then Save."; }
+    }); }
   $("#r-save").onclick=()=>{
     rec.title=$("#r-title").value.trim(); if(!rec.title){ $("#r-title").focus(); return; }
     rec.owner=$("#r-owner").value.trim(); rec.due=$("#r-due").value; rec.status=$("#r-status").value;
@@ -9554,6 +9618,9 @@ function renderSegContent(i){
       <div class="hint" style="margin:-4px 0 8px">Confirm each 7-day to-do and who is responsible to get it done.</div>
       ${dataList}${recap}
       <h4 style="margin-top:18px">Cascading Messages</h4>
+      <button type="button" class="btn ghost sm ai-btn" id="cc-ai" style="margin:0 0 6px">✨ Draft summary &amp; cascade with AI</button>
+      <div class="hint ai-status" id="cc-ai-status" hidden></div>
+      <div class="ai-summary" id="cc-ai-summary" ${meeting.notes.aiSummary?"":"hidden"}>${meeting.notes.aiSummary?"<b>Meeting summary</b><br>"+esc(meeting.notes.aiSummary).replace(/\n/g,"<br>"):""}</div>
       <textarea id="seg-cascade" placeholder="What needs to be communicated to the rest of the team?">${esc(meeting.notes.cascade||"")}</textarea>
       <h4 style="margin-top:16px">Meeting Rating (1–10)</h4>${rows}
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
@@ -9599,6 +9666,18 @@ function renderSegContent(i){
   if(note){ const key=SEGMENTS[i].key;
     note.oninput=()=>{ meeting.notes[key]=note.value; saveL10(); }; }
   const casc=$("#seg-cascade"); if(casc) casc.oninput=()=>{ meeting.notes.cascade=casc.value; saveL10(); };
+  { const aib=$("#cc-ai"); if(aib) aib.onclick=()=>aiRun(aib, $("#cc-ai-status"), "Reviewing the meeting…", async ()=>{
+      const digest=l10Digest();
+      if(!digest.trim()) throw new Error("Nothing recorded yet — capture some notes first.");
+      const vals=[...document.querySelectorAll("[data-rate]")].map(x=>parseFloat(x.value)).filter(v=>!isNaN(v));
+      const rating=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):"";
+      const text=await aiCall("l10_minutes",{ teamName:TEAM().name, transcript:digest, rating });
+      const j=aiParseJSON(text);
+      if(j.cascade){ const ta=$("#seg-cascade"); if(ta) ta.value=j.cascade; meeting.notes.cascade=j.cascade; }
+      if(j.summary){ meeting.notes.aiSummary=j.summary; const box=$("#cc-ai-summary"); if(box){ box.hidden=false; box.innerHTML="<b>Meeting summary</b><br>"+esc(j.summary).replace(/\n/g,"<br>"); } }
+      saveL10(true);
+      const st=$("#cc-ai-status"); if(st){ st.className="hint ai-status ok"; st.textContent="✓ Cascade filled in below · summary above — edit anything before you finish."; }
+    }); }
   lockForFollowers();
 }
 /* Followers see exactly what the facilitator sees, but can't drive. Rather than branch every
