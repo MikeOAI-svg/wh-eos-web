@@ -657,6 +657,7 @@
   .ai-status.ok{color:var(--accent);font-weight:600}
   .ai-status.err{color:#c0392b;font-weight:600}
   .ai-summary{background:var(--accent-soft);border:1px solid var(--accent);border-radius:11px;padding:11px 14px;margin:8px 0;font-size:13px;line-height:1.55;color:var(--text)}
+  .sc-ai-bar{margin:6px 2px 10px}
   .ids-lbl{display:block;font-size:12px;font-weight:800;color:var(--muted);margin:13px 0 5px;text-transform:uppercase;letter-spacing:.4px}
   .seg-panel textarea.ids-ta{min-height:56px;margin:0}
   .tdl-list{display:flex;flex-direction:column;gap:6px;margin:2px 0 9px}
@@ -4662,7 +4663,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=131;
+const BUILD=132;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5454,9 +5455,19 @@ function renderScorecard(){
         <td class="sc-goal">${esc(m.goal)}</td>${trend}${cells}</tr>`;
     });
   });
-  wrap.innerHTML=topbar+`<div class="sc-scroll"><table class="sc"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+  const aiBar=(isCurrent && canEditTeam())
+    ? `<div class="sc-ai-bar"><button type="button" class="btn ghost sm ai-btn" id="sc-ai">✨ Scorecard insight</button>
+        <div class="hint ai-status" id="sc-ai-status" hidden></div><div class="ai-summary" id="sc-ai-summary" hidden></div></div>` : "";
+  wrap.innerHTML=topbar+aiBar+`<div class="sc-scroll"><table class="sc"><thead>${head}</thead><tbody>${body}</tbody></table></div>
     <div class="hint">${isCurrent?"Tap any row to edit — enter each week's actual number/%, then mark it On Track (green) or Off Track (red). Drag the ⋮⋮ handle to reorder.":"Archived quarter — read-only. Switch to “Current” above to edit this quarter."}</div>`;
   wireBar();
+  { const aib=$("#sc-ai"); if(aib) aib.onclick=()=>aiRun(aib, $("#sc-ai-status"), "Reading your numbers…", async ()=>{
+      const digest=scorecardDigest();
+      if(!digest.trim()) throw new Error("No scorecard data yet.");
+      const text=await aiCall("scorecard_insight",{ teamName:TEAM().name, quarter:quarterLabel(curW1), digest });
+      const box=$("#sc-ai-summary"); if(box){ box.hidden=false; box.innerHTML="<b>Scorecard insight</b><br>"+esc(text).replace(/\n/g,"<br>"); }
+      const st=$("#sc-ai-status"); if(st){ st.className="hint ai-status ok"; st.textContent="✓ A read on this quarter's numbers — your judgment still rules."; }
+    }); }
   // Team editors can open any row; a plain member can open a row for a measurable THEY own (full edit + delete of it).
   if(isCurrent) wrap.querySelectorAll("tr.sc-open").forEach(tr=>{ const mid=tr.dataset.mid;
     const fm=findMeasAnywhere(mid); const mayOpen=canEditTeam()||(fm&&canEditOwn(fm.m.owner));
@@ -6029,6 +6040,16 @@ function l10Digest(){                            // plain-text of the current li
     L.push("  "+(idx+1)+". "+(s.text||"")); if(d.discuss) L.push("     Discussion: "+d.discuss); if(d.solve) L.push("     Solve: "+d.solve); }); }
   const todos=(m.createdTodos||[]).map(id=>((TEAM().todos)||[]).find(x=>x&&x.id===id)).filter(Boolean);
   if(todos.length){ L.push("New to-dos:"); todos.forEach(t=>L.push("  • "+t.text+(t.owner?" — "+t.owner:"")+(t.due?" (due "+t.due+")":""))); }
+  return L.join("\n");
+}
+function scorecardDigest(){                      // this team's current-quarter scorecard as text, weeks up to now
+  const board=measuresOnBoard(TEAM()), cwi=currentWeekIndex(), L=[];
+  L.push("Week "+(cwi+1)+" of 13.");
+  board.forEach(({m})=>{ const cells=[];
+    for(let i=0;i<=cwi;i++){ const e=(m.values&&m.values[i])||null;
+      if(!e || (!(e.v||"").trim() && !e.s)){ cells.push("W"+(i+1)+" —"); continue; }
+      cells.push("W"+(i+1)+" "+((e.v||"").trim()||"·")+(e.s?" ["+e.s+"]":"")); }
+    L.push("• "+m.name+" (owner "+(m.owner||"—")+", goal "+(m.goal||"—")+"): "+cells.join(", ")); });
   return L.join("\n");
 }
 function editRock(id){

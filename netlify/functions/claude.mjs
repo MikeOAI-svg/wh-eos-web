@@ -34,6 +34,16 @@ const TASKS = {
       system: "You are an expert EOS implementer writing the recap of a weekly Level 10 Meeting for a leadership team. Be concise, concrete, and professional; name owners for to-dos. Reply with ONLY a JSON object — no prose, no markdown, no code fences.",
       user: `Write the recap for ${team}'s Level 10 Meeting from these notes.\n\n${transcript || "(no notes were recorded)"}\n\nAverage rating: ${rating || "(n/a)"}\n\nReturn JSON shaped EXACTLY like:\n{"summary":"<5–8 sentence recap: what was decided, what got solved, and the key to-dos with owners>","cascade":"<a short 2–4 sentence Cascading Message the leaders can relay to their departments — only the few things everyone should hear>"}`
     };
+  },
+  scorecard_insight(p){
+    const team = String(p.teamName || "the team").slice(0, 120);
+    const quarter = String(p.quarter || "").slice(0, 40);
+    const digest = String(p.digest || "").slice(0, 10000);
+    return {
+      maxTokens: 1200,
+      system: "You are an expert EOS implementer reviewing a leadership team's weekly Scorecard. Be concise, concrete, and practical, and never invent numbers you were not given. Reply in PLAIN TEXT — short paragraphs or bullet lines, not JSON.",
+      user: `Review ${team}'s Scorecard for ${quarter}. Each measurable lists its weekly actuals with an [on]/[off] status.\n\n${digest || "(no data)"}\n\nIn 6–10 tight lines: (1) which measurables are trending OFF track, and any pattern across them; (2) the most likely story behind the worst one or two; (3) 2–3 specific things to focus on or put on the Issues list. Be actionable — no filler.`
+    };
   }
 };
 
