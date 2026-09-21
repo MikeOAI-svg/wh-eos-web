@@ -4663,7 +4663,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=133;
+const BUILD=134;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5316,7 +5316,7 @@ function currentWeekIndexFor(team){ const w=weekDatesFrom((team&&team.week1Start
   for(let i=0;i<13;i++){ if(t<=isoAddDays(w[i],6)) return i; } return 12; }
 function weekDates(){ return weekDatesFrom(TEAM().week1Start||firstMondayOfQuarter()); } // Monday of each week
 function currentWeekIndex(){ const w=weekDates(); const t=todayIso(); for(let i=0;i<13;i++){ if(t<=isoAddDays(w[i],6)) return i; } return 12; }
-function deptName(id){ const d=TEAM().departments.find(x=>x.id===id); return d?d.name:"Unassigned"; }
+function deptName(id){ if(!id) return "Unassigned"; for(const t of (data.teams||[])){ const d=(t.departments||[]).find(x=>x&&x.id===id); if(d) return d.name; } return "Unassigned"; }   // search ALL teams so a mirrored measurable shows its home department, not "Unassigned"
 
 /* ================= SCORECARD ================= */
 function meetsGoal(v,op,goal){
@@ -6787,7 +6787,7 @@ const CHECK_SECS={
 function getVtoList(v,key){ const p=CHECK_SECS[key].path; return (p.length===2 ? (v[p[0]]||{})[p[1]] : v[p[0]]) || []; }
 function setVtoList(v,key,arr){ const p=CHECK_SECS[key].path; if(p.length===2){ v[p[0]]=v[p[0]]||{}; v[p[0]][p[1]]=arr; } else v[p[0]]=arr; }
 /* every person named on any team — for owner autocomplete on the company-wide V/TO */
-function allMemberNames(){ const s=new Set(); (data.teams||[]).forEach(t=>(t.members||[]).forEach(m=>{ if(m&&m.name) s.add(m.name); })); return [...s].sort(); }
+function allMemberNames(){ return knownPeople(); }   // members + chart-seat occupants + owners — so V/TO owner autocomplete isn't empty on a chart-driven company
 
 /* ================= WHO AM I =================
    Rocks and To-Dos are owned by a NAME ("Aaron"), but a login is an EMAIL. To know which
@@ -8348,6 +8348,7 @@ function renderAccountability(){
       <div class="ac-actions"><button data-collapse="all">⊟ Collapse all</button><button data-collapse="none">⊞ Expand all</button></div>
       <div class="chart-vp" id="chartVp"><div id="acD3"></div></div>
       <div class="hint" style="margin:8px 2px 0">Drag empty space to pan · Fit / − / + to zoom · tap a box to edit · use the − / + on a box to collapse a branch.</div>`;
+    tidyChartOnce();   // first open of a facility → collapse deep branches so a big org doesn't open as a wall of boxes
     renderChartD3();
   } else if(acView==="free"){
     wrap.innerHTML=`${titleHtml}${toolbar}${picker}
@@ -8366,7 +8367,7 @@ function renderAccountability(){
   { const pb=$("#acPrint"); if(pb) pb.onclick=openAcPrintOptions; }
   { const cb=$("#acCopy"); if(cb) cb.onclick=openAcCopyOptions; }
   wrap.querySelectorAll("[data-collapse]").forEach(b=>b.onclick=()=>{
-    if(_d3chart && acView==="chart"){ b.dataset.collapse==="all"?_d3chart.collapseAll():_d3chart.expandAll(); }
+    if(acView==="chart"){ b.dataset.collapse==="all"?d3CollapseAll():d3ExpandAll(); }
     else { b.dataset.collapse==="all"?collapseAll():expandAll(); } });
   if(acView==="chart"){ wrap.querySelectorAll("[data-zoom]").forEach(b=>b.onclick=()=>{ const a=b.dataset.zoom;
     if(a==="add"){ addSeatUnder(null); return; }
@@ -8514,7 +8515,9 @@ function autoArrangeFree(){   // clear hand-placed positions for the seats in vi
 }
 /* ===== D3 ORG-CHART ENGINE — auto-layout, collapse/expand, pan/zoom (d3-org-chart) ===== */
 let _d3chart=null;
-let _d3collapsed=new Set();   // seat ids whose children are hidden (our own collapse tracking)
+let _d3collapsed=(function(){ try{ return new Set(JSON.parse(localStorage.getItem("eostracker.d3collapse")||"[]")); }catch(e){ return new Set(); } })();   // seat ids whose children are hidden — PERSISTED so a big facility opens the way you left it, not fully expanded every time
+function saveD3Collapse(){ try{ localStorage.setItem("eostracker.d3collapse", JSON.stringify([..._d3collapsed])); }catch(e){} }
+let _d3sideSeats=[];          // the left/right side reports from the last render — so a search-jump can re-draw them (a library render() rebuilds the tree and drops the overlay)
 let _d3xform=null;            // the user's current pan/zoom — restored across background re-renders so the chart never auto-zooms out on you
 let _d3wantFit=true;          // fit only on first open / an explicit view change (set true by the facility & view buttons)
 function d3NodeCard(s, hasKids, collapsed, isSide){
@@ -8576,6 +8579,7 @@ function renderChartD3(keepView){
       .nodeHeight(d=> d.data._seat ? d3NodeH(d.data._seat) : 1)
       .childrenMargin(()=>52).siblingsMargin(()=>22).neighbourMargin(()=>22).compactMarginBetween(()=>22).compactMarginPair(()=>26)
       .compact(false)
+      .initialExpandLevel(99)   // our `data` is already collapse-filtered, so show every node the FIRST render — no second expandAll() render
       .nodeContent(d=> d.data._syn ? '<div style="width:1px;height:1px"></div>' : d3NodeCard(d.data._seat, hasKids(d.data.id), _d3collapsed.has(d.data.id)))
       .linkUpdate(function(d){ const hide=d&&d.parent&&d.parent.data&&d.parent.data._syn;   // orange, bold connectors (hide links to the synthetic root)
         d3.select(this).attr("stroke", hide?"transparent":"#d85e16").attr("stroke-width", hide?0:3).attr("stroke-opacity",1); })
@@ -8603,7 +8607,7 @@ function renderChartD3(keepView){
         else if("seatConnect" in el.dataset) connectSide(el.dataset.seatConnect);
         else if("seatEdit" in el.dataset) editSeat(el.dataset.seatEdit); }, true);
     }
-    _d3chart.expandAll();
+    _d3sideSeats=sideSeats;             // remember for a search-jump re-render
     appendSideSeats(host, sideSeats);   // draw the left/right side reports beside their managers
     // Fit only on first open or an explicit view/facility change; otherwise RESTORE the user's current pan/zoom
     // so a background re-render never auto-zooms them out.
@@ -8613,7 +8617,20 @@ function renderChartD3(keepView){
 }
 function d3ToggleCollapse(id){
   if(_d3collapsed.has(id)) _d3collapsed.delete(id); else _d3collapsed.add(id);
+  saveD3Collapse();
   renderChartD3(true);   // deterministic: collapsed subtrees are filtered out of the data on re-render; keepView so the chart doesn't jump
+}
+// Collapse-all / Expand-all that drive OUR collapse set (the on-screen source of truth), not the library's own
+// competing flags — so the buttons agree with the per-box ▾/▸ toggles and survive the next background sync.
+function d3CollapseAll(){
+  const vis=acVisibleIds(); const parents=new Set();
+  acSeats().forEach(s=>{ if((!vis||vis.has(s.id)) && s.parent) parents.add(s.parent); });   // every seat that HAS an in-view child → collapse to the roots
+  parents.forEach(id=>_d3collapsed.add(id)); saveD3Collapse(); renderChartD3(true);
+}
+function d3ExpandAll(){
+  const vis=acVisibleIds();
+  if(!vis){ _d3collapsed.clear(); } else { [..._d3collapsed].forEach(id=>{ if(vis.has(id)) _d3collapsed.delete(id); }); }
+  saveD3Collapse(); renderChartD3(true);
 }
 /* On-screen height of a side box (mirrors the tree's nodeHeight so boxes match). */
 function d3SideBoxH(s){ return d3NodeH(s); }
@@ -8622,6 +8639,7 @@ function d3SideBoxH(s){ return d3NodeH(s); }
    connector from the manager's edge. Multiple side reports on the same side stack vertically, centered on the
    manager. Reliable in any environment — positions come from the node's own local coordinates, not screen math. */
 function appendSideSeats(host, sideSeats){
+  host.querySelectorAll(".d3-side-wrap,.d3-side-link").forEach(e=>e.remove());   // idempotent — clear any prior side overlay so a re-append (e.g. after a search-jump render) can't duplicate a side report
   if(!sideSeats||!sideSeats.length) return;
   const NS="http://www.w3.org/2000/svg", W=228, GAP=46, VGAP=16;
   const groups={}; sideSeats.forEach(s=>{ const k=s.parent+"|"+(s.side==="left"?"left":"right"); (groups[k]=groups[k]||[]).push(s); });
@@ -8758,30 +8776,32 @@ function jumpToSeat(id){
   // the facility that contains them — so a search always lands you on the match, no matter where you started.
   const vis=acVisibleIds();
   if(vis && !vis.has(id)){ const p=pillarSeatOf(id); acFunction=(p&&p.id)||"all"; saveAcFunction(); }
-  let s=byId[id]; while(s){ acCollapsed.delete(s.id); s=s.parent?byId[s.parent]:null; }
-  saveCollapse(); renderAccountability();
-  // D3 chart view: pan/zoom straight to the seat using the engine.
-  if(acView==="chart"){ setTimeout(()=>{ try{ if(_d3chart){ _d3chart.setCentered(id).render(); } }catch(e){} },60); return; }
+  // Expand the seat's whole ancestor chain in BOTH collapse sets — acCollapsed (list/free views) AND
+  // _d3collapsed (the chart), or the chart would filter the target out of its data and never reveal it.
+  let s=byId[id]; while(s){ acCollapsed.delete(s.id); _d3collapsed.delete(s.id); s=s.parent?byId[s.parent]:null; }
+  saveCollapse(); saveD3Collapse(); renderAccountability();
+  // D3 chart view: pan/zoom straight to the seat using the engine, then re-draw the side reports the engine's render() dropped.
+  if(acView==="chart"){ setTimeout(()=>{ try{ if(_d3chart){ _d3chart.setCentered(id).render(); appendSideSeats($("#acD3"), _d3sideSeats); } }catch(e){} },60); return; }
   setTimeout(()=>{ const vp=$("#chartVp"); const node=vp&&vp.querySelector('[data-seat-edit="'+id+'"]');
     if(node){ node.classList.add("seat-hit"); try{ node.scrollIntoView({block:"center",inline:"center"}); }catch(e){} setTimeout(()=>{ node.classList.remove("seat-hit"); },1800); } },40);
 }
 /* One-time tidy per pillar: on first open of a branch, collapse the pillar's directors so the chart
    opens showing the top tiers (Visionary → Integrator → pillar → directors), not the whole deep tree. */
 function tidyChartOnce(){
-  if(!acFunction) return; const flag="eostracker.actidy2."+acFunction;   // v2 → re-runs once with the new facility-level collapse
+  if(!acFunction) return; const flag="eostracker.actidy3."+acFunction;   // v3 → drives the D3 collapse set (_d3collapsed), which the on-screen chart actually reads
   try{ if(localStorage.getItem(flag)) return; }catch(e){}
   let did=false;
   if(acFunction==="all"){
     // WHOLE COMPANY: collapse the FACILITIES themselves, so a big org (e.g. 100+ Texas seats) opens showing
     // just the top — Visionary → Integrator → the facilities. Expand a facility only when you need it.
-    acFunctionSeats().forEach(f=>{ if(acChildren(f.id).length){ acCollapsed.add(f.id); did=true; } });
+    acFunctionSeats().forEach(f=>{ if(acChildren(f.id).length){ _d3collapsed.add(f.id); did=true; } });
   } else {
     // SINGLE FACILITY: keep the facility itself open (it's the focus) and collapse its directors, so it
     // opens showing the facility + its direct reports rather than the whole deep tree.
     const p=acSeatById(acFunction);
-    if(p) acChildren(p.id).forEach(k=>{ if(acChildren(k.id).length){ acCollapsed.add(k.id); did=true; } });
+    if(p) acChildren(p.id).forEach(k=>{ if(acChildren(k.id).length){ _d3collapsed.add(k.id); did=true; } });
   }
-  if(did) saveCollapse();
+  if(did) saveD3Collapse();
   try{ localStorage.setItem(flag,"1"); }catch(e){}
 }
 // Live search results under the box: match by person name or role across the WHOLE chart (every facility),
@@ -9633,12 +9653,17 @@ function renderSegContent(i){
       $("#ids-back").onclick=back; $("#ids-keep").onclick=back;
       { const bs=$("#ids-solved"); if(bs) bs.onclick=()=>{
         active.solved=true; active.solvedDate=todayIso();
-        // snapshot the worksheet into this meeting's minutes
-        (meeting.solvedIssues=meeting.solvedIssues||[]).push({text:active.text, ids:Object.assign({},active.ids||{})});
+        // Snapshot the worksheet into this meeting's minutes. UPSERT by issue id so re-solving a revisited
+        // issue doesn't list it twice, and keep the raiser (owner) so the archived minutes show "raised by".
+        const snap={issueId:active.id, text:active.text, owner:active.owner||"", ids:Object.assign({},active.ids||{})};
+        meeting.solvedIssues=meeting.solvedIssues||[];
+        const six=meeting.solvedIssues.findIndex(x=>x&&x.issueId===active.id);
+        if(six>=0) meeting.solvedIssues[six]=snap; else meeting.solvedIssues.push(snap);
         meeting.activeIssue=null; saveL10(true); renderSegContent(i);
       }; }
       { const br=$("#ids-reopen"); if(br) br.onclick=()=>{   // put a solved issue back on the open list (still worked on)
         active.solved=false; active.solvedDate="";
+        meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===active.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
         saveL10(true); renderSegContent(i);
       }; }
       const addTodo=()=>{ const ti=$("#ids-todo"), oi=$("#ids-todo-owner"), di=$("#ids-todo-due"); const v=ti.value.trim(); if(!v) return;
@@ -9853,7 +9878,7 @@ function concludeMeeting(auto){
   const ratingList=members.map(m=>({name:m.name,score:meeting.ratings[m.id]}))
                           .filter(r=>r.score!==undefined&&r.score!=="");
   const t=TEAM();
-  const rec={id:uid(),date:meeting.date,durationMin,avg,
+  const rec={id:"m_"+(meeting.startedAt||Date.now()),date:meeting.date,durationMin,avg,   // deterministic id (from start time) so two clients auto-concluding the same L10 file ONE record, not two
     ratings:{...meeting.ratings}, ratingList,
     notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
     issues:(meeting.solvedIssues||[]), team:t.name, summary:meetingSummary(t)};

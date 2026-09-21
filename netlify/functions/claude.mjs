@@ -47,18 +47,37 @@ const TASKS = {
   }
 };
 
+// Best-effort per-user rate limit. Netlify function instances are ephemeral, so this bounds a runaway
+// client or a single spammer within a warm instance (the most likely abuse); the DURABLE cost guard is
+// your Anthropic account spend cap, plus the fixed max_tokens + input caps + task allow-list that already
+// bound per-call cost.
+const RATE_MAX = 20, RATE_WINDOW_MS = 60000;
+const _hits = new Map();   // uid -> recent request timestamps
+function rateLimited(uid){
+  const now = Date.now();
+  const arr = (_hits.get(uid) || []).filter(t => now - t < RATE_WINDOW_MS);
+  arr.push(now);
+  _hits.set(uid, arr);
+  return arr.length > RATE_MAX;
+}
+
 export async function handler(event){
   if(event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
-  // 1) Only a signed-in member of this workspace may spend the API budget.
+  // 1) Only a signed-in user of this workspace may spend the API budget.
   const authHeader = event.headers.authorization || event.headers.Authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if(!token) return json(401, { error: "Please sign in first." });
+  let claims;
   try{
-    await jwtVerify(token, JWKS, { issuer: ISSUER, audience: PROJECT_ID });
+    const res = await jwtVerify(token, JWKS, { issuer: ISSUER, audience: PROJECT_ID });
+    claims = res.payload;
   }catch(e){
     return json(401, { error: "Your session isn't valid — sign in again." });
   }
+  const uid = claims && claims.sub;
+  if(!uid) return json(401, { error: "Your session isn't valid — sign in again." });   // a real Firebase token always carries a subject
+  if(rateLimited(uid)) return json(429, { error: "You're going a bit fast — wait a moment and try again." });
 
   // 2) Build the Claude request from an allow-listed task.
   let body;
@@ -78,7 +97,7 @@ export async function handler(event){
       body: JSON.stringify({ model: MODEL, max_tokens: built.maxTokens, system: built.system, messages: [{ role: "user", content: built.user }] })
     });
     const data = await r.json();
-    if(!r.ok) return json(502, { error: (data && data.error && data.error.message) || "The AI request failed." });
+    if(!r.ok){ console.error("anthropic error", r.status, data && data.error); return json(502, { error: "The AI request failed — try again." }); }   // log detail server-side; don't leak upstream text to the browser
     const text = (data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("").trim();
     return json(200, { text });
   }catch(e){
