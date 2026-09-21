@@ -4663,7 +4663,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=132;
+const BUILD=133;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -4837,12 +4837,32 @@ function mergeTeamMulti(teamId, applyTeam){
   })).then(res=>{ _teamDocs[teamId]=res.team; _teamAt[teamId]=res.at; _baseAt[teamId]=res.at; _shadowTeams[teamId]=JSON.stringify(res.team); setSync("Saved"); })
     .catch(e=>{ console.error("team merge tx failed — falling back",e); persistMulti(); });
 }
+// Merge a team-scoped change onto the LATEST server copy in either storage mode — the safe replacement for a
+// plain save() on any single-team edit (reorder, departments, etc.), so a concurrent sync can't refuse-and-revert it.
+function mergeTeam(teamId, applyTeam){
+  if(MULTI){ mergeTeamMulti(teamId, applyTeam); return; }
+  mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) applyTeam(st); });
+}
 function saveL10(immediate){   // persist the current L10 team's meeting + to-dos/issues by merging into the latest server state
   const t=TEAM(); if(!t){ save(); return; } const teamId=t.id;
   const snapJson=JSON.stringify({ liveMeeting:(t.liveMeeting||null), todos:(t.todos||[]), issues:(t.issues||[]) });
-  const apply=(st)=>{ const lt=JSON.parse(snapJson);
-    st.liveMeeting=lt.liveMeeting;                       // single meeting-writer → local wins
-    st.todos=upsertById(st.todos, lt.todos);            // adds/edits merge by id, so a to-do added elsewhere at the same time survives
+  // Two people write the live meeting at once — the FACILITATOR drives navigation/timer, the SCRIBE owns the
+  // notes/content. Merge each client's changes onto the server's LATEST meeting by role instead of overwriting
+  // the whole object, so a facilitator clicking "Next" can't wipe the scribe's just-typed note (and vice-versa).
+  // When one person is both (the common case), both roles are true → this is the same as "local wins".
+  const NAV=["seg","segStart","segElapsed","totalElapsed","capMin"];
+  const CONTENT=["notes","byPerson","ratings","createdTodos","activeIssue","solvedIssues"];
+  const IDENT=["date","startedAt","facilitatorEmail","facilitatorName","scribeEmail","scribeName"];
+  const apply=(st)=>{ const lt=JSON.parse(snapJson), loc=lt.liveMeeting;
+    if(!loc){ st.liveMeeting=null; }                      // meeting ended → clear it for everyone
+    else if(!st.liveMeeting){ st.liveMeeting=loc; }       // server has no meeting yet (we just started it) → take ours whole
+    else { const merged=Object.assign({}, st.liveMeeting);
+      const fac=isFacilitator(), scr=isScribe();          // isScribe() falls back to the facilitator when no separate scribe
+      if(fac) NAV.concat(IDENT).forEach(k=>{ if(k in loc) merged[k]=loc[k]; });
+      if(scr) CONTENT.forEach(k=>{ if(k in loc) merged[k]=loc[k]; });
+      st.liveMeeting=merged;
+    }
+    st.todos=upsertById(st.todos, lt.todos);              // adds/edits merge by id, so a to-do added elsewhere at the same time survives
     st.issues=upsertById(st.issues, lt.issues);
   };
   const fire=()=> MULTI ? mergeTeamMulti(teamId, apply)
@@ -5497,7 +5517,7 @@ function wireScDrag(wrap){
       const dragEl=wrap.querySelector('tr.sc-open[data-mid="'+dragMid+'"]');
       if(dragEl) tr.parentNode.insertBefore(dragEl, after?tr.nextSibling:tr);
       const order=[...wrap.querySelectorAll("tr.sc-open[data-mid]")].map(x=>x.dataset.mid);   // new top-to-bottom order
-      TEAM().scOrder=order; save(); dragMid=null; renderScorecard();
+      TEAM().scOrder=order; mergeTeam(TEAM().id, t=>{ t.scOrder=order.slice(); }); dragMid=null; renderScorecard();   // merge only scOrder → a teammate's concurrent number entry survives
     });
   });
 }
@@ -5578,10 +5598,11 @@ function scorecardSettings(){
     <div class="sheet-actions" style="margin-top:16px"><button class="btn" id="sc-done">Done</button></div>`);
   $("#sc-w1").onchange=e=>{ s.week1Start=e.target.value; save(); };
   $("#sc-w1-quarter").onclick=()=>{ s.week1Start=firstMondayOfQuarter(); save(); scorecardSettings(); };
-  const addDept=()=>{ const i=$("#sc-dept"); const v=(i&&i.value.trim())||""; if(!v) return; s.departments.push({id:uid(),name:v}); save(); scorecardSettings(); };
+  const saveDepts=()=>mergeTeam(s.id, t=>{ t.departments=JSON.parse(JSON.stringify(s.departments)); });   // merge only departments onto the latest team
+  const addDept=()=>{ const i=$("#sc-dept"); const v=(i&&i.value.trim())||""; if(!v) return; s.departments.push({id:uid(),name:v}); saveDepts(); scorecardSettings(); };
   $("#sc-dept-add").onclick=addDept; $("#sc-dept").onkeydown=e=>{ if(e.key==="Enter") addDept(); };
-  document.querySelectorAll("[data-del-dept]").forEach(b=>b.onclick=()=>{ s.departments=s.departments.filter(x=>x.id!==b.dataset.delDept); save(); scorecardSettings(); });
-  document.querySelectorAll("[data-edit-dept]").forEach(b=>b.onclick=()=>{ const d=s.departments.find(x=>x.id===b.dataset.editDept); if(!d) return; const nm=(prompt("Rename department",d.name)||"").trim(); if(nm){ d.name=nm; save(); scorecardSettings(); } });
+  document.querySelectorAll("[data-del-dept]").forEach(b=>b.onclick=()=>{ s.departments=s.departments.filter(x=>x.id!==b.dataset.delDept); saveDepts(); scorecardSettings(); });
+  document.querySelectorAll("[data-edit-dept]").forEach(b=>b.onclick=()=>{ const d=s.departments.find(x=>x.id===b.dataset.editDept); if(!d) return; const nm=(prompt("Rename department",d.name)||"").trim(); if(nm){ d.name=nm; saveDepts(); scorecardSettings(); } });
   $("#sc-new-quarter").onclick=()=>{ closeSheet(); startNewQuarter(); };
   $("#sc-done").onclick=()=>{ closeSheet(); renderScorecard(); };
 }
@@ -5640,7 +5661,7 @@ function editMeasurable(id){
       +'<option value="__new">＋ New department…</option>'; ds.dataset.prev=ds.value; };
     ds.onchange=()=>{
       if(ds.value==="__new"){ const nm=(prompt("New department name (e.g. Recruiting, Benefits)")||"").trim();
-        if(nm){ const d={id:uid(),name:nm}; TEAM().departments.push(d); save(); rebuild(d.id); }
+        if(nm){ const d={id:uid(),name:nm}; TEAM().departments.push(d); mergeTeam(TEAM().id, t=>{ t.departments=JSON.parse(JSON.stringify(TEAM().departments)); }); rebuild(d.id); }
         else { ds.value=ds.dataset.prev||""; } }
       else ds.dataset.prev=ds.value;
     }; } }
@@ -5781,7 +5802,7 @@ function askRockQuestion(rid){
     const from=me||(($("#q-from")&&$("#q-from").value)||"").trim()||"Someone";
     r.questions=r.questions||[];
     r.questions.push({id:uid(), from:from, text:text, created:todayIso(), answer:"", answeredAt:""});
-    save(); closeSheet(); renderRocks(); refreshNotes();
+    saveRock(hit.team, r, false); closeSheet(); renderRocks(); refreshNotes();   // merge onto latest so a concurrent edit can't refuse-and-drop the question
     setSync(r.owner?`Question sent to ${r.owner}`:"Question saved");
   };
   setTimeout(()=>{ const el=$("#q-text"); if(el) el.focus(); },50);
@@ -5797,7 +5818,7 @@ function answerRockQuestion(rid,qid){
   $("#a-send").onclick=()=>{
     const v=($("#a-text").value||"").trim(); if(!v) return;
     q.answer=v; q.answeredAt=todayIso();
-    save(); closeSheet(); renderRocks(); refreshNotes();
+    saveRock(hit.team, r, false); closeSheet(); renderRocks(); refreshNotes();   // merge onto latest so the answer isn't refused under concurrent edits
     setSync(`Answered ${q.from||""}`.trim());
   };
   setTimeout(()=>{ const el=$("#a-text"); if(el) el.focus(); },50);
@@ -5848,6 +5869,7 @@ function renderRocks(){
   const board=rocksOnBoard(TEAM());   // own Rocks + any owned by this team's leader that live on another team
   if(!board.length){ wrap.innerHTML=banner+qbar+`<div class="empty"><span class="emoji">🎯</span>No Rocks yet.<br>Add a quarterly Rock as a SMART goal, then break it into milestones.<br><small>Planning ahead? Switch the dropdown to <b>Next · ${esc(quarterLabel(_nextW1))}</b> to draft next quarter's Rocks without touching this board.</small></div>`; wireQ(); return; }
   wrap.innerHTML=banner+qbar+board.map(({r,home,mirror})=>{
+    r.milestones=r.milestones||[];               // normalize legacy/imported Rocks so a missing list can't blank the whole board
     const pct=rockPct(r);
     const stPill=r.status==="done"?'<span class="pill green">Done</span>':(r.status==="off"?'<span class="pill red">Off Track</span>':'<span class="pill green">On Track</span>');
     const sm=r.smart||{};
@@ -5904,10 +5926,12 @@ function renderRocks(){
       }
       const act=e.target.dataset.act; if(!act) return;
       const mayProg=canEditTeam()||canEditOwn(r.owner);
-      if(act==="ms-toggle"){ if(!mayProg) return; const mid=e.target.closest(".ms").dataset.mid; const m=r.milestones.find(x=>x.id===mid); m.done=!m.done; save(); renderRocks(); }
-      if(act==="ms-del"){ if(!mayProg) return; const mid=e.target.closest(".ms").dataset.mid; r.milestones=r.milestones.filter(x=>x.id!==mid); save(); renderRocks(); }
+      // These progress edits MERGE the Rock onto the latest server copy (saveRock), never the plain save() that
+      // a concurrent sync can refuse-and-revert — the "checked a box, it popped back" class of bug.
+      if(act==="ms-toggle"){ if(!mayProg) return; const mid=e.target.closest(".ms").dataset.mid; const m=r.milestones.find(x=>x.id===mid); m.done=!m.done; saveRock(fr.team, r, false); renderRocks(); }
+      if(act==="ms-del"){ if(!mayProg) return; const mid=e.target.closest(".ms").dataset.mid; r.milestones=r.milestones.filter(x=>x.id!==mid); saveRock(fr.team, r, false); renderRocks(); }
       if(act==="ms-add"){ if(!mayProg) return; const ti=card.querySelector('[data-act="ms-text"]'), di=card.querySelector('[data-act="ms-date"]');
-        const t=ti.value.trim(); if(!t) return; r.milestones.push({id:uid(),text:t,due:di.value||"",done:false}); save(); renderRocks(); }
+        const t=ti.value.trim(); if(!t) return; r.milestones.push({id:uid(),text:t,due:di.value||"",done:false}); saveRock(fr.team, r, false); renderRocks(); }
       if(act==="rock-edit") editRock(rid);
       if(act==="rock-update") logRockUpdate(rid);
       if(act==="rock-ask") askRockQuestion(rid);
@@ -6147,7 +6171,8 @@ function logRockUpdate(id){
     r.updates=r.updates||[];
     r.updates.push({id:uid(),date:$("#u-date").value||todayIso(),status:$("#u-status").value,note:$("#u-note").value.trim()});
     r.status=$("#u-status").value==="off"?"off":(r.status==="done"?"done":"on");
-    save(); closeSheet(); renderRocks();
+    saveRock(fr.team, r, false); closeSheet(); renderRocks();   // merge onto latest so a progress log isn't lost to a concurrent save
+
   };
 }
 
@@ -6974,7 +6999,10 @@ function healthPeople(){
   const vis=seats.filter(s=>isRole(s,/visionary/i));
   const integ=seats.filter(s=>isRole(s,/integrator/i));
   const integIds=integ.map(s=>s.id);
-  const kids=seats.filter(s=>s.parent && integIds.indexOf(s.parent)>=0);
+  // The Integrator's direct reports are the facility/pillar leaders — but EXCLUDE staff positions and SIDE
+  // reports (an EA or side-connected coach). They are roles, not pillar leaders, and must not see the
+  // confidential company Health dashboard. Same filter acFunctionSeats uses for facility tabs.
+  const kids=seats.filter(s=>s.parent && integIds.indexOf(s.parent)>=0 && !s.staff && s.side!=="left" && s.side!=="right");
   const m=new Map();
   [...vis,...integ,...kids].forEach(s=>seatNames(s).forEach(v=>{ v=v.trim(); m.set(v.toLowerCase(),v); }));
   return [...m.values()];
