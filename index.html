@@ -1466,6 +1466,11 @@
     table.p-tbl{width:100%; border-collapse:collapse; font-size:12px}
     table.p-tbl th,table.p-tbl td{border:1px solid #c7ccd4; padding:5px 9px; text-align:left}
     table.p-tbl th{background:#f1f2f4; font-size:11px; text-transform:uppercase; letter-spacing:.4px}
+    .p-vto-sec{font-size:12.5px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase; color:#fff; background:#d85e16; padding:5px 12px; border-radius:6px; margin:0 0 12px; display:inline-block}
+    .p-vto-sec.traction{background:#1f7a44; margin-top:10px}
+    .p-vto-full{margin-top:2px}
+    .p-vto-full .vto-card{border:1px solid #c7ccd4; border-radius:10px; padding:10px 12px; background:#fff}
+    .p-vto-full .vto-card h3{margin:0 0 6px; font-size:14px; color:#d85e16}
     .p-vto{column-count:2; column-gap:20px}
     .p-vto .vto-card{break-inside:avoid; border:1px solid #c7ccd4; border-radius:10px; padding:10px 12px; margin:0 0 12px; background:#fff}
     .p-vto .vto-card h3{margin:0 0 6px; font-size:14px; color:#d85e16}
@@ -4672,7 +4677,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=136;
+const BUILD=137;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -6265,17 +6270,18 @@ function printVtoHtml(){
   const list=a=>(a&&a.length)?'<ul>'+a.map(x=>`<li>${esc(itemText(x))}</li>`).join("")+'</ul>':'<div class="vto-kv">—</div>';
   const chk=a=>(a&&a.length)?'<ul class="p-chk">'+a.map(it=>`<li><span class="bx">${itemDone(it)?"☑":"☐"}</span>${esc(itemText(it))}${itemOwner(it)?`<span class="p-own">${esc(itemOwner(it))}</span>`:""}</li>`).join("")+'</ul>':'<div class="vto-kv">—</div>';
   const card=(t,inner)=>`<div class="vto-card"><h3>${t}</h3>${inner}</div>`;
-  return `<div class="p-vto">
-    ${card("Core Values",list(v.coreValues))}
+  // Grouped like the app: a VISION block, then a TRACTION block, then Collective Goals on its own.
+  const vision=`${card("Core Values",list(v.coreValues))}
     ${card("Core Focus",`<div class="vto-kv"><span>Mission</span>${esc(cf.mission)||"—"}</div><div class="vto-kv"><span>Purpose / Cause / Passion</span>${esc(cf.purpose)||"—"}</div><div class="vto-kv"><span>Niche</span>${esc(cf.niche)||"—"}</div>`)}
     ${card("10-Year Target™",`<div>${esc(v.tenYear)||"—"}</div>`)}
     ${card("Marketing Strategy",`<div class="vto-kv"><span>Target Market</span>${esc(mk.targetMarket)||"—"}</div><div class="vto-kv"><span>3 Uniques</span></div>${list(mk.uniques)}<div class="vto-kv"><span>Proven Process</span>${esc(mk.provenProcess)||"—"}</div><div class="vto-kv"><span>Guarantee</span>${esc(mk.guarantee)||"—"}</div>`)}
-    ${card("3-Year Picture™",`<div class="vto-kv">Future Date: <b>${esc(ty.date)}</b> · Measurables: <b>${esc(ty.measurables)}</b></div>${chk(ty.bullets)}`)}
-    ${card("1-Year Plan",`<div class="vto-kv">Future Date: <b>${esc(oy.date)}</b> · Measurables: <b>${esc(oy.measurables)}</b></div>${chk(oy.goals)}`)}
+    ${card("3-Year Picture™",`<div class="vto-kv">Future Date: <b>${esc(ty.date)}</b> · Measurables: <b>${esc(ty.measurables)}</b></div>${chk(ty.bullets)}`)}`;
+  const traction=`${card("1-Year Plan",`<div class="vto-kv">Future Date: <b>${esc(oy.date)}</b> · Measurables: <b>${esc(oy.measurables)}</b></div>${chk(oy.goals)}`)}
     ${card("Quarterly Rocks",`<div class="vto-kv">Future Date: <b>${esc(qr.date)}</b> · Measurables: <b>${esc(qr.measurables)}</b></div>${chk(qr.rocks)}`)}
-    ${card("Future Issues List",list(v.issues))}
-    ${card("Collective Company Goals",chk(v.collectiveGoals))}
-  </div>`;
+    ${card("Future Issues List",list(v.issues))}`;
+  return `<div class="p-vto-sec">VISION</div><div class="p-vto">${vision}</div>
+    <div class="p-vto-sec traction">TRACTION</div><div class="p-vto">${traction}</div>
+    <div class="p-vto-full">${card("Collective Company Goals",chk(v.collectiveGoals))}</div>`;
 }
 function printHealthHtml(){
   // Mirror the LIVE Health tab instead of maintaining a separate copy, so the printout can never
