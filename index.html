@@ -338,7 +338,10 @@
     background-image:radial-gradient(var(--border) 1px,transparent 1px);background-size:22px 22px;
     box-shadow:var(--shadow);height:calc(100dvh - 320px);min-height:340px;touch-action:none;cursor:grab;position:relative}
   .chart-vp:active{cursor:grabbing}
-  .chart-canvas{width:max-content;min-width:100%;padding:26px 46px 46px;position:relative}
+  /* Super-faded company logo behind the seats — a fixed backdrop that stays put while the chart pans/zooms.
+     Sits above the dot grid, below the seat boxes (which get z-index:1). Tweak opacity/size to taste. */
+  .chart-vp::after{content:"";position:absolute;inset:0;background:var(--ac-logo,none) no-repeat center/46%;opacity:.05;pointer-events:none;z-index:0}
+  .chart-canvas{width:max-content;min-width:100%;padding:26px 46px 46px;position:relative;z-index:1}
   .tree,.tree ul{display:flex;justify-content:center;list-style:none;margin:0;padding:0}
   .tree ul{padding-top:24px}
   .tree li{list-style:none;display:flex;flex-direction:column;align-items:center;position:relative;padding:24px 8px 0}
@@ -560,7 +563,7 @@
   .fconn path{fill:none;stroke:var(--accent);stroke-width:2.4}   /* bold orange connectors, matching the chart */
   .free-hint{margin:8px 2px 0}
   /* ===== D3 org-chart node cards ===== */
-  #acD3{width:100%;height:100%}
+  #acD3{width:100%;height:100%;position:relative;z-index:1}   /* above the logo watermark */
   #acD3 .node-button-div div{border-color:var(--accent)!important;color:var(--accent)!important;background:var(--card)!important}
   .d3node{box-sizing:border-box;height:100%;border:2px solid var(--border);border-top:4px solid var(--accent);border-radius:10px;
     background:var(--card);padding:6px 10px 4px;text-align:center;overflow:hidden;font-family:inherit;display:flex;flex-direction:column}
@@ -4663,7 +4666,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=134;
+const BUILD=135;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -11356,6 +11359,7 @@ function applyBrandImages(){
   const bm=$("#brandMark"); if(bm) bm.src=src;
   const sm=$("#splashMark"); if(sm) sm.src=src;
   const lm=$("#loginMark"); if(lm) lm.src=MARK_DARK; // login screen is always dark
+  try{ document.documentElement.style.setProperty("--ac-logo", 'url("'+src+'")'); }catch(e){}   // faint logo watermark behind the accountability chart (theme-aware)
 }
 applyBrandImages();
 if(window.matchMedia){ const mq=window.matchMedia("(prefers-color-scheme: dark)");
