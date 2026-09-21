@@ -1477,6 +1477,11 @@
     .p-chk li{font-size:12px; margin:2px 0}
     .p-chk .bx{display:inline-block; width:14px; font-weight:800}
     .p-own{color:#d85e16; font-weight:700; font-size:10.5px; margin-left:5px}
+    /* Branded header for a standalone V/TO print (printVTO) */
+    .p-vto-head{display:flex; align-items:center; gap:14px; padding-bottom:12px; margin-bottom:16px; border-bottom:2px solid #d85e16}
+    .p-vto-logo{height:42px; width:auto}
+    .p-vto-title{font-size:20px; font-weight:800; color:#14171c}
+    .p-vto-sub{font-size:12px; color:#5b6472; font-weight:600; margin-top:2px}
     /* Accountability Chart prints as the SAME List view (seatListHtml) — just drop the Edit buttons */
     .ac-list-print .vto-editbtn{display:none}
     .ac-list-print .seat-head{break-inside:avoid}   /* keep a seat's role+name together, but let long branches flow across pages */
@@ -1580,7 +1585,8 @@
       <div class="subtabs">
         <button class="active" data-vision="vto">V/TO</button>
         <button data-vision="accountability">Accountability</button>
-        <button class="btn sm" id="printSnap" style="margin-left:auto" title="Print / Save as PDF: Health + V/TO + Accountability Chart">🖨 Print Snapshot</button>
+        <button class="btn sm" id="printVto" style="margin-left:auto" title="Print / Save the V/TO as a PDF (branded with the logo)">🖨 Print V/TO</button>
+        <button class="btn sm" id="printSnap" style="margin-left:8px" title="Print / Save as PDF: Health + V/TO + Accountability Chart">🖨 Print Snapshot</button>
       </div>
       <div id="visionWrap"></div>
     </section>
@@ -4666,7 +4672,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=135;
+const BUILD=136;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -6245,7 +6251,8 @@ const VTO_TITLES={coreValues:"Core Values",coreFocus:"Core Focus",tenYear:"10-Ye
 const arrToLines=a=>(a||[]).join("\n");
 const linesToArr=s=>s.split("\n").map(x=>x.trim()).filter(Boolean);
 let visionMode="vto";
-function renderVision(){ if(visionMode==="vto") renderVTO(); else renderAccountability(); }
+function renderVision(){ const pv=$("#printVto"); if(pv) pv.style.display=(visionMode==="vto")?"":"none";   // the V/TO print button only makes sense on the V/TO tab
+  if(visionMode==="vto") renderVTO(); else renderAccountability(); }
 
 /* ===== Printable Company Snapshot (Company Health + V/TO + Accountability Chart) =====
    Assembles a paper-styled document into #printDoc and opens the browser print dialog
@@ -6329,6 +6336,19 @@ function printSnapshot(){
     <div class="p-section"><div class="p-h2">Vision / Traction Organizer</div>${printVtoHtml()}</div>
     ${printChartHtml()}`;
   // The chart now prints as an indented list (flows naturally across pages) — no measuring/scaling needed.
+  window.print();
+}
+/* Standalone, branded V/TO print. Renders ONLY the Vision/Traction Organizer (the same clean two-column
+   card layout the Print Snapshot uses) with a logo header, then opens the print dialog — which offers
+   "Save as PDF" for a downloadable, shareable copy. Native print = no canvas taint, always reliable. */
+function printVTO(){
+  const doc=$("#printDoc"); if(!doc) return;
+  const dateStr=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  const q=quarterLabel(TEAM().week1Start);
+  doc.innerHTML=`<div class="p-vto-head"><img class="p-vto-logo" src="${MARK_LIGHT}" alt="Warriors Heart">
+      <div><div class="p-vto-title">Vision / Traction Organizer</div>
+        <div class="p-vto-sub">Warriors Heart · ${esc(q)} · ${esc(dateStr)}</div></div></div>
+    ${printVtoHtml()}`;
   window.print();
 }
 
@@ -11134,6 +11154,7 @@ document.querySelectorAll("#view-vision .subtabs button[data-vision]").forEach(b
   document.querySelectorAll("#view-vision .subtabs button[data-vision]").forEach(x=>x.classList.toggle("active",x===b)); renderVision();
 });
 { const ps=$("#printSnap"); if(ps) ps.onclick=printSnapshot; }
+{ const pv=$("#printVto"); if(pv) pv.onclick=printVTO; }
 { const ur=$("#updateReload"); if(ur) ur.onclick=()=>location.reload(); }
 document.querySelectorAll("#view-rocks .subtabs button").forEach(b=>b.onclick=()=>{
   rocksMode=b.dataset.rocks; document.querySelectorAll("#view-rocks .subtabs button").forEach(x=>x.classList.toggle("active",x===b));
