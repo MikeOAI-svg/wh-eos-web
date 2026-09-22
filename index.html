@@ -293,6 +293,13 @@
   .vto-kv span{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:2px}
   .vto-meta{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:9px}
   .vto-fin{color:var(--accent);background:var(--accent-soft);border-radius:7px;padding:4px 8px;display:inline-block;margin:-2px 0 9px}
+  .rpm-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  .rpm-tbl th,.rpm-tbl td{border:1px solid var(--border);padding:6px 9px;text-align:left}
+  .rpm-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:800}
+  .rpm-tbl td.rpm-l{font-weight:800;color:var(--muted)}
+  .rpm-edit{display:flex;gap:16px;flex-wrap:wrap}
+  .rpm-col{flex:1;min-width:220px}
+  .rpm-col-h{font-weight:800;color:var(--accent);margin:2px 0 8px;text-transform:uppercase;letter-spacing:.5px;font-size:12px}
   .vto-big{font-size:16px;font-weight:700;line-height:1.45}
   /* ---------- Accountability chart ---------- */
   .ac-title{font-size:15px;font-weight:800;text-align:center;color:var(--text);margin:2px 0 12px;letter-spacing:.3px}
@@ -1488,6 +1495,18 @@
     .p-vto-logo{height:42px; width:auto}
     .p-vto-title{font-size:20px; font-weight:800; color:#14171c}
     .p-vto-sub{font-size:12px; color:#5b6472; font-weight:600; margin-top:2px}
+    /* RPM block + Quarterly-Rocks packet page */
+    .p-rpm{margin:0 0 18px}
+    .p-rpm-h{font-size:16px; font-weight:800; color:#d85e16; margin:0 0 8px; padding-bottom:5px; border-bottom:2px solid #d85e16}
+    #printDoc .rpm-tbl{width:100%; border-collapse:collapse; font-size:12.5px}
+    #printDoc .rpm-tbl th,#printDoc .rpm-tbl td{border:1px solid #c7ccd4; padding:6px 10px; text-align:left}
+    #printDoc .rpm-tbl th{background:#f1f2f4; font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:#5b6472; font-weight:800}
+    #printDoc .rpm-tbl td.rpm-l{font-weight:800; color:#5b6472}
+    .rk-line{display:flex; justify-content:space-between; gap:14px; align-items:baseline; border:1px solid #c7ccd4; border-radius:8px; padding:8px 12px; margin:0 0 8px; break-inside:avoid}
+    .rk-line-t{font-weight:700; font-size:13px}
+    .rk-line-m{font-size:11.5px; color:#5b6472; white-space:nowrap}
+    .rkp{font-weight:800; font-size:10px; padding:1px 7px; border-radius:20px; margin-left:4px}
+    .rkp.on{color:#1f7a44}.rkp.off{color:#c62828}.rkp.done{color:#5b6472}
     /* Accountability Chart prints as the SAME List view (seatListHtml) — just drop the Edit buttons */
     .ac-list-print .vto-editbtn{display:none}
     .ac-list-print .seat-head{break-inside:avoid}   /* keep a seat's role+name together, but let long branches flow across pages */
@@ -4678,7 +4697,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=140;
+const BUILD=141;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -6351,14 +6370,40 @@ function printSnapshot(){
    "Save as PDF" for a downloadable, shareable copy. Native print = no canvas taint, always reliable. */
 function printVTO(){
   if(!canPrintVTO()) return;   // leadership + facility leaders only
+  // "Pick the team each time": choose whose Quarterly Rocks join the packet (or V/TO only).
+  const teams = seesAllTeams() ? (data.teams||[]) : teamsForUser();
+  openSheet(`<h2>Print V/TO Packet</h2>
+    <div class="hint" style="margin:-4px 2px 12px">Include a team's Quarterly Rocks with the V/TO${canSeeFinancials()?" &amp; RPM":""}? Pick a team, or print the V/TO on its own.</div>
+    <div class="who-list" id="pk-teams">
+      ${teams.map(t=>`<button type="button" class="onb-seat" data-pk="${t.id}">＋ ${esc(t.name)} Rocks</button>`).join("")}
+      <button type="button" class="onb-seat" data-pk="">V/TO only</button>
+    </div>`);
+  document.querySelectorAll('#pk-teams [data-pk]').forEach(b=>b.onclick=()=>{ const id=b.dataset.pk; closeSheet(); setTimeout(()=>doPrintVTO(id),60); });
+}
+function doPrintVTO(teamId){
   const doc=$("#printDoc"); if(!doc) return;
   const dateStr=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
-  const q=quarterLabel(TEAM().week1Start);
+  const team = teamId ? (data.teams||[]).find(t=>t&&t.id===teamId) : null;
+  const q=quarterLabel((team&&team.week1Start)||TEAM().week1Start);
   doc.innerHTML=`<div class="p-vto-head"><img class="p-vto-logo" src="${MARK_LIGHT}" alt="Warriors Heart">
       <div><div class="p-vto-title">Vision / Traction Organizer</div>
         <div class="p-vto-sub">Warriors Heart · ${esc(q)} · ${esc(dateStr)}</div></div></div>
-    ${printVtoHtml()}`;
+    ${rpmPrintHtml()}
+    ${printVtoHtml()}
+    ${team?rocksPrintHtml(team):""}`;
   window.print();
+}
+function rpmPrintHtml(){   // confidential — only for those allowed to see financials
+  if(!canSeeFinancials()) return "";
+  return `<div class="p-rpm"><div class="p-rpm-h">RPM — Revenue · Profit · Measurables</div>${rpmTableHtml()}</div>`;
+}
+function rocksPrintHtml(team){
+  const board=rocksOnBoard(team), st=rockStats(board.map(x=>x.r));
+  const rows=board.map(({r})=>{ const pct=rockPct(r);
+    const pill=r.status==="done"?'<span class="rkp done">Done</span>':r.status==="off"?'<span class="rkp off">Off Track</span>':'<span class="rkp on">On Track</span>';
+    return `<div class="rk-line"><div class="rk-line-t">${esc(r.title||"(untitled)")}</div><div class="rk-line-m">${esc(r.owner||"—")} · ${pct}% ${pill}</div></div>`; }).join("");
+  return `<div class="p-section"><div class="p-h2">${esc(team.name)} — Quarterly Rocks · ${esc(quarterLabel(team.week1Start))}${st.n?` (${st.pct}% complete)`:""}</div>
+    ${rows||'<div class="hint">No Rocks on this team’s board.</div>'}</div>`;
 }
 
 /* ===== Graphical Accountability-Chart print =====
@@ -8068,8 +8113,10 @@ function renderVTO(){
       <div class="vto-meta">Future Date: <b>${esc(v.quarterRocks.date)}</b> · Measurables: <b>${esc(v.quarterRocks.measurables)}</b></div>${fin(v.quarterRocks)}${checklist(v.quarterRocks.rocks,"quarterRocks")}`)}
    ${vtoCard("issues","Future Issues List",list(v.issues))}
    </div>
-   ${vtoCard("collectiveGoals","Collective Company Goals",checklist(v.collectiveGoals,"collectiveGoals"))}`;
+   ${vtoCard("collectiveGoals","Collective Company Goals",checklist(v.collectiveGoals,"collectiveGoals"))}
+   ${canSeeFinancials()?`<div class="vto-card rpm-card"><h3>🔒 RPM — Revenue · Profit · Measurables <button class="vto-editbtn" data-rpm-edit="1">Edit</button></h3>${rpmTableHtml()}</div>`:""}`;
   wrap.querySelectorAll("[data-vto-edit]").forEach(b=>b.onclick=()=>editVTO(b.dataset.vtoEdit));
+  { const rb=wrap.querySelector("[data-rpm-edit]"); if(rb) rb.onclick=editRPM; }
   if(canEditCompany()) wrap.querySelectorAll("[data-check-sec]").forEach(b=>{ b.style.cursor="pointer"; b.onclick=()=>{
     const sec=b.dataset.checkSec, i=+b.dataset.checkI;
     const arr=getVtoList(data.vto,sec).slice(), it=arr[i];
@@ -8077,6 +8124,40 @@ function renderVTO(){
     setVtoList(data.vto,sec,arr);
     save(); renderVTO();
   }; });
+}
+/* RPM — confidential Revenue / Profit / Profit% / Measurables, this quarter + next-quarter prediction.
+   Shared by the on-screen card and the print packet; gated by canSeeFinancials everywhere it appears. */
+function rpmTableHtml(){
+  const r=(data.vto&&data.vto.rpm)||{}, c=r.current||{}, n=r.next||{};
+  const row=(lbl,key)=>`<tr><td class="rpm-l">${lbl}</td><td>${esc(c[key])||"—"}</td><td>${esc(n[key])||"—"}</td></tr>`;
+  return `<table class="rpm-tbl"><thead><tr><th></th><th>This Quarter</th><th>Next Qtr · Prediction</th></tr></thead><tbody>
+    ${row("Revenue","revenue")}${row("Profit","profit")}${row("Profit %","profitPct")}${row("Measurables","measurables")}</tbody></table>`;
+}
+function editRPM(){
+  if(!canSeeFinancials()) return;
+  data.vto.rpm=data.vto.rpm||{}; const c=data.vto.rpm.current||{}, n=data.vto.rpm.next||{};
+  const f=(id,val,ph)=>`<input id="${id}" value="${esc(val)}" placeholder="${esc(ph)}">`;
+  openSheet(`<h2>RPM — Revenue · Profit · Measurables</h2>
+    <div class="hint" style="margin:-4px 2px 12px">🔒 Confidential — visible only to Admin, Visionary, Integrator &amp; the Shared Services leader.</div>
+    <div class="rpm-edit">
+      <div class="rpm-col"><div class="rpm-col-h">This Quarter</div>
+        <div class="field"><label>Revenue</label>${f("rpm-cr",c.revenue,"e.g. $3.2M")}</div>
+        <div class="field"><label>Profit</label>${f("rpm-cp",c.profit,"e.g. $520K")}</div>
+        <div class="field"><label>Profit %</label>${f("rpm-cpp",c.profitPct,"e.g. 16%")}</div>
+        <div class="field"><label>Measurables</label>${f("rpm-cm",c.measurables,"e.g. 210 intakes")}</div></div>
+      <div class="rpm-col"><div class="rpm-col-h">Next Quarter (Prediction)</div>
+        <div class="field"><label>Revenue</label>${f("rpm-nr",n.revenue,"")}</div>
+        <div class="field"><label>Profit</label>${f("rpm-np",n.profit,"")}</div>
+        <div class="field"><label>Profit %</label>${f("rpm-npp",n.profitPct,"")}</div>
+        <div class="field"><label>Measurables</label>${f("rpm-nm",n.measurables,"")}</div></div>
+    </div>
+    <div class="sheet-actions"><button class="btn ghost" id="rpm-cancel">Cancel</button><button class="btn" id="rpm-save">Save</button></div>`);
+  $("#rpm-cancel").onclick=closeSheet;
+  $("#rpm-save").onclick=()=>{
+    data.vto.rpm={ current:{revenue:$("#rpm-cr").value.trim(),profit:$("#rpm-cp").value.trim(),profitPct:$("#rpm-cpp").value.trim(),measurables:$("#rpm-cm").value.trim()},
+                   next:{revenue:$("#rpm-nr").value.trim(),profit:$("#rpm-np").value.trim(),profitPct:$("#rpm-npp").value.trim(),measurables:$("#rpm-nm").value.trim()} };
+    save(); closeSheet(); renderVTO(); setSync("RPM saved");
+  };
 }
 /* Editor rows: text + owner. `done` rides on the row itself (data-done) rather than
    being matched by index or text, so it survives reordering, renaming and deleting. */
