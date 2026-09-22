@@ -1496,7 +1496,8 @@
     .p-vto-title{font-size:20px; font-weight:800; color:#14171c}
     .p-vto-sub{font-size:12px; color:#5b6472; font-weight:600; margin-top:2px}
     /* RPM block + Quarterly-Rocks packet page */
-    .p-rpm{margin:0 0 18px}
+    .vto-pp-break{break-before:page; page-break-before:always}   /* Traction starts on its own page (Vision alone on page 1) */
+    .p-rpm{margin:0 0 18px; break-before:page; page-break-before:always}
     .p-rpm-h{font-size:16px; font-weight:800; color:#d85e16; margin:0 0 8px; padding-bottom:5px; border-bottom:2px solid #d85e16}
     #printDoc .rpm-tbl{width:100%; border-collapse:collapse; font-size:12.5px}
     #printDoc .rpm-tbl th,#printDoc .rpm-tbl td{border:1px solid #c7ccd4; padding:6px 10px; text-align:left}
@@ -4697,7 +4698,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=141;
+const BUILD=142;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -6300,9 +6301,10 @@ function printVtoHtml(){
   const traction=`${card("1-Year Plan",`<div class="vto-kv">Future Date: <b>${esc(oy.date)}</b> · Measurables: <b>${esc(oy.measurables)}</b></div>${pfin(oy)}${chk(oy.goals)}`)}
     ${card("Quarterly Rocks",`<div class="vto-kv">Future Date: <b>${esc(qr.date)}</b> · Measurables: <b>${esc(qr.measurables)}</b></div>${pfin(qr)}${chk(qr.rocks)}`)}
     ${card("Future Issues List",list(v.issues))}`;
-  return `<div class="p-vto-sec">VISION</div><div class="p-vto">${vision}</div>
-    <div class="p-vto-sec traction">TRACTION</div><div class="p-vto">${traction}</div>
-    <div class="p-vto-full">${card("Collective Company Goals",chk(v.collectiveGoals))}</div>`;
+  // Vision on its OWN page, Traction on a separate page (the classic 2-page EOS V/TO spread).
+  return `<div class="vto-pp"><div class="p-vto-sec">VISION</div><div class="p-vto">${vision}</div></div>
+    <div class="vto-pp vto-pp-break"><div class="p-vto-sec traction">TRACTION</div><div class="p-vto">${traction}</div>
+      <div class="p-vto-full">${card("Collective Company Goals",chk(v.collectiveGoals))}</div></div>`;
 }
 function printHealthHtml(){
   // Mirror the LIVE Health tab instead of maintaining a separate copy, so the printout can never
@@ -6388,8 +6390,8 @@ function doPrintVTO(teamId){
   doc.innerHTML=`<div class="p-vto-head"><img class="p-vto-logo" src="${MARK_LIGHT}" alt="Warriors Heart">
       <div><div class="p-vto-title">Vision / Traction Organizer</div>
         <div class="p-vto-sub">Warriors Heart · ${esc(q)} · ${esc(dateStr)}</div></div></div>
-    ${rpmPrintHtml()}
     ${printVtoHtml()}
+    ${rpmPrintHtml()}
     ${team?rocksPrintHtml(team):""}`;
   window.print();
 }
