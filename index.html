@@ -292,6 +292,7 @@
   .vto-kv{font-size:14px;line-height:1.5;margin-bottom:9px}
   .vto-kv span{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:2px}
   .vto-meta{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:9px}
+  .vto-fin{color:var(--accent);background:var(--accent-soft);border-radius:7px;padding:4px 8px;display:inline-block;margin:-2px 0 9px}
   .vto-big{font-size:16px;font-weight:700;line-height:1.45}
   /* ---------- Accountability chart ---------- */
   .ac-title{font-size:15px;font-weight:800;text-align:center;color:var(--text);margin:2px 0 12px;letter-spacing:.3px}
@@ -4677,7 +4678,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=138;
+const BUILD=140;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -6256,7 +6257,7 @@ const VTO_TITLES={coreValues:"Core Values",coreFocus:"Core Focus",tenYear:"10-Ye
 const arrToLines=a=>(a||[]).join("\n");
 const linesToArr=s=>s.split("\n").map(x=>x.trim()).filter(Boolean);
 let visionMode="vto";
-function renderVision(){ const pv=$("#printVto"); if(pv) pv.style.display=(visionMode==="vto")?"":"none";   // the V/TO print button only makes sense on the V/TO tab
+function renderVision(){ const pv=$("#printVto"); if(pv) pv.style.display=(visionMode==="vto" && canPrintVTO())?"":"none";   // V/TO print button: V/TO tab only, and only for leadership + facility leaders
   if(visionMode==="vto") renderVTO(); else renderAccountability(); }
 
 /* ===== Printable Company Snapshot (Company Health + V/TO + Accountability Chart) =====
@@ -6270,14 +6271,15 @@ function printVtoHtml(){
   const list=a=>(a&&a.length)?'<ul>'+a.map(x=>`<li>${esc(itemText(x))}</li>`).join("")+'</ul>':'<div class="vto-kv">—</div>';
   const chk=a=>(a&&a.length)?'<ul class="p-chk">'+a.map(it=>`<li><span class="bx">${itemDone(it)?"☑":"☐"}</span>${esc(itemText(it))}${itemOwner(it)?`<span class="p-own">${esc(itemOwner(it))}</span>`:""}</li>`).join("")+'</ul>':'<div class="vto-kv">—</div>';
   const card=(t,inner)=>`<div class="vto-card"><h3>${t}</h3>${inner}</div>`;
+  const pfin=o=>canSeeFinancials()?`<div class="vto-kv">Revenue: <b>${esc(o&&o.revenue)||"—"}</b> · Profit: <b>${esc(o&&o.profit)||"—"}</b></div>`:"";   // confidential — omitted from the print unless the person printing may see it
   // Grouped like the app: a VISION block, then a TRACTION block, then Collective Goals on its own.
   const vision=`${card("Core Values",list(v.coreValues))}
     ${card("Core Focus",`<div class="vto-kv"><span>Mission</span>${esc(cf.mission)||"—"}</div><div class="vto-kv"><span>Purpose / Cause / Passion</span>${esc(cf.purpose)||"—"}</div><div class="vto-kv"><span>Niche</span>${esc(cf.niche)||"—"}</div>`)}
     ${card("10-Year Target™",`<div>${esc(v.tenYear)||"—"}</div>`)}
     ${card("Marketing Strategy",`<div class="vto-kv"><span>Target Market</span>${esc(mk.targetMarket)||"—"}</div><div class="vto-kv"><span>3 Uniques</span></div>${list(mk.uniques)}<div class="vto-kv"><span>Proven Process</span>${esc(mk.provenProcess)||"—"}</div><div class="vto-kv"><span>Guarantee</span>${esc(mk.guarantee)||"—"}</div>`)}
-    ${card("3-Year Picture™",`<div class="vto-kv">Future Date: <b>${esc(ty.date)}</b> · Measurables: <b>${esc(ty.measurables)}</b></div>${chk(ty.bullets)}`)}`;
-  const traction=`${card("1-Year Plan",`<div class="vto-kv">Future Date: <b>${esc(oy.date)}</b> · Measurables: <b>${esc(oy.measurables)}</b></div>${chk(oy.goals)}`)}
-    ${card("Quarterly Rocks",`<div class="vto-kv">Future Date: <b>${esc(qr.date)}</b> · Measurables: <b>${esc(qr.measurables)}</b></div>${chk(qr.rocks)}`)}
+    ${card("3-Year Picture™",`<div class="vto-kv">Future Date: <b>${esc(ty.date)}</b> · Measurables: <b>${esc(ty.measurables)}</b></div>${pfin(ty)}${chk(ty.bullets)}`)}`;
+  const traction=`${card("1-Year Plan",`<div class="vto-kv">Future Date: <b>${esc(oy.date)}</b> · Measurables: <b>${esc(oy.measurables)}</b></div>${pfin(oy)}${chk(oy.goals)}`)}
+    ${card("Quarterly Rocks",`<div class="vto-kv">Future Date: <b>${esc(qr.date)}</b> · Measurables: <b>${esc(qr.measurables)}</b></div>${pfin(qr)}${chk(qr.rocks)}`)}
     ${card("Future Issues List",list(v.issues))}`;
   return `<div class="p-vto-sec">VISION</div><div class="p-vto">${vision}</div>
     <div class="p-vto-sec traction">TRACTION</div><div class="p-vto">${traction}</div>
@@ -6348,6 +6350,7 @@ function printSnapshot(){
    card layout the Print Snapshot uses) with a logo header, then opens the print dialog — which offers
    "Save as PDF" for a downloadable, shareable copy. Native print = no canvas taint, always reliable. */
 function printVTO(){
+  if(!canPrintVTO()) return;   // leadership + facility leaders only
   const doc=$("#printDoc"); if(!doc) return;
   const dateStr=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
   const q=quarterLabel(TEAM().week1Start);
@@ -7062,6 +7065,16 @@ function isAdmin(){ return isAdminEmail(myEmail()) || iHavePerm("admin"); }
 function isLeadership(){ if(isAdmin()) return true; const me=myName(); if(!me) return false;
   return ((data.accountability||{}).seats||[]).some(s=>s&&seatHasName(s,me)&&/visionary|integrator/i.test(String(s.role||""))); }
 const canEditCompany=()=>isLeadership();
+// Confidential V/TO financials (Revenue & Profit) — visible ONLY to Admin, the Visionary, the Integrator,
+// and the Shared Services leader. Everyone else sees the V/TO with those two figures hidden.
+function canSeeFinancials(){
+  if(isLeadership()) return true;                 // admin, Visionary, Integrator
+  const me=myName(); if(!me) return false;
+  return (((data.accountability||{}).seats)||[]).some(s=>s&&/shared services/i.test(String(s.role||""))&&seatHasName(s,me));
+}
+// Who may PRINT / Save the V/TO — leadership (admin, Visionary, Integrator) plus facility leaders
+// (Shared Services / Texas / Virginia). Others can still VIEW the V/TO on screen, just not print it.
+function canPrintVTO(){ return isLeadership() || facilitiesLedBy(myName()).length>0; }
 // Planning is a leadership rite — Visionary, Integrator, and Facility Leaders only (plus a "See every team" grant).
 function canSeePlanning(){ return isLeadership() || iHavePerm("viewAll") || facilitiesLedBy(myName()).length>0; }
 /* A FACILITY leader = whoever sits on a function seat (Shared Services / Texas / Virginia — the
@@ -8027,6 +8040,8 @@ function renderVTO(){
         <span class="vc-t">${esc(itemText(it))}</span>
         ${itemOwner(it)?`<span class="vc-owner">${esc(itemOwner(it))}</span>`:""}
       </li>`).join("")+'</ul>':'<div class="vto-meta">—</div>';
+  // Confidential Revenue/Profit line — rendered only for those allowed to see it (canSeeFinancials).
+  const fin=o=>canSeeFinancials()?`<div class="vto-meta vto-fin">🔒 Revenue: <b>${esc(o&&o.revenue)||"—"}</b> · Profit: <b>${esc(o&&o.profit)||"—"}</b></div>`:"";
   wrap.innerHTML=`
    <div class="vto-side-lbl">VISION</div>
    <div class="vto-page vto-vision"><div class="vto-col">
@@ -8043,14 +8058,14 @@ function renderVTO(){
       <div class="vto-kv"><span>Guarantee</span>${esc(v.marketing.guarantee)||"—"}</div>`)}
    </div><div class="vto-col">
    ${vtoCard("threeYear","3-Year Picture™",`
-      <div class="vto-meta">Future Date: <b>${esc(v.threeYear.date)}</b> · Measurables: <b>${esc(v.threeYear.measurables)}</b></div>${checklist(v.threeYear.bullets,"threeYear")}`)}
+      <div class="vto-meta">Future Date: <b>${esc(v.threeYear.date)}</b> · Measurables: <b>${esc(v.threeYear.measurables)}</b></div>${fin(v.threeYear)}${checklist(v.threeYear.bullets,"threeYear")}`)}
    </div></div>
    <div class="vto-side-lbl traction">TRACTION</div>
    <div class="vto-page vto-traction">
    ${vtoCard("oneYear","1-Year Plan",`
-      <div class="vto-meta">Future Date: <b>${esc(v.oneYear.date)}</b> · Measurables: <b>${esc(v.oneYear.measurables)}</b></div>${checklist(v.oneYear.goals,"oneYear")}`)}
+      <div class="vto-meta">Future Date: <b>${esc(v.oneYear.date)}</b> · Measurables: <b>${esc(v.oneYear.measurables)}</b></div>${fin(v.oneYear)}${checklist(v.oneYear.goals,"oneYear")}`)}
    ${vtoCard("quarterRocks","Quarterly Rocks",`
-      <div class="vto-meta">Future Date: <b>${esc(v.quarterRocks.date)}</b> · Measurables: <b>${esc(v.quarterRocks.measurables)}</b></div>${checklist(v.quarterRocks.rocks,"quarterRocks")}`)}
+      <div class="vto-meta">Future Date: <b>${esc(v.quarterRocks.date)}</b> · Measurables: <b>${esc(v.quarterRocks.measurables)}</b></div>${fin(v.quarterRocks)}${checklist(v.quarterRocks.rocks,"quarterRocks")}`)}
    ${vtoCard("issues","Future Issues List",list(v.issues))}
    </div>
    ${vtoCard("collectiveGoals","Collective Company Goals",checklist(v.collectiveGoals,"collectiveGoals"))}`;
@@ -8118,8 +8133,10 @@ function editVTO(key){
   }else if(CHECK_SECS[key]){
     const withDates=(key!=="collectiveGoals");
     const sec=withDates?v[key]:null;
+    const finFields=(withDates&&canSeeFinancials())?`<div class="field"><label>Revenue <small>(confidential — Admin, Visionary, Integrator &amp; Shared Services only)</small></label><input id="e5" value="${esc(sec.revenue)}" placeholder="e.g. $12M / yr"></div>
+      <div class="field"><label>Profit <small>(confidential)</small></label><input id="e6" value="${esc(sec.profit)}" placeholder="e.g. $2.4M"></div>`:"";
     const dates=withDates?`<div class="field"><label>Future Date</label><input id="e1" value="${esc(sec.date)}" placeholder="MM/DD/YY"></div>
-      <div class="field"><label>Measurables</label><input id="e2" value="${esc(sec.measurables)}"></div>`:"";
+      <div class="field"><label>Measurables</label><input id="e2" value="${esc(sec.measurables)}"></div>${finFields}`:"";
     body=`${dates}
       <div class="field"><label>${CHECK_SECS[key].label} — and who owns each</label>
         <datalist id="vto-owners">${allMemberNames().map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>
@@ -8127,7 +8144,8 @@ function editVTO(key){
         <button type="button" class="btn ghost sm" id="e-additem" style="margin-top:9px">+ Add item</button>
         <div class="hint" style="margin-top:7px">Owner is optional. Tick items off as complete on the card itself.</div></div>`;
     commit=()=>{
-      if(withDates){ sec.date=$("#e1").value.trim(); sec.measurables=$("#e2").value.trim(); }
+      if(withDates){ sec.date=$("#e1").value.trim(); sec.measurables=$("#e2").value.trim();
+        if($("#e5")) sec.revenue=$("#e5").value.trim(); if($("#e6")) sec.profit=$("#e6").value.trim(); }   // only present/committed for those allowed to see financials
       setVtoList(v,key,readItemRows());
     };
   }else if(key==="issues"){
