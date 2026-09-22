@@ -107,6 +107,7 @@
   .pill.red{background:var(--red-soft); color:var(--red)}
   .pill.amber{background:var(--amber-soft); color:var(--amber)}
   .pill.grey{background:var(--accent-soft); color:var(--muted)}
+  .pill.notdone{background:var(--red); color:#fff}   /* solid red — a final "missed it", distinct from soft-red Off Track */
   .pill.blue{background:#e7f0fb; color:#2f6fd0}
   @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .pill.blue{background:#16233a; color:#7fb0ef} }
   /* self-assessment preview cells on the leader dashboard (their ratings shown until you add your read) */
@@ -938,6 +939,7 @@
   .mb-rock-status.on{color:var(--green);border-color:var(--green)}
   .mb-rock-status.off{color:var(--red);border-color:var(--red)}
   .mb-rock-status.done{color:var(--green);background:var(--green-soft);border-color:var(--green)}
+  .mb-rock-status.notdone{color:#fff;background:#dc2626;border-color:#dc2626}
   .mb-next-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px;padding-top:7px;border-top:1px dashed var(--border)}
   .mb-next-row .mb-next{margin:0;padding:0;border:0;flex:1}
   .mb-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px}
@@ -1260,6 +1262,7 @@
   .rock-stat.rs-on{color:#16a34a;border-color:#16a34a}
   .rock-stat.rs-off{color:#dc2626;border-color:#dc2626}
   .rock-stat.rs-done{background:var(--text);color:var(--bg);border-color:var(--text)}
+  .rock-stat.rs-notdone{background:#dc2626;color:#fff;border-color:#dc2626}
   .rock-key{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
   .rock-key .rk{font-weight:800;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;border-radius:5px;padding:1px 6px;border:1px solid currentColor}
   .rock-key .rk-on{color:#16a34a}.rock-key .rk-off{color:#dc2626}
@@ -1507,7 +1510,7 @@
     .rk-line-t{font-weight:700; font-size:13px}
     .rk-line-m{font-size:11.5px; color:#5b6472; white-space:nowrap}
     .rkp{font-weight:800; font-size:10px; padding:1px 7px; border-radius:20px; margin-left:4px}
-    .rkp.on{color:#1f7a44}.rkp.off{color:#c62828}.rkp.done{color:#5b6472}
+    .rkp.on{color:#1f7a44}.rkp.off{color:#c62828}.rkp.done{color:#5b6472}.rkp.notdone{color:#fff;background:#c62828;padding:1px 7px;border-radius:20px}
     /* Accountability Chart prints as the SAME List view (seatListHtml) — just drop the Edit buttons */
     .ac-list-print .vto-editbtn{display:none}
     .ac-list-print .seat-head{break-inside:avoid}   /* keep a seat's role+name together, but let long branches flow across pages */
@@ -4698,7 +4701,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=143;
+const BUILD=144;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5562,7 +5565,8 @@ function rockStats(rocks){
   const n=(rocks||[]).length;
   const done=(rocks||[]).filter(r=>r.status==="done").length;
   const off=(rocks||[]).filter(r=>r.status==="off").length;
-  return {n:n, done:done, off:off, on:n-done-off, pct:n?Math.round(done/n*100):null};
+  const notdone=(rocks||[]).filter(r=>r.status==="notdone").length;
+  return {n:n, done:done, off:off, notdone:notdone, on:n-done-off-notdone, pct:n?Math.round(done/n*100):null};
 }
 /* Closing a quarter used to archive the Scorecard ONLY — Rocks just stayed on the board, so
    last quarter's Rocks mixed into the new one and nobody could answer "how many did we land?".
@@ -5743,12 +5747,13 @@ function renderCompanyRocks(){
     return;
   }
   const cnt=s=>all.filter(r=>(r.status||"on")===s).length;
-  const done=cnt("done"), off=cnt("off"), on=all.length-done-off;
+  const done=cnt("done"), off=cnt("off"), notdone=cnt("notdone"), on=all.length-done-off-notdone;
   let html=`<div class="co-summary">
       <div class="co-stat"><b>${all.length}</b><span>Total</span></div>
       <div class="co-stat green"><b>${on}</b><span>On Track</span></div>
       <div class="co-stat red"><b>${off}</b><span>Off Track</span></div>
       <div class="co-stat"><b>${done}</b><span>Done</span></div>
+      ${notdone?`<div class="co-stat red"><b>${notdone}</b><span>Not Done</span></div>`:""}
     </div>
     <div class="hint" style="margin:0 2px 4px">Every Rock across all ${teams.length} team${teams.length>1?"s":""} — read-only. Switch to “My Team” to edit yours.</div>`;
   teams.forEach(t=>{
@@ -5758,6 +5763,7 @@ function renderCompanyRocks(){
     rocks.forEach(r=>{
       const pct=rockPct(r), ms=r.milestones||[];
       const pill=r.status==="done"?'<span class="pill green">Done</span>'
+                : r.status==="notdone"?'<span class="pill notdone">Not Done</span>'
                 : r.status==="off"?'<span class="pill red">Off Track</span>'
                 : '<span class="pill green">On Track</span>';
       const msHtml=ms.map(m=>`<div class="ms ${m.done?"done":""}">
@@ -5906,7 +5912,7 @@ function renderRocks(){
   wrap.innerHTML=banner+qbar+board.map(({r,home,mirror})=>{
     r.milestones=r.milestones||[];               // normalize legacy/imported Rocks so a missing list can't blank the whole board
     const pct=rockPct(r);
-    const stPill=r.status==="done"?'<span class="pill green">Done</span>':(r.status==="off"?'<span class="pill red">Off Track</span>':'<span class="pill green">On Track</span>');
+    const stPill=r.status==="done"?'<span class="pill green">Done</span>':r.status==="notdone"?'<span class="pill notdone">Not Done</span>':(r.status==="off"?'<span class="pill red">Off Track</span>':'<span class="pill green">On Track</span>');
     const sm=r.smart||{};
     const smartLine=(sm.s||sm.m||sm.a||sm.rel||sm.t)?`<div class="smart">
       ${sm.s?`<div><b>S</b>pecific: ${esc(sm.s)}</div>`:""}
@@ -6034,6 +6040,7 @@ function renderRockArchive(a, archives){
   const rows=(a.rocks||[]).map(r=>{
     const ms=r.milestones||[], pct=rockPct(r);
     const pill=r.status==="done"?'<span class="pill green">Done</span>'
+      :r.status==="notdone"?'<span class="pill notdone">Not Done</span>'
       :r.status==="off"?'<span class="pill red">Off Track</span>':'<span class="pill amber">Unfinished</span>';
     return `<div class="card ${r.status==="off"?"is-off":""}">
       <div class="top"><div><h3>${esc(r.title||"(untitled)")}</h3>${rkAttr(r.owner, TEAM().name, r.due)}</div>${pill}</div>
@@ -6132,7 +6139,8 @@ function editRock(id){
     <div class="field"><label>Status</label><select id="r-status">
       <option value="on" ${rec.status==="on"?"selected":""}>On Track</option>
       <option value="off" ${rec.status==="off"?"selected":""}>Off Track</option>
-      <option value="done" ${rec.status==="done"?"selected":""}>Done</option></select></div>
+      <option value="done" ${rec.status==="done"?"selected":""}>Done</option>
+      <option value="notdone" ${rec.status==="notdone"?"selected":""}>Not Done</option></select></div>
     ${(!draft && connectedTeamsFor().filter(x=>x.id!==home.id).length)?`<div class="field"><label>Shows on <small>(this Rock appears on its home team below + every team you tick — e.g. roll it up to leadership)</small></label>
       <div class="sh-home">✓ <b>${esc(home.name)}</b> <span>· home</span></div>
       <div class="who-list" id="r-share">${connectedTeamsFor().filter(x=>x.id!==home.id).map(tm=>`<button type="button" class="onb-seat ${(rec.showOn||[]).indexOf(tm.id)>=0?"on":""}" data-share="${tm.id}">${esc(tm.name)}</button>`).join("")}</div></div>`:""}
@@ -6205,7 +6213,7 @@ function logRockUpdate(id){
   $("#u-save").onclick=()=>{
     r.updates=r.updates||[];
     r.updates.push({id:uid(),date:$("#u-date").value||todayIso(),status:$("#u-status").value,note:$("#u-note").value.trim()});
-    r.status=$("#u-status").value==="off"?"off":(r.status==="done"?"done":"on");
+    r.status=$("#u-status").value==="off"?"off":((r.status==="done"||r.status==="notdone")?r.status:"on");   // keep a final Done/Not Done mark; otherwise reflect this week's on/off
     saveRock(fr.team, r, false); closeSheet(); renderRocks();   // merge onto latest so a progress log isn't lost to a concurrent save
 
   };
@@ -6402,7 +6410,7 @@ function rpmPrintHtml(){   // confidential — only for those allowed to see fin
 function rocksPrintHtml(team){
   const board=rocksOnBoard(team), st=rockStats(board.map(x=>x.r));
   const rows=board.map(({r})=>{ const pct=rockPct(r);
-    const pill=r.status==="done"?'<span class="rkp done">Done</span>':r.status==="off"?'<span class="rkp off">Off Track</span>':'<span class="rkp on">On Track</span>';
+    const pill=r.status==="done"?'<span class="rkp done">Done</span>':r.status==="notdone"?'<span class="rkp notdone">Not Done</span>':r.status==="off"?'<span class="rkp off">Off Track</span>':'<span class="rkp on">On Track</span>';
     return `<div class="rk-line"><div class="rk-line-t">${esc(r.title||"(untitled)")}</div><div class="rk-line-m">${esc(r.owner||"—")} · ${pct}% ${pill}</div></div>`; }).join("");
   return `<div class="p-section"><div class="p-h2">${esc(team.name)} — Quarterly Rocks · ${esc(quarterLabel(team.week1Start))}${st.n?` (${st.pct}% complete)`:""}</div>
     ${rows||'<div class="hint">No Rocks on this team’s board.</div>'}</div>`;
@@ -7794,7 +7802,7 @@ function myNotes(){
             sub:(r.owner||"The owner")+" answered your question on “"+(r.title||"untitled")+"”",
             teamId:t.id, view:"rocks", rockId:r.id});
       });
-      if(!sameName(r.owner,me) || r.status==="done") return;
+      if(!sameName(r.owner,me) || r.status==="done" || r.status==="notdone") return;   // finalized (Done/Not Done) → no more nudges
       if(r.status==="off")
         out.push({id:"off:"+r.id, icon:"🔴", title:r.title||"(untitled Rock)",
           sub:"Your Rock is Off Track · "+t.name, teamId:t.id, view:"rocks", rockId:r.id});
@@ -9472,7 +9480,7 @@ function meetingSummary(t){
   t=t||TEAM();
   const rocks=rocksOnBoard(t).map(x=>x.r);
   let rOn=0,rOff=0,rDone=0;
-  rocks.forEach(r=>{ if(r.status==="done") rDone++; else if(r.status==="off") rOff++; else rOn++; });
+  rocks.forEach(r=>{ if(r.status==="done") rDone++; else if(r.status==="off"||r.status==="notdone") rOff++; else rOn++; });   // Not Done groups with "not on track"
   const cwi=currentWeekIndex();
   const meas=measuresOnBoard(t).map(x=>x.m);
   let sOn=0,sOff=0,sBlank=0;
@@ -9727,7 +9735,7 @@ function renderSegContent(i){
     const rows=rocksOnBoard(TEAM()).map(({r,mirror})=>`<div class="rate-row rock-review" data-rid="${r.id}">
       <div class="rr-info"><div class="rr-title"><b>${esc(r.title)}</b>${mirror?' <span class="mir-tag">↔ shared</span>':''}</div>
         <div class="rr-meta">${ownerChip(r.owner)}<span class="rr-pct">${rockPct(r)}%</span></div></div>
-      <select class="rate-input rock-stat rs-${r.status||'off'}" style="width:110px" data-rock-status="${r.id}"><option value="on" ${r.status==="on"?"selected":""}>On</option><option value="off" ${r.status==="off"?"selected":""}>Off</option><option value="done" ${r.status==="done"?"selected":""}>Done</option></select></div>`).join("");
+      <select class="rate-input rock-stat rs-${r.status||'off'}" style="width:120px" data-rock-status="${r.id}"><option value="on" ${r.status==="on"?"selected":""}>On</option><option value="off" ${r.status==="off"?"selected":""}>Off</option><option value="done" ${r.status==="done"?"selected":""}>Done</option><option value="notdone" ${r.status==="notdone"?"selected":""}>Not Done</option></select></div>`).join("");
     c.innerHTML=`<div class="seg-panel"><h4>Rocks — On / Off Track</h4>${rows||'<div class="hint">No Rocks yet. Add them on the Rocks tab.</div>'}
       <div class="hint rock-key" style="margin-top:8px"><span class="rk rk-on">On</span><span class="rk rk-off">Off</span><span class="rk rk-done">Done</span> · Off-track Rocks should become issues for IDS.</div></div>`;
     c.querySelectorAll("[data-rock-status]").forEach(sel=>sel.onchange=()=>{ const rid=sel.dataset.rockStatus, val=sel.value; const fr=findRockAnywhere(rid);
@@ -10059,13 +10067,13 @@ function healthData(){
   const rocks=[]; teams.forEach(t=>(t.rocks||[]).forEach(r=>rocks.push({team:t.name, teamId:t.id, r:r})));
   const n=rocks.length;
   const done=rocks.filter(x=>x.r.status==="done").length;
-  const off=rocks.filter(x=>x.r.status==="off").length;
+  const off=rocks.filter(x=>x.r.status==="off"||x.r.status==="notdone").length;   // Not Done grouped with "not on track"
   const on=n-done-off;
   // Milestone completion — an OBJECTIVE progress measure, separate from self-reported status.
   let msTot=0, msDone=0;
   rocks.forEach(x=>{ const ms=x.r.milestones||[]; msTot+=ms.length; msDone+=ms.filter(m=>m.done).length; });
   // Rocks called on-track/done but with milestones lagging — the "says 100% but nothing shipped" gap.
-  const behind=rocks.filter(x=> x.r.status!=="off" && (x.r.milestones||[]).length>0 && rockPct(x.r)<50);
+  const behind=rocks.filter(x=> x.r.status!=="off" && x.r.status!=="notdone" && (x.r.milestones||[]).length>0 && rockPct(x.r)<50);
   // Scorecard hit rate by week INDEX so teams line up even if a quarter start differs.
   // NB: weekly values are keyed by week INDEX (0..12), not by date — see editMeasurable's
   // `rec.values[i]={v,s}`. Reading them by date string silently yields "no data" forever.
@@ -10101,8 +10109,8 @@ function healthData(){
     rs.forEach(r=>{ const ms=r.milestones||[]; mtot+=ms.length; mdone+=ms.filter(m=>m.done).length; });
     return {id:t.id, name:t.name, n:rs.length,
       done:rs.filter(r=>r.status==="done").length,
-      off:rs.filter(r=>r.status==="off").length,
-      on:rs.filter(r=>r.status!=="done"&&r.status!=="off").length,
+      off:rs.filter(r=>r.status==="off"||r.status==="notdone").length,   // Not Done groups with "not on track"
+      on:rs.filter(r=>r.status!=="done"&&r.status!=="off"&&r.status!=="notdone").length,
       msTot:mtot, msDone:mdone, msPct: mtot?Math.round(mdone/mtot*100):null,
       scOn:scOn, scWeek:scWeek, scPct:(scWeek>=0&&measCount)?Math.round(scOn/measCount*100):null,
       measCount:measCount};
@@ -10225,7 +10233,7 @@ function renderHealth(){
       <div class="hint" style="margin:0 2px 6px">Marked on track or done, but under half their milestones are complete — the status looks fine while the work lags. Click a row to open that department's Rocks.</div>
       <div class="pa-tablewrap"><table class="pa-table watch"><thead><tr><th class="pn">Rock</th><th>Owner</th><th>Department</th><th>Status</th><th>Milestones</th></tr></thead>
       <tbody>${h.behind.map(x=>`<tr class="click" data-go-rocks="${x.teamId}"><td class="pn">${esc(x.r.title||"(untitled)")}</td><td>${esc(x.r.owner||"—")}</td><td>${esc(x.team)}</td>
-        <td>${x.r.status==="done"?"Done":"On Track"}</td><td class="rc">${rockPct(x.r)}%</td></tr>`).join("")}</tbody></table></div>`:""}
+        <td>${x.r.status==="done"?"Done":x.r.status==="notdone"?"Not Done":x.r.status==="off"?"Off Track":"On Track"}</td><td class="rc">${rockPct(x.r)}%</td></tr>`).join("")}</tbody></table></div>`:""}
     ${salesTallyHtml()}
     <div style="height:24px"></div>`;
   wireLineChart();
@@ -10541,7 +10549,7 @@ function renderMyBoard(){
   const rockCards=mine.map(x=>{
     const r=x.r, pct=rockPct(r), ms=r.milestones||[];
     const next=ms.filter(m=>!m.done).sort((a,b)=>String(a.due||"9999").localeCompare(String(b.due||"9999")))[0];
-    const stv=r.status==="off"?"off":r.status==="done"?"done":"on";
+    const stv=r.status==="off"?"off":r.status==="notdone"?"notdone":r.status==="done"?"done":"on";
     const open=(r.questions||[]).filter(qq=>!qq.answer).length;
     return `<div class="mb-rock ${r.status==="off"?"is-off":""}">
       <div class="mb-top"><div><div class="mb-title">${esc(r.title||"(untitled)")}</div>
@@ -10549,7 +10557,8 @@ function renderMyBoard(){
         <select class="mb-rock-status ${stv}" data-rock="${r.id}" title="Update this Rock's status">
           <option value="on" ${stv==="on"?"selected":""}>On Track</option>
           <option value="off" ${stv==="off"?"selected":""}>Off Track</option>
-          <option value="done" ${stv==="done"?"selected":""}>Done</option></select></div>
+          <option value="done" ${stv==="done"?"selected":""}>Done</option>
+          <option value="notdone" ${stv==="notdone"?"selected":""}>Not Done</option></select></div>
       <div class="prog"><span style="width:${pct}%"></span></div>
       <div class="prog-lbl"><span>${ms.filter(m=>m.done).length}/${ms.length} milestones</span><span>${pct}%</span></div>
       ${next?`<div class="mb-next-row"><span class="mb-next">Next: ${esc(next.text)}${next.due?` <b>${fmtShort(next.due)}</b>`:""}</span><button class="btn ghost sm" data-ms-done="${r.id}|${next.id}">✓ Done</button></div>`:""}
@@ -10848,7 +10857,7 @@ function renderPAWorksheet(){
 
     <div class="sec-title" style="margin-top:18px">4 · Their Rocks</div>
     ${rocks.length?rocks.map(x=>`<div class="qc-rock"><div><b>${esc(x.r.title||"(untitled)")}</b><div class="hint">${esc(x.t)} · ${rockPct(x.r)}% · ${(x.r.milestones||[]).filter(m=>m.done).length}/${(x.r.milestones||[]).length} milestones</div></div>
-        <span class="pill ${x.r.status==="off"?"red":x.r.status==="done"?"green":"green"}">${x.r.status==="off"?"Off Track":x.r.status==="done"?"Done":"On Track"}</span></div>`).join("")
+        <span class="pill ${x.r.status==="off"?"red":x.r.status==="notdone"?"notdone":x.r.status==="done"?"green":"green"}">${x.r.status==="off"?"Off Track":x.r.status==="notdone"?"Not Done":x.r.status==="done"?"Done":"On Track"}</span></div>`).join("")
       :`<div class="hint">No Rocks owned by ${esc(person)} this quarter.</div>`}
 
     <div class="sec-title" style="margin-top:18px">5 · Their Scorecard</div>
@@ -11402,7 +11411,7 @@ function coachDigest(){
     L.push("\nTeam: "+t.name+(t.leader?" · leader "+t.leader:""));
     const rocks=(t.rocks||[]);
     if(rocks.length){ L.push(" Rocks ("+quarterLabel(t.week1Start)+"):");
-      rocks.forEach(r=>L.push("  - "+(r.title||"(untitled)")+" — "+(r.owner||"no owner")+" ["+(r.status==="off"?"OFF track":r.status==="done"?"done":"on track")+"]")); }
+      rocks.forEach(r=>L.push("  - "+(r.title||"(untitled)")+" — "+(r.owner||"no owner")+" ["+(r.status==="off"?"OFF track":r.status==="notdone"?"NOT DONE":r.status==="done"?"done":"on track")+"]")); }
     const meas=(t.measurables||[]);
     if(meas.length){ L.push(" Scorecard (through week "+(cwi+1)+"):");
       meas.forEach(m=>{ let streak=0; for(let i=cwi;i>=0;i--){ const e=(m.values||{})[i]; if(e&&e.s==="off") streak++; else if(e&&e.s){break;} else if(i<cwi){break;} }
@@ -11486,7 +11495,7 @@ function helpGoto(view,label){ return `<div class="help-open"><button class="hel
 function helpRocksAns(d, offOnly){
   let rs=d.rocks; if(offOnly) rs=rs.filter(x=>x.r.status==="off");
   if(!rs.length) return offOnly?"You have no off-track Rocks right now. 🎉":"You don't own any Rocks yet — add one on the Rocks tab.";
-  const rows=rs.map(x=>{ const st=x.r.status==="done"?"✅ Done":x.r.status==="off"?"🔴 Off track":"🟢 On track";
+  const rows=rs.map(x=>{ const st=x.r.status==="done"?"✅ Done":x.r.status==="notdone"?"❌ Not Done":x.r.status==="off"?"🔴 Off track":"🟢 On track";
     return `<li><b>${esc(x.r.title||"(untitled)")}</b> — ${st} · ${rockPct(x.r)}%${x.r.due?` · due ${esc(fmtShort(x.r.due))}`:""}</li>`; }).join("");
   return `<div class="help-ans-t">🎯 Your Rocks${offOnly?" — off track":""}</div><ul>${rows}</ul>${helpGoto("rocks","Open Rocks")}`;
 }
