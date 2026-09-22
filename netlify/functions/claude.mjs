@@ -35,6 +35,26 @@ const TASKS = {
       user: `Write the recap for ${team}'s Level 10 Meeting from these notes.\n\n${transcript || "(no notes were recorded)"}\n\nAverage rating: ${rating || "(n/a)"}\n\nReturn JSON shaped EXACTLY like:\n{"summary":"<5–8 sentence recap: what was decided, what got solved, and the key to-dos with owners>","cascade":"<a short 2–4 sentence Cascading Message the leaders can relay to their departments — only the few things everyone should hear>"}`
     };
   },
+  ask_app(p){
+    const question = String(p.question || "").slice(0, 1000);
+    const digest = String(p.digest || "").slice(0, 16000);
+    return {
+      maxTokens: 1200,
+      system: "You are a helpful assistant embedded in a company's EOS (Entrepreneurial Operating System / Traction) app. Answer the user's question using ONLY the DATA provided about this company's teams, Rocks, Scorecard, issues, to-dos, accountability chart, and vision. Use real names and numbers from the data. If the answer isn't in the data, say you don't see it in the app rather than guessing. You may add brief EOS best-practice guidance when it's clearly helpful. Keep it concise — short paragraphs or bullet lines. Plain text (you may use - bullets, 1. numbering, and **bold**), never JSON or code fences.",
+      user: `DATA (this company's operating system):\n${digest || "(no data available)"}\n\n----------\nQUESTION: ${question}`
+    };
+  },
+  suggest_lma(p){
+    const role = String(p.role || "").slice(0, 160);
+    const parentRole = String(p.parentRole || "").slice(0, 160);
+    const existing = String(p.existing || "").slice(0, 1000);
+    const company = String(p.company || "a company").slice(0, 300);
+    return {
+      maxTokens: 600,
+      system: "You are an expert EOS (Entrepreneurial Operating System) implementer defining a seat's Roles — the handful of core accountabilities (the 'R' in LMA) that say what a seat owns. Each is a short, specific, outcome-oriented phrase (3–8 words), in the company's own language. Reply with ONLY a JSON object — no prose, no code fences.",
+      user: `Suggest the key Roles / Responsibilities for this seat on the accountability chart.\n\nSeat / Role: ${role}\nReports to: ${parentRole || "(top of the chart)"}\nCompany: ${company}\n${existing ? `Already listed (do NOT repeat these): ${existing}\n` : ""}\nReturn JSON shaped EXACTLY like: {"roles":["<accountability 1>","<accountability 2>","<accountability 3>","<accountability 4>","<accountability 5>"]}\nGive 5 concise, distinct accountabilities that fit this seat.`
+    };
+  },
   scorecard_insight(p){
     const team = String(p.teamName || "the team").slice(0, 120);
     const quarter = String(p.quarter || "").slice(0, 40);

@@ -4677,7 +4677,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=137;
+const BUILD=138;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -8960,7 +8960,8 @@ function editSeat(id, newParent){
         <button type="button" class="s-color ${!rec.color?"on":""}" data-color="">None</button>
         ${["green","yellow","orange","red","grey"].map(c=>`<button type="button" class="s-color sw-${c} ${rec.color===c?"on":""}" data-color="${c}">${c.charAt(0).toUpperCase()+c.slice(1)}</button>`).join("")}
       </div></div>
-    <div class="field"><label>Key Roles / Responsibilities</label>
+    <div class="field"><label>Key Roles / Responsibilities <button type="button" class="btn ghost sm ai-btn" id="s-ai-lma" style="margin-left:8px;padding:2px 9px">✨ Suggest</button></label>
+      <div class="hint ai-status" id="s-ai-status" hidden></div>
       ${resp.map((r,i)=>`<input class="resp-in" value="${esc(r)}" placeholder="Responsibility ${i+1}" style="margin-bottom:7px">`).join("")}</div>
     ${(data.teams||[]).filter(t=>t.seatId!==rec.id).length?`<div class="field"><label>Also reports into <small>(other team meetings this person attends — a dotted-line report)</small></label>
       <div class="hint" style="margin:0 2px 8px">Tick another team's meeting and this person joins its L10 — they get a spot in its WIFLS/Headlines and can see that team's board, on top of their own.</div>
@@ -8991,6 +8992,16 @@ function editSeat(id, newParent){
   document.querySelectorAll('#s-also [data-also]').forEach(b=>b.onclick=()=>b.classList.toggle("on"));
   document.querySelectorAll('.s-place').forEach(b=>b.onclick=()=>{ document.querySelectorAll('.s-place').forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
   document.querySelectorAll('.s-color').forEach(b=>b.onclick=()=>{ document.querySelectorAll('.s-color').forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
+  { const aib=$("#s-ai-lma"); if(aib) aib.onclick=()=>aiRun(aib, $("#s-ai-status"), "Thinking about this seat…", async ()=>{
+      const role=($("#s-role").value||"").trim(); if(!role){ $("#s-role").focus(); throw new Error("Name the seat/role first."); }
+      const par=seats.find(x=>x.id===($("#s-parent").value||rec.parent));
+      const inputs=[...document.querySelectorAll(".resp-in")];
+      const existing=inputs.map(i=>i.value.trim()).filter(Boolean);
+      const text=await aiCall("suggest_lma",{ role, parentRole:(par&&par.role)||"", company:"Warriors Heart — residential addiction & trauma treatment for veterans and first responders", existing:existing.join("; ") });
+      const j=aiParseJSON(text); const roles=(j&&j.roles)||[];
+      let idx=0; roles.forEach(rr=>{ rr=String(rr||"").trim(); if(!rr) return; while(idx<inputs.length && inputs[idx].value.trim()) idx++; if(idx<inputs.length){ inputs[idx].value=rr; idx++; } });
+      const st=$("#s-ai-status"); if(st){ st.className="hint ai-status ok"; st.textContent="✓ Suggested into the empty rows — edit any, then Save."; }
+    }); }
   $("#s-save").onclick=()=>{
     rec.role=$("#s-role").value.trim()||"Untitled Seat";
     rec.names=($("#s-names").value||"").split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);
@@ -11269,6 +11280,53 @@ function editGuide(){
 /* ===== Help chat — a free, in-app assistant that answers from the (editable) Guide =====
    No AI/backend: it keyword-matches the user's question against the Guide sections and replies with the
    best one, plus "see also" and a link to the full Guide. Grow its knowledge by editing the Guide. */
+/* ===== Ask the App (AI EOS coach) =====
+   Assembles a compact, privacy-safe snapshot of the operating system (teams' Rocks / Scorecard / issues /
+   to-dos, the accountability chart, and the V/TO) and lets Claude answer questions over it. People-Analyzer
+   ratings are NEVER included. Team boards are scoped to what this user can already see (facility isolation). */
+function coachDigest(){
+  const L=[], teams = seesAllTeams() ? (data.teams||[]) : teamsForUser();
+  L.push("=== TEAMS & THEIR BOARDS ===");
+  teams.forEach(t=>{
+    const cwi=currentWeekIndexFor(t);
+    L.push("\nTeam: "+t.name+(t.leader?" · leader "+t.leader:""));
+    const rocks=(t.rocks||[]);
+    if(rocks.length){ L.push(" Rocks ("+quarterLabel(t.week1Start)+"):");
+      rocks.forEach(r=>L.push("  - "+(r.title||"(untitled)")+" — "+(r.owner||"no owner")+" ["+(r.status==="off"?"OFF track":r.status==="done"?"done":"on track")+"]")); }
+    const meas=(t.measurables||[]);
+    if(meas.length){ L.push(" Scorecard (through week "+(cwi+1)+"):");
+      meas.forEach(m=>{ let streak=0; for(let i=cwi;i>=0;i--){ const e=(m.values||{})[i]; if(e&&e.s==="off") streak++; else if(e&&e.s){break;} else if(i<cwi){break;} }
+        const cur=(m.values||{})[cwi]; const st=cur&&cur.s?(cur.s==="off"?"OFF":"on"):"blank";
+        L.push("  - "+m.name+" — "+(m.owner||"?")+", goal "+(m.goal||"?")+", latest "+st+(streak>1?" ("+streak+" wks off)":"")); }); }
+    const iss=(t.issues||[]).filter(x=>x&&!x.solved);
+    if(iss.length){ L.push(" Open issues:"); iss.forEach(x=>L.push("  - "+x.text+(x.owner?" (raised by "+x.owner+")":""))); }
+    const td=(t.todos||[]).filter(x=>x&&!x.done);
+    if(td.length){ L.push(" Open to-dos ("+td.length+"):"); td.slice(0,20).forEach(x=>L.push("  - "+x.text+(x.owner?" — "+x.owner:"")+(x.due?" (due "+x.due+")":""))); }
+  });
+  const seats=((data.accountability||{}).seats)||[];
+  if(seats.length){ const byId={}; seats.forEach(s=>byId[s.id]=s);
+    L.push("\n=== ACCOUNTABILITY CHART (seat — people — reports to) ===");
+    seats.forEach(s=>{ const par=byId[s.parent]; L.push(" "+(s.role||"?")+" — "+(seatNames(s).join(", ")||"open seat")+(par?" — reports to "+(par.role||"?"):"")); }); }
+  const v=data.vto||{};
+  L.push("\n=== VISION (V/TO) ===");
+  if((v.coreValues||[]).length) L.push(" Core Values: "+v.coreValues.map(itemText).join("; "));
+  if(v.coreFocus) L.push(" Core Focus — Mission: "+(v.coreFocus.mission||"—")+" | Niche: "+(v.coreFocus.niche||"—"));
+  if(v.tenYear) L.push(" 10-Year Target: "+v.tenYear);
+  return L.join("\n").slice(0,16000);
+}
+async function helpAsk(q){
+  helpUser(q);
+  const m=$("#helpMsgs"); const d=document.createElement("div"); d.className="help-msg bot";
+  d.innerHTML='<span class="ai-status">✨ Thinking…</span>'; m.appendChild(d); m.scrollTop=m.scrollHeight;
+  try{
+    const text=await aiCall("ask_app",{ question:q, digest:coachDigest() });
+    d.innerHTML=guideFmt(text);   // same light markdown formatter the Guide uses (bullets, numbers, **bold**)
+  }catch(e){
+    d.remove();                    // AI unreachable (offline / not deployed) → fall back to the built-in keyword+data help
+    helpRespond(q);
+  }
+  const mm=$("#helpMsgs"); if(mm) mm.scrollTop=mm.scrollHeight; wireHelpButtons();
+}
 let helpGreeted=false;
 function initHelpChat(){
   if(document.getElementById("helpFab")) return;
@@ -11282,14 +11340,14 @@ function initHelpChat(){
   const close=()=>{ panel.classList.add("hide"); fab.classList.remove("open"); };
   fab.onclick=()=>panel.classList.contains("hide")?open():close();
   $("#helpClose").onclick=close;
-  const send=()=>{ const el=$("#helpQ"); const q=(el.value||"").trim(); if(!q) return; el.value=""; helpUser(q); helpRespond(q); };
+  const send=()=>{ const el=$("#helpQ"); const q=(el.value||"").trim(); if(!q) return; el.value=""; helpAsk(q); };
   $("#helpSend").onclick=send; $("#helpQ").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); send(); } };
 }
 function helpBubble(html, who){ const m=$("#helpMsgs"); if(!m) return; const d=document.createElement("div"); d.className="help-msg "+(who||"bot"); d.innerHTML=html; m.appendChild(d); m.scrollTop=m.scrollHeight; wireHelpButtons(); }
 function helpUser(t){ helpBubble(esc(t),"me"); }
 function helpGreet(){
-  helpBubble("Hi! Ask me <b>how to do something</b>, or about <b>your own</b> Rocks, Scorecard, to-dos, issues and due dates. Tap a question to start:");
-  const qs=["What are my Rocks?","What's on my Scorecard this week?","What are my to-dos?","What's due soon?","What issues are open?","How do I update my Rock?"];
+  helpBubble("Hi! I'm your <b>Operating System assistant</b> ✨ — ask me anything about your Rocks, Scorecard, to-dos, issues, who owns what, what's off track, or how to use the app. Tap a question to start:");
+  const qs=["What are my Rocks?","Which measurables are off track?","What's due soon?","Who owns Admissions?","What issues are open?","How do I update my Rock?"];
   helpBubble(`<div class="help-chips">${qs.map(q=>`<button class="help-chip">${esc(q)}</button>`).join("")}</div>`);
 }
 function helpSearch(q){
