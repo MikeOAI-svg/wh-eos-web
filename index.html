@@ -1511,6 +1511,22 @@
     .rk-line-m{font-size:11.5px; color:#5b6472; white-space:nowrap}
     .rkp{font-weight:800; font-size:10px; padding:1px 7px; border-radius:20px; margin-left:4px}
     .rkp.on{color:#1f7a44}.rkp.off{color:#c62828}.rkp.done{color:#5b6472}.rkp.notdone{color:#fff;background:#c62828;padding:1px 7px;border-radius:20px}
+    /* Selected team's Scorecard packet page (landscape gives room for the 13 weeks) */
+    .p-sc{width:100%; border-collapse:collapse; font-size:9.5px; table-layout:fixed}
+    .p-sc th,.p-sc td{border:1px solid #c7ccd4; padding:3px 4px; text-align:center}
+    .p-sc th{background:#f1f2f4; color:#5b6472; font-weight:800}
+    .p-sc .p-sc-name{width:150px; text-align:left}
+    .p-sc .p-sc-goal{width:88px; text-align:left; font-size:9px; color:#5b6472}
+    .p-sc-m{font-weight:700; font-size:10px}
+    .p-sc-o{font-size:8.5px; color:#5b6472}
+    .p-sc-wd{font-weight:600; color:#9aa3b0; font-size:7.5px}
+    .p-sc-dept td{background:#eef0f3; font-weight:800; text-transform:uppercase; letter-spacing:.4px; text-align:left; font-size:9px; color:#3a424e}
+    .p-sc-trend{font-weight:800}
+    .p-sc-trend.good{color:#1f7a44}.p-sc-trend.warn{color:#9a6b00}.p-sc-trend.bad{color:#c62828}
+    .p-sc-c.g{background:#dff3e6; color:#1f7a44; font-weight:700}
+    .p-sc-c.r{background:#fadddd; color:#c62828; font-weight:700}
+    .p-sc-c.empty{color:#c2c8d0}
+    .p-sc tr{break-inside:avoid}
     /* Accountability Chart prints as the SAME List view (seatListHtml) — just drop the Edit buttons */
     .ac-list-print .vto-editbtn{display:none}
     .ac-list-print .seat-head{break-inside:avoid}   /* keep a seat's role+name together, but let long branches flow across pages */
@@ -4701,7 +4717,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=146;
+const BUILD=147;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5236,7 +5252,7 @@ function revertPerTeamStorage(){
 /* Test seam: exposes the per-team internals ONLY when a test flag is present (never set in production). */
 if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
-    mergeCompany, mergeTeam, saveRock, savePaRec, get BUILD(){return BUILD;},
+    mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -6417,7 +6433,8 @@ function doPrintVTO(teamId){
         <div class="p-vto-sub">Warriors Heart · ${esc(q)} · ${esc(dateStr)}</div></div></div>
     ${printVtoHtml()}
     ${rpmPrintHtml()}
-    ${team?rocksPrintHtml(team):""}`;
+    ${team?rocksPrintHtml(team):""}
+    ${team?scorecardPrintHtml(team):""}`;
   window.print();
 }
 function rpmPrintHtml(){   // confidential — only for those allowed to see financials
@@ -6431,6 +6448,41 @@ function rocksPrintHtml(team){
     return `<div class="rk-line"><div class="rk-line-t">${esc(r.title||"(untitled)")}</div><div class="rk-line-m">${esc(r.owner||"—")} · ${pct}% ${pill}</div></div>`; }).join("");
   return `<div class="p-section"><div class="p-h2">${esc(team.name)} — Quarterly Rocks · ${esc(quarterLabel(team.week1Start))}${st.n?` (${st.pct}% complete)`:""}</div>
     ${rows||'<div class="hint">No Rocks on this team’s board.</div>'}</div>`;
+}
+// The selected team's 13-week Scorecard, mirroring what's on screen (departments, mirrored-in rows by owner,
+// the shared row order, and each cell's On/Off color). Current quarter — what the team is presenting.
+function scorecardPrintHtml(team){
+  const w1=team.week1Start||firstMondayOfQuarter(), weeks=weekDatesFrom(w1);
+  const board=measuresOnBoard(team);
+  if(!board.length) return `<div class="p-section"><div class="p-h2">${esc(team.name)} — Scorecard · ${esc(quarterLabel(w1))}</div><div class="hint">No measurables on this team’s scorecard.</div></div>`;
+  const groups=[];
+  (team.departments||[]).forEach(dp=>{ const items=board.filter(x=>!x.mirror&&x.m.deptId===dp.id); if(items.length) groups.push({name:dp.name,items}); });
+  const orphan=board.filter(x=>!x.mirror&&!(team.departments||[]).some(d=>d.id===x.m.deptId)); if(orphan.length) groups.push({name:"Unassigned",items:orphan});
+  const mir={}; board.filter(x=>x.mirror).forEach(x=>{ const k=x.m.owner||"—"; (mir[k]=mir[k]||[]).push(x); });
+  Object.keys(mir).sort((a,b)=>a.localeCompare(b)).forEach(n=>groups.push({name:"↔ "+n,items:mir[n]}));
+  const scOrd=team.scOrder||[], scIdx=id=>{ const i=scOrd.indexOf(id); return i<0?1e9:i; };
+  groups.forEach(g=>g.items.sort((a,b)=>scIdx(a.m.id)-scIdx(b.m.id)));   // honor the team's shared order within each group
+  let head=`<tr><th class="p-sc-name">Measurable</th><th class="p-sc-goal">Goal</th><th class="p-sc-trend">On</th>`;
+  weeks.forEach((w,i)=>{ head+=`<th class="p-sc-wk"><div>W${i+1}</div><div class="p-sc-wd">${fmtShort(w)}</div></th>`; });
+  head+=`</tr>`;
+  const NCOL=3+13;
+  let body="";
+  groups.forEach(g=>{
+    body+=`<tr class="p-sc-dept"><td colspan="${NCOL}">${esc(g.name)}</td></tr>`;
+    g.items.forEach(({m,mirror})=>{
+      let cells="", on=0, off=0;
+      for(let i=0;i<13;i++){ const e=(m.values&&m.values[i])||null, v=e?(e.v||""):"", s=e?(e.s||""):"";
+        const cls=(v===""&&!s)?"empty":(s==="on"?"g":(s==="off"?"r":""));
+        cells+=`<td class="p-sc-c ${cls}">${v===""?"·":esc(v)}</td>`;
+        if(s==="on")on++; else if(s==="off")off++; }
+      const tot=on+off, rate=tot?Math.round(on/tot*100):null, rcls=rate===null?"":rate>=80?"good":rate>=50?"warn":"bad";
+      body+=`<tr><td class="p-sc-name"><div class="p-sc-m">${esc(m.name)}${mirror?' ↔':''}</div><div class="p-sc-o">${esc(m.owner||"—")}</div></td>
+        <td class="p-sc-goal">${esc(m.goal||"")}</td>
+        <td class="p-sc-trend ${rcls}">${tot?on+"/"+tot:"—"}</td>${cells}</tr>`;
+    });
+  });
+  return `<div class="p-section p-sc-sec"><div class="p-h2">${esc(team.name)} — Scorecard · ${esc(quarterLabel(w1))}</div>
+    <table class="p-sc"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
 /* ===== Graphical Accountability-Chart print =====
