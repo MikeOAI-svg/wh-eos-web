@@ -4701,7 +4701,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=144;
+const BUILD=146;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -4889,7 +4889,7 @@ function saveL10(immediate){   // persist the current L10 team's meeting + to-do
   // the whole object, so a facilitator clicking "Next" can't wipe the scribe's just-typed note (and vice-versa).
   // When one person is both (the common case), both roles are true → this is the same as "local wins".
   const NAV=["seg","segStart","segElapsed","totalElapsed","capMin"];
-  const CONTENT=["notes","byPerson","ratings","createdTodos","activeIssue","solvedIssues"];
+  const CONTENT=["notes","byPerson","ratings","createdTodos","activeIssue","solvedIssues","guests"];   // "guests" = attendees added in-meeting (WIFLS/Headlines/ratings); must merge or added attendees vanish on the next sync
   const IDENT=["date","startedAt","facilitatorEmail","facilitatorName","scribeEmail","scribeName"];
   const apply=(st)=>{ const lt=JSON.parse(snapJson), loc=lt.liveMeeting;
     if(!loc){ st.liveMeeting=null; }                      // meeting ended → clear it for everyone
@@ -5613,7 +5613,7 @@ function startNewQuarter(){
     t.nextRocks=[];
     t.week1Start=nextW1;
     (t.measurables||[]).forEach(m=>{ m.values={}; });
-    scQuarter=null; rkQuarter=null; save(); closeSheet();
+    scQuarter=null; rkQuarter=null; save(true); closeSheet();   // immediate write beats the sync-adopt race for this one-shot close
     switchView(currentView);
     setSync(`${quarterLabel(curW1)} closed · ${st.n?st.pct+"% of Rocks done":"no Rocks"}`);
   };
@@ -5635,8 +5635,8 @@ function scorecardSettings(){
     <button class="btn ghost wide" id="sc-new-quarter">▶ Close ${esc(quarterLabel(s.week1Start))} → start ${esc(quarterLabel(nextQuarterFirstMonday(s.week1Start||firstMondayOfQuarter())))}</button>
     <div class="hint" style="margin:6px 2px 0">Archives this quarter's Scorecard <b>and</b> Rocks with their completion score, then starts fresh. Measurables carry over.</div>
     <div class="sheet-actions" style="margin-top:16px"><button class="btn" id="sc-done">Done</button></div>`);
-  $("#sc-w1").onchange=e=>{ s.week1Start=e.target.value; save(); };
-  $("#sc-w1-quarter").onclick=()=>{ s.week1Start=firstMondayOfQuarter(); save(); scorecardSettings(); };
+  $("#sc-w1").onchange=e=>{ s.week1Start=e.target.value; mergeTeam(s.id, t=>{ t.week1Start=s.week1Start; }); };
+  $("#sc-w1-quarter").onclick=()=>{ s.week1Start=firstMondayOfQuarter(); mergeTeam(s.id, t=>{ t.week1Start=s.week1Start; }); scorecardSettings(); };
   const saveDepts=()=>mergeTeam(s.id, t=>{ t.departments=JSON.parse(JSON.stringify(s.departments)); });   // merge only departments onto the latest team
   const addDept=()=>{ const i=$("#sc-dept"); const v=(i&&i.value.trim())||""; if(!v) return; s.departments.push({id:uid(),name:v}); saveDepts(); scorecardSettings(); };
   $("#sc-dept-add").onclick=addDept; $("#sc-dept").onkeydown=e=>{ if(e.key==="Enter") addDept(); };
@@ -6009,7 +6009,7 @@ function renderRockDrafts(){
   wrap.querySelectorAll(".card.rk-draft").forEach(card=>{ const rid=card.dataset.rid;
     card.addEventListener("click",e=>{ const act=e.target.dataset.act; if(!act) return;
       if(act==="draft-edit"){ editRock(rid); }
-      if(act==="draft-del"){ if(confirm("Delete this drafted Rock?")){ t.nextRocks=(t.nextRocks||[]).filter(x=>x.id!==rid); save(); renderRocks(); } }
+      if(act==="draft-del"){ if(confirm("Delete this drafted Rock?")){ t.nextRocks=(t.nextRocks||[]).filter(x=>x.id!==rid); deleteRock(t, rid, true); renderRocks(); } }   // merge-safe delete (was plain save → could reappear on sync)
     }); });
   wireQ();
 }
@@ -6031,7 +6031,7 @@ function activateDraftedRocks(){
   t.nextRocks=[];
   t.week1Start=nextW1;
   (t.measurables||[]).forEach(m=>{ m.values={}; });
-  scQuarter=null; rkQuarter=null; save(); switchView(currentView);
+  scQuarter=null; rkQuarter=null; save(true); switchView(currentView);   // immediate write beats the sync-adopt race for this one-shot activation
   setSync(`${quarterLabel(nextW1)} Rocks are live · ${quarterLabel(curW1)} archived`);
 }
 /* A closed quarter, read-only: the score you actually landed, plus every Rock as it stood. */
@@ -9337,6 +9337,7 @@ function editTool(id){
 /* ================= LISTS (Issues / To-Dos) ================= */
 let listMode="issues";
 let expandedIssueNotes=new Set();   // which issues have their discussion/notes box open on the Lists tab
+let _liNoteTimer=null;   // debounce the issue-discussion-note merge write (fires on each keystroke)
 function renderLists(){
   const addRow=$("#listAddRow"), wrap=$("#listsWrap");
   if(noTeamAccess()){ if(addRow) addRow.style.display="none"; wrap.innerHTML=NO_TEAM_HTML; return; }
@@ -9372,33 +9373,37 @@ function renderLists(){
       :`<div class="empty"><span class="emoji">✅</span>No to-dos. These are 7-day action items from your meetings.</div>`;
   }
   const inp=$("#li-input"), addBtn=$("#li-add");
-  const add=()=>{ if(!inp) return; const v=inp.value.trim(); if(!v) return;
+  const add=()=>{ if(!inp) return; const v=inp.value.trim(); if(!v) return; const tid=TEAM().id;
     // An issue belongs to whoever raised it — so you know who to ask when it comes up in IDS.
-    if(listMode==="issues") TEAM().issues.unshift({id:uid(),text:v,owner:myName(),solved:false,created:todayIso()});
-    else TEAM().todos.unshift({id:uid(),text:v,owner:"",due:"",done:false,created:todayIso()});
-    inp.value=""; save(); renderLists(); };
+    // MERGE the new item onto the latest team copy (like the L10 does) so a concurrent sync can't revert it.
+    if(listMode==="issues"){ const it={id:uid(),text:v,owner:myName(),solved:false,created:todayIso()}; TEAM().issues.unshift(it); mergeTeam(tid, t=>{ t.issues=upsertById(t.issues,[it]); }); }
+    else { const it={id:uid(),text:v,owner:"",due:"",done:false,created:todayIso()}; TEAM().todos.unshift(it); mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[it]); }); }
+    inp.value=""; renderLists(); };
   if(addBtn) addBtn.onclick=add;
   if(inp) inp.onkeydown=e=>{ if(e.key==="Enter") add(); };
   wrap.querySelectorAll(".li").forEach(row=>{
     row.addEventListener("click",e=>{
-      const act=e.target.dataset.act, id=row.dataset.id; if(!act) return;
+      const act=e.target.dataset.act, id=row.dataset.id; if(!act) return; const tid=TEAM().id;
+      // Every change MERGES the specific delta onto the latest team copy (never a plain save that a sync can revert).
       if(listMode==="issues"){
         if(act==="notes"){ if(expandedIssueNotes.has(id)) expandedIssueNotes.delete(id); else expandedIssueNotes.add(id); renderLists(); return; }   // anyone can open notes to read
-        const it=TEAM().issues.find(x=>x.id===id); if(!canEd) return;   // issue changes = team editors
-        if(act==="toggle"){ it.solved=!it.solved; }
-        if(act==="del"){ if(!confirm(`Delete this issue?\n\n"${(it&&it.text)||""}"`)) return; TEAM().issues=TEAM().issues.filter(x=>x.id!==id); }
-        if(act==="drop"){ TEAM().todos.unshift({id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}); it.solved=true; }
+        const it=TEAM().issues.find(x=>x.id===id); if(!canEd || !it) return;   // issue changes = team editors
+        if(act==="toggle"){ it.solved=!it.solved; const s=it.solved; mergeTeam(tid, t=>{ const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=s; }); }
+        if(act==="del"){ if(!confirm(`Delete this issue?\n\n"${(it&&it.text)||""}"`)) return; TEAM().issues=TEAM().issues.filter(x=>x.id!==id); mergeTeam(tid, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); }
+        if(act==="drop"){ const nt={id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); it.solved=true; mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[nt]); const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=true; }); }
       }else{
-        const it=TEAM().todos.find(x=>x.id===id);
-        if(act==="toggle"){ if(!canEd && !canEditOwn(it.owner)) return; it.done=!it.done; }   // tick your own
-        if(act==="del"){ if(!canEd) return; if(!confirm(`Delete this to-do?\n\n"${(it&&it.text)||""}"`)) return; TEAM().todos=TEAM().todos.filter(x=>x.id!==id); }
+        const it=TEAM().todos.find(x=>x.id===id); if(!it) return;
+        if(act==="toggle"){ if(!canEd && !canEditOwn(it.owner)) return; it.done=!it.done; const d=it.done; mergeTeam(tid, t=>{ const x=(t.todos||[]).find(y=>y&&y.id===id); if(x) x.done=d; }); }   // tick your own
+        if(act==="del"){ if(!canEd) return; if(!confirm(`Delete this to-do?\n\n"${(it&&it.text)||""}"`)) return; TEAM().todos=TEAM().todos.filter(x=>x.id!==id); mergeTeam(tid, t=>{ t.todos=(t.todos||[]).filter(y=>y&&y.id!==id); }); }
       }
-      save(); renderLists();
+      renderLists();
     });
   });
   // Discussion notes on an issue — typed here, saved live, no re-render (so focus is never lost mid-sentence).
   wrap.querySelectorAll(".li-notes").forEach(ta=>{ if(ta.hasAttribute("readonly")) return;
-    ta.oninput=()=>{ const it=TEAM().issues.find(x=>x.id===ta.dataset.notes); if(it){ it.discussion=ta.value; save(); } }; });
+    ta.oninput=()=>{ const it=TEAM().issues.find(x=>x.id===ta.dataset.notes); if(!it) return; it.discussion=ta.value;
+      const tid=TEAM().id, id=ta.dataset.notes, val=ta.value;
+      clearTimeout(_liNoteTimer); _liNoteTimer=setTimeout(()=>mergeTeam(tid, t=>{ const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.discussion=val; }), 650); }; });   // merge only this issue's note
 }
 
 /* ================= L10 MEETING ================= */
@@ -9572,9 +9577,9 @@ function emailMinutes(m, t){
       </div>`);
     document.querySelectorAll(".rcpt[data-rcpt]").forEach(b=>b.onclick=e=>{ if(e.target.closest("[data-del-cc]")) return; b.classList.toggle("on"); });
     document.querySelectorAll("[data-del-cc]").forEach(x=>x.onclick=e=>{ e.stopPropagation(); const em=x.dataset.delCc.toLowerCase();
-      t.minutesCc=(t.minutesCc||[]).filter(v=>String(v).toLowerCase()!==em); save(); draw(); });
+      t.minutesCc=(t.minutesCc||[]).filter(v=>String(v).toLowerCase()!==em); mergeTeam(t.id, tt=>{ tt.minutesCc=JSON.parse(JSON.stringify(t.minutesCc)); }); draw(); });
     const addCc=()=>{ const i=$("#em-add"), v=(i&&i.value.trim())||""; if(!validEmail(v)){ alert("Enter a valid email address."); return; }
-      if(!(t.minutesCc||[]).some(e=>String(e).toLowerCase()===v.toLowerCase())) t.minutesCc.push(v); save(); draw(); };
+      if(!(t.minutesCc||[]).some(e=>String(e).toLowerCase()===v.toLowerCase())) t.minutesCc.push(v); mergeTeam(t.id, tt=>{ tt.minutesCc=JSON.parse(JSON.stringify(t.minutesCc)); }); draw(); };
     { const b=$("#em-add-btn"); if(b) b.onclick=addCc; const i=$("#em-add"); if(i) i.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addCc(); } }; }
     $("#em-copy").onclick=()=>{ const txt=minutesText(m);
       if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>{ const b=$("#em-copy"); if(b){ b.textContent="Copied ✓"; setTimeout(()=>{ if($("#em-copy")) $("#em-copy").textContent="Copy text"; },1500); } }).catch(()=>alert(txt)); }
