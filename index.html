@@ -4881,6 +4881,22 @@ function mergeTeam(teamId, applyTeam){
   if(MULTI){ mergeTeamMulti(teamId, applyTeam); return; }
   mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) applyTeam(st); });
 }
+// Merge a COMPANY-scoped change (V/TO, RPM, People Analyzer, name-claim, chart) onto the LATEST company doc —
+// re-read, apply just the delta, write in one guarded transaction. The company analog of mergeTeamMulti, so a
+// company edit is never lost to the sync-adopt race or refused on a version conflict. Single-doc → mergeSave.
+function mergeCompany(applyCompany){
+  if(!MULTI){ mergeSave(state=>applyCompany(state)); return; }
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; }
+  if(!fs || !fs.runTransaction){ save(true); return; }
+  const ref=fs.doc(WS_PATH), email=((firebase.auth().currentUser||{}).email)||"";
+  fs.runTransaction(tx=>tx.get(ref).then(snap=>{
+    const comp=(snap.exists&&snap.data()&&snap.data().state) ? snap.data().state : JSON.parse(JSON.stringify(companyOf(data)));
+    applyCompany(comp);
+    comp.teamOrder=(data.teams||[]).map(t=>t.id); comp.meta=comp.meta||{}; comp.meta.multiDoc=true; comp.meta.build=Math.max(BUILD, comp.meta.build||0);
+    const ts=Date.now(); tx.set(ref,{ state:comp, updatedAt:ts, updatedBy:email }); return { state:comp, at:ts };
+  })).then(res=>{ _companyState=res.state; _companyAt=res.at; _baseCompany=res.at; _shadowCompany=JSON.stringify(companyOf(data)); setSync("Saved"); })
+    .catch(e=>{ console.error("company merge tx failed — falling back",e); save(true); });
+}
 function saveL10(immediate){   // persist the current L10 team's meeting + to-dos/issues by merging into the latest server state
   const t=TEAM(); if(!t){ save(); return; } const teamId=t.id;
   const snapJson=JSON.stringify({ liveMeeting:(t.liveMeeting||null), todos:(t.todos||[]), issues:(t.issues||[]) });
@@ -5220,6 +5236,7 @@ function revertPerTeamStorage(){
 /* Test seam: exposes the per-team internals ONLY when a test flag is present (never set in production). */
 if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
+    mergeCompany, mergeTeam, saveRock, savePaRec, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -6892,7 +6909,9 @@ function claimName(name){
   data.people=data.people||[];
   const p=data.people.find(x=>x&&(x.email||"").trim().toLowerCase()===e);
   if(p) p.name=n; else data.people.push({email:e,name:n});
-  save(); if(booted) switchView(currentView);   // re-render: ownership (and so notifications) just changed
+  // merge just MY people entry onto the latest company doc (was plain save → could revert your name claim)
+  mergeCompany(comp=>{ comp.people=comp.people||[]; const cp=comp.people.find(x=>x&&(x.email||"").trim().toLowerCase()===e); if(cp) cp.name=n; else comp.people.push({email:e,name:n}); });
+  if(booted) switchView(currentView);   // re-render: ownership (and so notifications) just changed
 }
 // Every name the app knows about — members, Rock/To-Do owners, and seats on the chart.
 // Owners are free text, so the same person shows up as "Aaron" and "aaron". Dedupe
@@ -7025,6 +7044,13 @@ function paRec(person, quarter, make){
     data.pa.push(r); }
   return r||null;
 }
+// Persist ONE People-Analyzer record by MERGING it (by person+quarter) into the latest company doc, so a
+// rating click isn't lost to the sync-adopt race. Was plain save() at every PA edit site.
+function savePaRec(rec){ if(!rec) return; const person=rec.person, quarter=rec.quarter, copy=JSON.parse(JSON.stringify(rec));
+  mergeCompany(comp=>{ comp.pa=comp.pa||[]; const i=comp.pa.findIndex(x=>x&&sameName(x.person,person)&&x.quarter===quarter);
+    if(i>=0) comp.pa[i]=copy; else comp.pa.push(copy); }); }
+let _paSaveTimer=null;   // debounce the per-keystroke PA notes/QC-answer merge writes
+function savePaRecDebounced(rec){ clearTimeout(_paSaveTimer); _paSaveTimer=setTimeout(()=>savePaRec(rec),650); }
 /* THE BAR (your rule): any "-" on a core value, or any "No" on GWC, is below it.
    The training manual's non-negotiable: below the bar REQUIRES three behaviour-based
    examples — so the app refuses to complete a conversation without them. */
@@ -8132,7 +8158,8 @@ function renderVTO(){
     const arr=getVtoList(data.vto,sec).slice(), it=arr[i];
     arr[i]=(it&&typeof it==="object")?Object.assign({},it,{done:!it.done}):{text:it||"",done:true,owner:""};
     setVtoList(data.vto,sec,arr);
-    save(); renderVTO();
+    mergeCompany(comp=>{ comp.vto=comp.vto||{}; setVtoList(comp.vto, sec, JSON.parse(JSON.stringify(arr))); });   // merge only this V/TO list so a concurrent sync can't revert the tick
+    renderVTO();
   }; });
 }
 /* RPM — confidential Revenue / Profit / Profit% / Measurables, this quarter + next-quarter prediction.
@@ -8175,7 +8202,7 @@ function editRPM(){
   $("#rpm-save").onclick=()=>{
     data.vto.rpm={ current:{revenue:$("#rpm-cr").value.trim(),profit:$("#rpm-cp").value.trim(),profitPct:$("#rpm-cpp").value.trim(),measurables:$("#rpm-cm").value.trim()},
                    next:{revenue:$("#rpm-nr").value.trim(),profit:$("#rpm-np").value.trim(),profitPct:$("#rpm-npp").value.trim(),measurables:$("#rpm-nm").value.trim()} };
-    save(); closeSheet(); renderVTO(); setSync("RPM saved");
+    mergeCompany(comp=>{ comp.vto=comp.vto||{}; comp.vto.rpm=JSON.parse(JSON.stringify(data.vto.rpm)); }); closeSheet(); renderVTO(); setSync("RPM saved");
   };
 }
 /* Editor rows: text + owner. `done` rides on the row itself (data-done) rather than
@@ -8254,7 +8281,7 @@ function editVTO(key){
   }
   openSheet(`<h2>Edit — ${VTO_TITLES[key]||key}</h2>${body}<div class="sheet-actions"><button class="btn ghost" id="e-cancel">Cancel</button><button class="btn" id="e-save">Save</button></div>`);
   wireItemRows();
-  $("#e-save").onclick=()=>{ commit(); save(); closeSheet(); renderVTO(); };
+  $("#e-save").onclick=()=>{ commit(); mergeCompany(comp=>{ comp.vto=JSON.parse(JSON.stringify(data.vto)); }); closeSheet(); renderVTO(); };   // merge V/TO onto latest company doc (was plain save → could revert)
   $("#e-cancel").onclick=closeSheet;
 }
 
@@ -10519,8 +10546,8 @@ function scheduleQC(person){
     <div class="field"><label>Location <small>(optional — best on neutral ground, not your office)</small></label><input id="qc-loc" value="${esc(rec.qc.meetLoc||"")}" placeholder="e.g. conference room / coffee shop"></div>
     <div class="sheet-actions">${rec.qc.meetAt?'<button class="btn danger" id="qc-clear">Clear</button>':""}<button class="btn" id="qc-save">Save</button></div>`);
   $("#qc-save").onclick=()=>{ const d=$("#qc-date").value; if(!d){ $("#qc-date").focus(); return; }
-    rec.qc.meetAt=d; rec.qc.meetTime=$("#qc-time").value||""; rec.qc.meetLoc=$("#qc-loc").value.trim(); save(); closeSheet(); renderMyBoard(); };
-  const clr=$("#qc-clear"); if(clr) clr.onclick=()=>{ delete rec.qc.meetAt; delete rec.qc.meetTime; delete rec.qc.meetLoc; save(); closeSheet(); renderMyBoard(); };
+    rec.qc.meetAt=d; rec.qc.meetTime=$("#qc-time").value||""; rec.qc.meetLoc=$("#qc-loc").value.trim(); savePaRec(rec); closeSheet(); renderMyBoard(); };
+  const clr=$("#qc-clear"); if(clr) clr.onclick=()=>{ delete rec.qc.meetAt; delete rec.qc.meetTime; delete rec.qc.meetLoc; savePaRec(rec); closeSheet(); renderMyBoard(); };
 }
 
 let _mbCellTimers={};
@@ -10731,18 +10758,18 @@ function renderPeople(){
   // wire my self-assessment
   wrap.querySelectorAll('.pa-grid[data-scope="self"] [data-cv]').forEach(cell=>{
     cell.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>{
-      const r=paRec(me,q,true); r.self.v[cell.dataset.cv]=b.dataset.rate; r.self.at=todayIso(); r.self.by=myEmail(); save(); renderPeople(); });
+      const r=paRec(me,q,true); r.self.v[cell.dataset.cv]=b.dataset.rate; r.self.at=todayIso(); r.self.by=myEmail(); savePaRec(r); renderPeople(); });
   });
   wrap.querySelectorAll('.pa-grid[data-scope="self"] [data-gwc]').forEach(cell=>{
     cell.querySelectorAll("[data-yn]").forEach(b=>b.onclick=()=>{
-      const r=paRec(me,q,true); r.self[cell.dataset.gwc]=b.dataset.yn; r.self.at=todayIso(); r.self.by=myEmail(); save(); renderPeople(); });
+      const r=paRec(me,q,true); r.self[cell.dataset.gwc]=b.dataset.yn; r.self.at=todayIso(); r.self.by=myEmail(); savePaRec(r); renderPeople(); });
   });
   wrap.querySelectorAll("[data-open-pa]").forEach(b=>b.onclick=()=>{ paPerson=b.dataset.openPa; paQuarter=q; renderPeople(); });
   { const rb=$("#pp-reset-self"); if(rb) rb.onclick=()=>{
       const have=reports.filter(p=>{ const rr=paRec(p,q,false); return rr&&rateDone(rr.self); });
       if(!have.length){ alert(`None of your people have a self-assessment to reset for ${qLabel(q)}.`); return; }
       if(!confirm(`Reset the self-assessment for all ${have.length} of your ${have.length===1?"person":"people"} who submitted one this quarter (${qLabel(q)})?\n\nThis clears only what they entered about themselves, so they can start fresh. Your reads, final ratings and notes are untouched.`)) return;
-      have.forEach(p=>{ const rr=paRec(p,q,true); rr.self=blankRating(); }); save(); renderPeople();
+      have.forEach(p=>{ const rr=paRec(p,q,true); rr.self=blankRating(); }); mergeCompany(comp=>{ comp.pa=JSON.parse(JSON.stringify(data.pa)); }); renderPeople();
     }; }
 }
 
@@ -10899,36 +10926,36 @@ function renderPAWorksheet(){
   const back=()=>{ paPerson=null; renderPeople(); };
   $("#pa-back").onclick=back; $("#pa-back2").onclick=back;
   wrap.querySelectorAll('.pa-grid[data-scope="sup"] [data-cv]').forEach(c=>c.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>{
-    r.sup.v[c.dataset.cv]=b.dataset.rate; r.sup.at=todayIso(); r.sup.by=myEmail(); save(); renderPAWorksheet(); }));
+    r.sup.v[c.dataset.cv]=b.dataset.rate; r.sup.at=todayIso(); r.sup.by=myEmail(); savePaRec(r); renderPAWorksheet(); }));
   wrap.querySelectorAll('.pa-grid[data-scope="sup"] [data-gwc]').forEach(c=>c.querySelectorAll("[data-yn]").forEach(b=>b.onclick=()=>{
-    r.sup[c.dataset.gwc]=b.dataset.yn; r.sup.at=todayIso(); r.sup.by=myEmail(); save(); renderPAWorksheet(); }));
+    r.sup[c.dataset.gwc]=b.dataset.yn; r.sup.at=todayIso(); r.sup.by=myEmail(); savePaRec(r); renderPAWorksheet(); }));
   wrap.querySelectorAll('.pa-grid[data-scope="final"] [data-cv]').forEach(c=>c.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>{
-    r.final.v[c.dataset.cv]=b.dataset.rate; r.final.at=todayIso(); r.final.by=myEmail(); save(); renderPAWorksheet(); }));
+    r.final.v[c.dataset.cv]=b.dataset.rate; r.final.at=todayIso(); r.final.by=myEmail(); savePaRec(r); renderPAWorksheet(); }));
   wrap.querySelectorAll('.pa-grid[data-scope="final"] [data-gwc]').forEach(c=>c.querySelectorAll("[data-yn]").forEach(b=>b.onclick=()=>{
-    r.final[c.dataset.gwc]=b.dataset.yn; r.final.at=todayIso(); r.final.by=myEmail(); save(); renderPAWorksheet(); }));
-  wrap.querySelectorAll("[data-note]").forEach(t=>t.oninput=()=>{ r.notes[t.dataset.note]=t.value; save(); });
-  wrap.querySelectorAll("[data-qc]").forEach(t=>t.oninput=()=>{ r.qc[t.dataset.qc]=t.value; save(); });
-  $("#pa-copy").onclick=()=>{ r.final={v:Object.assign({},r.sup.v), g:r.sup.g, w:r.sup.w, c:r.sup.c, at:todayIso(), by:myEmail()}; save(); renderPAWorksheet(); };
+    r.final[c.dataset.gwc]=b.dataset.yn; r.final.at=todayIso(); r.final.by=myEmail(); savePaRec(r); renderPAWorksheet(); }));
+  wrap.querySelectorAll("[data-note]").forEach(t=>t.oninput=()=>{ r.notes[t.dataset.note]=t.value; savePaRecDebounced(r); });
+  wrap.querySelectorAll("[data-qc]").forEach(t=>t.oninput=()=>{ r.qc[t.dataset.qc]=t.value; savePaRecDebounced(r); });
+  $("#pa-copy").onclick=()=>{ r.final={v:Object.assign({},r.sup.v), g:r.sup.g, w:r.sup.w, c:r.sup.c, at:todayIso(), by:myEmail()}; savePaRec(r); renderPAWorksheet(); };
   $("#pa-complete").onclick=()=>{
     if(!rateDone(r.final)){ alert("Set the final rating on every Core Value and all three GWC first — the leader owns the final call."); return; }
     // The manual's non-negotiable rule, enforced rather than suggested.
     const miss=stillMissing();
     if(miss.length){ alert("Below the bar on: "+miss.map(b=>b.label).join(", ")+".\n\nThree behaviour-based examples are required for each before this conversation can be closed."); return; }
-    r.status="complete"; r.qc.held=todayIso(); save(); paPerson=null; renderPeople();
+    r.status="complete"; r.qc.held=todayIso(); savePaRec(r); paPerson=null; renderPeople();
   };
   { const pr=$("#pa-reset"); if(pr) pr.onclick=()=>{
       if(!confirm(`Reset ${person}'s ${qLabel(q)} conversation?\n\nThis clears your ratings, the final rating, the below-the-bar notes and the conversation answers, and re-opens it. ${person}'s own self-assessment is kept.`)) return;
       r.sup=blankRating(); r.final=blankRating(); r.notes={}; r.qc={}; r.status="open";
-      save(); renderPAWorksheet();
+      savePaRec(r); renderPAWorksheet();
     }; }
   { const pd=$("#pa-delete"); if(pd) pd.onclick=()=>{
       if(!confirm(`Delete ${person}'s ${qLabel(q)} conversation entirely?\n\nThis removes the whole record — your read, their self-assessment, the notes and the completion — from ${person}'s history. This can't be undone.`)) return;
       data.pa=(data.pa||[]).filter(x=>!(x&&sameName(x.person,person)&&x.quarter===q));
-      save(); paPerson=null; renderPeople();
+      mergeCompany(comp=>{ comp.pa=(comp.pa||[]).filter(x=>!(x&&sameName(x.person,person)&&x.quarter===q)); }); paPerson=null; renderPeople();
     }; }
   { const rs=$("#pa-reset-self"); if(rs) rs.onclick=()=>{
       if(!confirm(`Reset ${person}'s self-assessment for ${qLabel(q)}?\n\nThis clears only the ratings ${person} entered about themselves, so they can fill it in again. Your read, the final rating and your notes stay put.`)) return;
-      r.self=blankRating(); save(); renderPAWorksheet();
+      r.self=blankRating(); savePaRec(r); renderPAWorksheet();
     }; }
 }
 // A person's 13-week trend for one measurable — "trends matter more than any single week"
