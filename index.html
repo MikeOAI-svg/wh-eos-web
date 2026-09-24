@@ -1545,6 +1545,50 @@
     .p-sc-c.r{background:#fadddd; color:#c62828; font-weight:700}
     .p-sc-c.empty{color:#c2c8d0}
     .p-sc tr{break-inside:avoid}
+    /* L10 Minutes → PDF (printMinutes): the on-screen "View Minutes" markup, tuned for paper */
+    .min-print{color:#14171c; font-size:13px; line-height:1.55}
+    .min-print .min-sec{border-top:1px solid #e2e5ea; padding-top:12px; margin-top:14px; break-inside:avoid}
+    .min-print .min-sec:first-child{border-top:0; margin-top:4px}
+    .min-print .min-sec h4{margin:0 0 8px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; color:#d85e16}
+    .min-print .min-sec p{margin:0; font-size:13px; line-height:1.55}
+    .min-print .min-list{margin:0; padding-left:19px}
+    .min-print .min-list li{font-size:13px; line-height:1.5; margin-bottom:5px}
+    .min-print .min-issue{background:#f6f7f9; border:1px solid #e2e5ea; border-radius:8px; padding:9px 12px; margin-bottom:8px; break-inside:avoid}
+    .min-print .min-row{margin-top:5px; font-size:12.5px; line-height:1.5}
+    .min-print .min-row span{display:block; font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#8a93a0}
+    .min-print .min-by{display:inline-block; margin-left:8px; font-size:10.5px; font-weight:700; color:#d85e16; background:#fbe7d8; border-radius:6px; padding:1px 7px}
+    .min-print .from-issue{font-size:11px; color:#5b6472; margin-top:2px}
+    /* BLUF pill strip */
+    .min-print .min-blf{display:flex; flex-direction:column; gap:6px; background:#f6f7f9; border:1px solid #e2e5ea; border-radius:10px; padding:10px 14px; margin-bottom:4px}
+    .min-print .min-blf-row{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+    .min-print .min-blf-lbl{font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#5b6472; min-width:112px}
+    .min-print .min-blf-tot{font-size:11px; color:#5b6472}
+    .min-print .pill{font-size:10.5px; font-weight:800; padding:1px 9px; border-radius:20px}
+    .min-print .pill.green{background:#dff3e6; color:#1f7a44}
+    .min-print .pill.red{background:#fadddd; color:#c62828}
+    .min-print .pill.amber{background:#fbf1cd; color:#9a6b00}
+    .min-print .pill.grey{background:#edeff2; color:#5b6472}
+    /* Scorecard grid — fit all 13 weeks on portrait */
+    .min-print .min-scroll{overflow:visible}
+    .min-print .min-sc{min-width:0; width:100%; font-size:8px; table-layout:fixed}
+    .min-print .min-sc th,.min-print .min-sc td{border:1px solid #c7ccd4; padding:2px 3px}
+    .min-print .min-sc th{background:#f1f2f4; color:#5b6472}
+    .min-print .min-sc-n{width:118px; font-size:9px}
+    .min-print .min-sc-o{font-size:7.5px; color:#5b6472}
+    .min-print .min-sc-goal{width:64px; font-size:8px; color:#5b6472}
+    .min-print .min-sc-tr.good{color:#1f7a44}.min-print .min-sc-tr.warn{color:#9a6b00}.min-print .min-sc-tr.bad{color:#c62828}
+    .min-print .min-sc-c.g{background:#dff3e6; color:#1f7a44}
+    .min-print .min-sc-c.r{background:#fadddd; color:#c62828}
+    .min-print .min-sc-c.e{color:#c2c8d0}
+    /* Rocks list */
+    .min-print .min-rk{font-size:12.5px; line-height:1.5; margin-bottom:6px; break-inside:avoid}
+    .min-print .min-rk-p{display:inline-block; font-size:10px; font-weight:800; padding:1px 8px; border-radius:20px; margin-right:5px}
+    .min-print .min-rk-p.on{background:#dff3e6; color:#1f7a44}
+    .min-print .min-rk-p.off{background:#fadddd; color:#c62828}
+    .min-print .min-rk-p.done{background:#edeff2; color:#5b6472}
+    .min-print .min-rk-p.notdone{background:#dc2626; color:#fff}
+    .min-print .rate-row{display:inline-flex; gap:8px; align-items:baseline; border:1px solid #e2e5ea; border-radius:8px; padding:4px 10px; margin:0 8px 8px 0; font-size:12.5px}
+    .min-print .rate-row b{color:#14171c}
     /* Accountability Chart prints as the SAME List view (seatListHtml) — just drop the Edit buttons */
     .ac-list-print .vto-editbtn{display:none}
     .ac-list-print .seat-head{break-inside:avoid}   /* keep a seat's role+name together, but let long branches flow across pages */
@@ -4735,7 +4779,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=148;
+const BUILD=149;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5271,7 +5315,7 @@ function revertPerTeamStorage(){
 if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
-    meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, get BUILD(){return BUILD;},
+    meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -9749,8 +9793,9 @@ function emailMinutes(m, t){
   };
   draw();
 }
-function showMinutes(id){
-  const m=(TEAM().meetings||[]).find(x=>x.id===id); if(!m) return;
+// The body of the minutes — the same markup drives the on-screen sheet AND the print/PDF layout,
+// so the downloaded PDF looks exactly like "View Minutes".
+function minutesInnerHtml(m){
   const n=m.notes||{};
   const sec=(t,body)=>body?`<div class="min-sec"><h4>${t}</h4>${body}</div>`:"";
   // WIFLS / Headlines captured per person → show who said what.
@@ -9766,10 +9811,7 @@ function showMinutes(id){
   const reviewed=(m.reviewedTodos||[]).map(t=>`<li>${t.done?"✓":"○"} <span class="${t.done?"tdl-txt done":""}">${esc(t.text)}</span> — <b>${esc(t.owner||"unassigned")}</b>${t.due?` · due ${fmtShort(t.due)}`:""}</li>`).join("");
   const reviewedHdr=(m.reviewedTodos||[]).length?`Last Week's To-Dos <small style="font-weight:600;color:var(--muted)">· ${m.reviewedTodos.filter(t=>t.done).length} done, ${m.reviewedTodos.filter(t=>!t.done).length} not done</small>`:"";
   const rl=(m.ratingList||[]).map(r=>`<div class="rate-row"><div>${esc(r.name)}</div><b>${esc(String(r.score))}/10</b></div>`).join("");
-  openSheet(`
-    <h2>L10 Minutes</h2>
-    <div class="min-head">${fmtLong(m.date)} · ${m.durationMin} min · ${esc(m.team||TEAM().name)}${m.avg?` · Avg ${m.avg}/10`:""}</div>
-    ${blufHtml(m.summary)}
+  return `${blufHtml(m.summary)}
     ${sec("WIFLS", pBlock("segue")+(n.segue?`<p>${nl2br(n.segue)}</p>`:""))}
     ${sec("Scorecard", n.scorecard?`<p>${nl2br(n.scorecard)}</p>`:"")}
     ${sec(m.scorecardSnap?`Scorecard — ${esc(m.scorecardSnap.quarter)}`:"", scorecardSnapHtml(m.scorecardSnap))}
@@ -9780,12 +9822,39 @@ function showMinutes(id){
     ${sec("New To-Dos", todos?`<ul class="min-list">${todos}</ul>`:"")}
     ${sec("Cascading Messages", n.cascade?`<p>${nl2br(n.cascade)}</p>`:"")}
     ${sec("Ratings", rl)}
-    ${(!n.segue&&!n.scorecard&&!n.headlines&&!issues&&!todos&&!reviewed&&!n.cascade&&!rl)?'<div class="hint">This meeting was finished without any notes recorded.</div>':""}
+    ${(!n.segue&&!n.scorecard&&!n.headlines&&!issues&&!todos&&!reviewed&&!n.cascade&&!rl)?'<div class="hint">This meeting was finished without any notes recorded.</div>':""}`;
+}
+// Render the minutes into the print layer and open the browser's print dialog — the user picks
+// "Save as PDF" (or a printer). Same offline, no-library path as the V/TO packet.
+function printMinutes(m){
+  const doc=$("#printDoc"); if(!doc) return;
+  const dateStr=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  doc.innerHTML=`<div class="p-vto-head"><img class="p-vto-logo" src="${MARK_LIGHT}" alt="Warriors Heart">
+      <div><div class="p-vto-title">Level 10 Meeting — Minutes</div>
+        <div class="p-vto-sub">${esc(m.team||TEAM().name)} · ${esc(fmtLong(m.date))} · ${m.durationMin} min${m.avg?` · Avg ${m.avg}/10`:""}</div></div></div>
+    <div class="min-print">${minutesInnerHtml(m)}</div>`;
+  // A minutes document reads best on PORTRAIT — override the base landscape @page, then remove the override
+  // afterward so the V/TO and chart prints stay landscape.
+  let st=document.getElementById("minDynPage"); if(!st){ st=document.createElement("style"); st.id="minDynPage"; document.head.appendChild(st); }
+  st.textContent=`@media print{@page{size:portrait; margin:14mm}}`;
+  const cleanup=()=>{ const s=document.getElementById("minDynPage"); if(s) s.remove(); window.removeEventListener("afterprint",cleanup); };
+  window.addEventListener("afterprint",cleanup);
+  setTimeout(()=>{ window.print(); setTimeout(cleanup,1500); }, 30);   // fallback if afterprint never fires
+}
+function showMinutes(id){
+  const m=(TEAM().meetings||[]).find(x=>x.id===id); if(!m) return;
+  const n=m.notes||{};
+  openSheet(`
+    <h2>L10 Minutes</h2>
+    <div class="min-head">${fmtLong(m.date)} · ${m.durationMin} min · ${esc(m.team||TEAM().name)}${m.avg?` · Avg ${m.avg}/10`:""}</div>
+    ${minutesInnerHtml(m)}
     <div class="sheet-actions">
       <button class="btn danger" id="min-del">Delete</button>
+      <button class="btn ghost" id="min-pdf">⬇ PDF</button>
       <button class="btn ghost" id="min-copy">Copy</button>
       <button class="btn" id="min-email">Email</button>
     </div>`);
+  { const b=$("#min-pdf"); if(b) b.onclick=()=>printMinutes(m); }
   $("#min-email").onclick=()=>emailMinutes(m, TEAM());
   $("#min-copy").onclick=()=>{
     const txt=minutesText(m);
