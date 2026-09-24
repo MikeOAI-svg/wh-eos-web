@@ -846,6 +846,24 @@
   .min-issue{background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:14px}
   .min-row{margin-top:5px;font-size:13px;line-height:1.5}
   .min-row span{display:block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  /* Scorecard + Rocks snapshots inside the minutes view */
+  .min-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .min-sc{border-collapse:collapse;font-size:11px;width:100%;min-width:640px}
+  .min-sc th,.min-sc td{border:1px solid var(--border);padding:3px 5px;text-align:center;white-space:nowrap}
+  .min-sc th{font-size:9.5px;font-weight:800;color:var(--muted);background:var(--bg)}
+  .min-sc-n{text-align:left!important;font-weight:700}
+  .min-sc-o{font-size:9.5px;font-weight:600;color:var(--muted)}
+  .min-sc-goal{text-align:left!important;font-size:10px;color:var(--muted)}
+  .min-sc-tr{font-weight:800}.min-sc-tr.good{color:#1f9d55}.min-sc-tr.warn{color:#c98a00}.min-sc-tr.bad{color:#e0483d}
+  .min-sc-c.g{background:rgba(31,157,85,.16);color:#1f9d55;font-weight:700}
+  .min-sc-c.r{background:rgba(224,72,61,.16);color:#e0483d;font-weight:700}
+  .min-sc-c.e{color:var(--faint)}
+  .min-rk{font-size:13px;line-height:1.5;margin-bottom:6px}
+  .min-rk-p{display:inline-block;font-size:10px;font-weight:800;padding:1px 7px;border-radius:20px;margin-right:5px}
+  .min-rk-p.on{background:rgba(31,157,85,.16);color:#1f9d55}
+  .min-rk-p.off{background:rgba(224,72,61,.16);color:#e0483d}
+  .min-rk-p.done{background:var(--bg);color:var(--muted)}
+  .min-rk-p.notdone{background:#dc2626;color:#fff}
 
   /* ================= COMPANY ROCKS ROLL-UP ================= */
   .co-summary{display:flex;gap:8px;margin:2px 0 10px}
@@ -4717,7 +4735,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=147;
+const BUILD=148;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5252,7 +5270,8 @@ function revertPerTeamStorage(){
 /* Test seam: exposes the per-team internals ONLY when a test flag is present (never set in production). */
 if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
-    mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml, get BUILD(){return BUILD;},
+    mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
+    meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -9587,6 +9606,56 @@ function blufHtml(s){ if(!s) return "";
       ${sc.total?`${pill("green",sc.on+" on track")}${sc.off?pill("red",sc.off+" off track"):""}${sc.blank?pill("grey",sc.blank+" no data"):""}<span class="min-blf-tot">of ${sc.total}</span>`:'<span class="min-blf-tot">no measurables</span>'}</div>
   </div>`;
 }
+/* Snapshots of the team's Scorecard + Rocks taken WHEN the meeting concludes, so the minutes report
+   exactly what was reviewed that day and stay accurate even after the numbers move next week. Stored on
+   the meeting record (m.scorecardSnap / m.rocksSnap) and rendered into both the copy/email text and the
+   on-screen minutes. Old meetings (pre-147) simply have no snapshot and show nothing extra. */
+function meetingScorecardSnap(t){
+  const w1=t.week1Start||firstMondayOfQuarter(), board=measuresOnBoard(t);
+  if(!board.length) return null;
+  const rows=board.map(({m,mirror})=>{ let on=0,off=0; const cells=[];
+    for(let i=0;i<13;i++){ const e=(m.values&&m.values[i])||null, v=e?(e.v||""):"", s=e?(e.s||""):""; cells.push({v,s}); if(s==="on")on++; else if(s==="off")off++; }
+    return {name:m.name||"", owner:m.owner||"", goal:m.goal||"", mirror:!!mirror, cells, on, tot:on+off}; });
+  return {quarter:quarterLabel(w1), rows};
+}
+function meetingRocksSnap(t){
+  const board=rocksOnBoard(t); if(!board.length) return null;
+  const st=rockStats(board.map(x=>x.r));
+  return {quarter:quarterLabel(t.week1Start), n:st.n, done:st.done, pct:st.pct,
+    rows:board.map(({r})=>({title:r.title||"", owner:r.owner||"", status:r.status||"on", pct:rockPct(r)}))};
+}
+const ROCK_LABEL={on:"On Track", off:"Off Track", done:"Done", notdone:"Not Done"};
+function scorecardSnapTextLines(sc){
+  if(!sc||!sc.rows||!sc.rows.length) return [];
+  const L=[`\nSCORECARD — ${sc.quarter}`];
+  sc.rows.forEach(r=>{
+    L.push(`  • ${r.name}${r.owner?` (${r.owner})`:""}${r.goal?` — goal ${r.goal}`:""}${r.mirror?" ↔":""} — ${r.tot?`${r.on}/${r.tot} on track`:"no data yet"}`);
+    const wk=[]; r.cells.forEach((c,i)=>{ if(c.v!==""||c.s) wk.push(`W${i+1} ${c.v===""?"·":c.v}${c.s==="on"?"✓":c.s==="off"?"✗":""}`); });
+    if(wk.length) L.push("      "+wk.join("  "));
+  });
+  return L;
+}
+function rocksSnapTextLines(rk){
+  if(!rk||!rk.rows||!rk.rows.length) return [];
+  const L=[`\nROCKS — ${rk.quarter}${rk.n?` · ${rk.done}/${rk.n} done (${rk.pct}%)`:""}`];
+  rk.rows.forEach(r=>L.push(`  • [${ROCK_LABEL[r.status]||"On Track"}] ${r.title||"(untitled)"} — ${r.owner||"unassigned"} — ${r.pct}%`));
+  return L;
+}
+function scorecardSnapHtml(sc){
+  if(!sc||!sc.rows||!sc.rows.length) return "";
+  const rows=sc.rows.map(r=>{
+    const cells=r.cells.map((c,i)=>`<td class="min-sc-c ${c.s==="on"?"g":c.s==="off"?"r":c.v===""&&!c.s?"e":""}">${c.v===""?"·":esc(c.v)}</td>`).join("");
+    const rate=r.tot?Math.round(r.on/r.tot*100):null, rcls=rate===null?"":rate>=80?"good":rate>=50?"warn":"bad";
+    return `<tr><td class="min-sc-n">${esc(r.name)}${r.mirror?' <span class="mir-tag">↔</span>':""}<div class="min-sc-o">${esc(r.owner||"—")}</div></td>
+      <td class="min-sc-goal">${esc(r.goal||"")}</td><td class="min-sc-tr ${rcls}">${r.tot?r.on+"/"+r.tot:"—"}</td>${cells}</tr>`; }).join("");
+  let head=`<tr><th>Measurable</th><th>Goal</th><th>On</th>`; for(let i=0;i<13;i++) head+=`<th>W${i+1}</th>`; head+=`</tr>`;
+  return `<div class="min-scroll"><table class="min-sc"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+function rocksSnapHtml(rk){
+  if(!rk||!rk.rows||!rk.rows.length) return "";
+  return rk.rows.map(r=>{ const cls=r.status==="done"?"done":r.status==="notdone"?"notdone":r.status==="off"?"off":"on";
+    return `<div class="min-rk"><span class="min-rk-p ${cls}">${ROCK_LABEL[r.status]||"On Track"}</span> <b>${esc(r.title||"(untitled)")}</b> — ${esc(r.owner||"unassigned")} · ${r.pct}%</div>`; }).join("");
+}
 function minutesText(m){
   const n=m.notes||{}, L=[];
   L.push(`L10 MINUTES — ${m.team||TEAM().name}`);
@@ -9601,7 +9670,9 @@ function minutesText(m){
     if(n[k]) L.push(String(n[k]).trim());
   };
   personSec("segue","WIFLS");
-  if(n.scorecard) L.push(`\nSCORECARD\n${n.scorecard}`);
+  if(n.scorecard) L.push(`\nSCORECARD NOTES\n${n.scorecard}`);
+  scorecardSnapTextLines(m.scorecardSnap).forEach(x=>L.push(x));   // the numbers reviewed this meeting
+  rocksSnapTextLines(m.rocksSnap).forEach(x=>L.push(x));           // Rock status reviewed this meeting
   personSec("headlines","HEADLINES");
   if((m.issues||[]).length){
     L.push(`\nISSUES SOLVED (IDS)`);
@@ -9701,6 +9772,8 @@ function showMinutes(id){
     ${blufHtml(m.summary)}
     ${sec("WIFLS", pBlock("segue")+(n.segue?`<p>${nl2br(n.segue)}</p>`:""))}
     ${sec("Scorecard", n.scorecard?`<p>${nl2br(n.scorecard)}</p>`:"")}
+    ${sec(m.scorecardSnap?`Scorecard — ${esc(m.scorecardSnap.quarter)}`:"", scorecardSnapHtml(m.scorecardSnap))}
+    ${sec(m.rocksSnap?`Rocks — ${esc(m.rocksSnap.quarter)}${m.rocksSnap.n?` · ${m.rocksSnap.done}/${m.rocksSnap.n} done`:""}`:"", rocksSnapHtml(m.rocksSnap))}
     ${sec("Headlines", pBlock("headlines")+(n.headlines?`<p>${nl2br(n.headlines)}</p>`:""))}
     ${sec("Issues Solved (IDS)", issues)}
     ${sec(reviewedHdr, reviewed?`<ul class="min-list">${reviewed}</ul>`:"")}
@@ -10123,7 +10196,8 @@ function concludeMeeting(auto){
   const rec={id:"m_"+(meeting.startedAt||Date.now()),date:meeting.date,durationMin,avg,   // deterministic id (from start time) so two clients auto-concluding the same L10 file ONE record, not two
     ratings:{...meeting.ratings}, ratingList,
     notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
-    issues:(meeting.solvedIssues||[]), team:t.name, summary:meetingSummary(t)};
+    issues:(meeting.solvedIssues||[]), team:t.name, summary:meetingSummary(t),
+    scorecardSnap:meetingScorecardSnap(t), rocksSnap:meetingRocksSnap(t)};   // freeze the numbers + Rock status reviewed today
   t.meetings.push(rec);
   t.liveMeeting=null;
   // Persist by MERGING into the latest server state — file the minutes, end the meeting, and keep every
