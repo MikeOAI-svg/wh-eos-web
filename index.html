@@ -1571,11 +1571,15 @@
     /* Scorecard grid — fit all 13 weeks on portrait */
     .min-print .min-scroll{overflow:visible}
     .min-print .min-sc{min-width:0; width:100%; font-size:8px; table-layout:fixed}
-    .min-print .min-sc th,.min-print .min-sc td{border:1px solid #c7ccd4; padding:2px 3px}
+    .min-print .min-sc th,.min-print .min-sc td{border:1px solid #c7ccd4; padding:2px 3px; vertical-align:top}
     .min-print .min-sc th{background:#f1f2f4; color:#5b6472}
-    .min-print .min-sc-n{width:118px; font-size:9px}
-    .min-print .min-sc-o{font-size:7.5px; color:#5b6472}
-    .min-print .min-sc-goal{width:64px; font-size:8px; color:#5b6472}
+    /* The measurable name + goal must WRAP (long names like "VA New Hire Initial Compliance Completed")
+       instead of overflowing into the next column — the on-screen grid keeps them nowrap for the scroll. */
+    .min-print .min-sc-n{width:150px; font-size:9px; white-space:normal; word-break:break-word; line-height:1.25}
+    .min-print .min-sc-o{font-size:7.5px; color:#5b6472; white-space:normal}
+    .min-print .min-sc-goal{width:58px; font-size:8px; color:#5b6472; white-space:normal; word-break:break-word; line-height:1.25}
+    .min-print .min-sc-tr{width:26px}
+    .min-print .min-sc-w{width:31px}
     .min-print .min-sc-tr.good{color:#1f7a44}.min-print .min-sc-tr.warn{color:#9a6b00}.min-print .min-sc-tr.bad{color:#c62828}
     .min-print .min-sc-c.g{background:#dff3e6; color:#1f7a44}
     .min-print .min-sc-c.r{background:#fadddd; color:#c62828}
@@ -4779,7 +4783,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=149;
+const BUILD=150;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -9692,7 +9696,7 @@ function scorecardSnapHtml(sc){
     const rate=r.tot?Math.round(r.on/r.tot*100):null, rcls=rate===null?"":rate>=80?"good":rate>=50?"warn":"bad";
     return `<tr><td class="min-sc-n">${esc(r.name)}${r.mirror?' <span class="mir-tag">↔</span>':""}<div class="min-sc-o">${esc(r.owner||"—")}</div></td>
       <td class="min-sc-goal">${esc(r.goal||"")}</td><td class="min-sc-tr ${rcls}">${r.tot?r.on+"/"+r.tot:"—"}</td>${cells}</tr>`; }).join("");
-  let head=`<tr><th>Measurable</th><th>Goal</th><th>On</th>`; for(let i=0;i<13;i++) head+=`<th>W${i+1}</th>`; head+=`</tr>`;
+  let head=`<tr><th class="min-sc-n">Measurable</th><th class="min-sc-goal">Goal</th><th class="min-sc-tr">On</th>`; for(let i=0;i<13;i++) head+=`<th class="min-sc-w">W${i+1}</th>`; head+=`</tr>`;
   return `<div class="min-scroll"><table class="min-sc"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
 function rocksSnapHtml(rk){
