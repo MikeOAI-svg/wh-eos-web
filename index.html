@@ -4783,7 +4783,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=151;
+const BUILD=152;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5320,7 +5320,7 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
     meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
-    acDownloadPDF, acExportSVG, get BUILD(){return BUILD;},
+    acDownloadPDF, acExportSVG, acChartPNG, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -6849,11 +6849,39 @@ function acExportSVG(){
   const o=acPrintOpts();
   const cfg=acCfg({fit:"one", orient:o.orient, lma:o.lma, cols:o.cols, marks:false});
   const lay=acLayoutFor(null, cfg); if(!lay) return null;
-  const b=lay.bounds, w=Math.max(1,Math.round(b.w)), h=Math.max(1,Math.round(b.h));
+  const b=lay.bounds;
+  // Branded header band ABOVE the chart — logo + title + date + a COLOR LEGEND. Lives in acExportSVG so it
+  // appears on BOTH the PNG (rastered from here) and the zoomable PDF (built from here). The legend swatches
+  // reuse PRINT_SEAT_COLORS, so they match the seat boxes exactly. Sized in the chart's own units.
+  const M=28, logoH=76, logoW=200, FONT="Segoe UI,Helvetica,Arial,sans-serif";
+  const gapRow=18, legendH=22, headH=M+logoH+gapRow+legendH+M;   // two rows: logo/title, then legend
+  const title=(acDoc().title||"Accountability Chart")+(acDraftMode?" — DRAFT":"");
+  const dateStr=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  // Legend — the seat-colour key (label text supplied by the org's convention).
+  const LEG=[["orange","Visionary"],["yellow","Shared Services"],["green","Local Operation"],
+             ["red","Direct Reports"],["","Staff"],["grey","Build-To Positions"]];
+  const SW=20, SWGAP=7, CHIPGAP=26, LFONT=15;
+  const chips=LEG.map(([key,label])=>({key,label,w:SW+SWGAP+Math.ceil(label.length*7.7)+2}));
+  let legendW=0; chips.forEach((c,i)=>{ legendW+=c.w+(i<chips.length-1?CHIPGAP:0); });
+  const titleRowMinW=logoW+22+Math.max(title.length,18)*16;
+  const vx=b.x, vy=b.y-headH, vw=Math.max(b.w, Math.max(legendW, titleRowMinW)+2*M), vh=b.h+headH;
+  const w=Math.max(1,Math.round(vw)), h=Math.max(1,Math.round(vh));
+  const lx=vx+M, ly=vy+M, tx=lx+logoW+22;
+  const legY=vy+M+logoH+gapRow;                                  // top of the legend row
+  let cx=vx+M, legend="";
+  chips.forEach(c=>{ const pc=PRINT_SEAT_COLORS[c.key]||PRINT_SEAT_COLORS[""];
+    legend+=`<rect x="${cx.toFixed(1)}" y="${legY.toFixed(1)}" width="${SW}" height="18" rx="3" fill="${pc.fill}" stroke="${pc.border}" stroke-width="1.2"/>`
+      + `<text x="${(cx+SW+SWGAP).toFixed(1)}" y="${(legY+14).toFixed(1)}" font-family="${FONT}" font-size="${LFONT}" fill="#14171c">${esc(c.label)}</text>`;
+    cx+=c.w+CHIPGAP; });
+  const head=`<image href="${MARK_LIGHT}" xlink:href="${MARK_LIGHT}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" width="${logoW}" height="${logoH}" preserveAspectRatio="xMinYMid meet"/>`
+    + `<text x="${tx.toFixed(1)}" y="${(ly+logoH*0.46).toFixed(1)}" font-family="${FONT}" font-size="31" font-weight="700" fill="#14171c">${esc(title)}</text>`
+    + `<text x="${tx.toFixed(1)}" y="${(ly+logoH*0.46+27).toFixed(1)}" font-family="${FONT}" font-size="16" fill="#5b6472">Warriors Heart · ${esc(dateStr)}</text>`
+    + legend
+    + `<line x1="${(vx+M).toFixed(1)}" y1="${(b.y-8).toFixed(1)}" x2="${(vx+vw-M).toFixed(1)}" y2="${(b.y-8).toFixed(1)}" stroke="#d85e16" stroke-width="2.5"/>`;
   // An explicit white ground: without it a PNG pastes transparent and the dark text vanishes on a dark slide.
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${b.x.toFixed(1)} ${b.y.toFixed(1)} ${b.w.toFixed(1)} ${b.h.toFixed(1)}">`
-    + `<rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="#ffffff"/>`
-    + lay.svg + `</svg>`;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="${vx.toFixed(1)} ${vy.toFixed(1)} ${vw.toFixed(1)} ${vh.toFixed(1)}">`
+    + `<rect x="${vx.toFixed(1)}" y="${vy.toFixed(1)}" width="${vw.toFixed(1)}" height="${vh.toFixed(1)}" fill="#ffffff"/>`
+    + head + lay.svg + `</svg>`;
   return {svg, w, h};
 }
 function acCopyFallback(t, ok){
