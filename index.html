@@ -4783,7 +4783,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=150;
+const BUILD=151;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5319,7 +5319,8 @@ function revertPerTeamStorage(){
 if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
-    meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes, get BUILD(){return BUILD;},
+    meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
+    acDownloadPDF, acExportSVG, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -6905,6 +6906,30 @@ function acCopyPNG(){
     } else acSaveBlob(blob, "accountability-chart.png");
   });
 }
+// Download the whole chart as ONE vector PDF page sized to the chart itself — so it zooms in infinitely
+// and stays razor-sharp (like a Keynote export), unlike the raster PNG which blurs when you zoom. Reuses
+// the same export SVG (self-contained: its own white ground + inline colors), so the on-screen chart is
+// untouched. Goes through the browser's Print → "Save as PDF" (no PDF library, no canvas taint).
+function acDownloadPDF(){
+  const ex=acExportSVG(); if(!ex){ setSync("Nothing to export — no seats in this view", true); return; }
+  const doc=$("#printDoc"); if(!doc) return;
+  // Fit ONE page to the chart's own aspect ratio, capped so it never tiles into multiple sheets. Because
+  // the page is vector, a "small" page still zooms in perfectly crisp — the size only sets the 100% view.
+  const DPI=96, MAXIN=42;
+  let win=ex.w/DPI, hin=ex.h/DPI; const long=Math.max(win,hin);
+  if(long>MAXIN){ const k=MAXIN/long; win*=k; hin*=k; }
+  win=Math.max(1,win); hin=Math.max(1,hin);
+  const svg=ex.svg.replace(/^<svg /, `<svg style="display:block;width:${win.toFixed(2)}in;height:${hin.toFixed(2)}in" `);
+  doc.innerHTML=`<div class="ac-pdf">${svg}</div>`;
+  // A single custom-sized page holds the whole chart. Remove the override afterward so a later V/TO or
+  // minutes print isn't stuck at this odd page size.
+  let st=document.getElementById("acDynPage"); if(!st){ st=document.createElement("style"); st.id="acDynPage"; document.head.appendChild(st); }
+  st.textContent=`@media print{@page{size:${win.toFixed(2)}in ${hin.toFixed(2)}in; margin:0} .ac-pdf{margin:0;padding:0;line-height:0}}`;
+  const cleanup=()=>{ const s=document.getElementById("acDynPage"); if(s) s.remove(); window.removeEventListener("afterprint",cleanup); };
+  window.addEventListener("afterprint",cleanup);
+  setSync("Opening print — choose “Save as PDF” for a zoomable chart");
+  setTimeout(()=>{ window.print(); setTimeout(cleanup,1500); }, 40);   // fallback if afterprint never fires
+}
 // Every seat in the current scope, depth-first. Collapsed branches ARE included: a collapse is a way of
 // looking at the chart, not a statement that those seats don't exist, and a half-exported table is useless.
 function acExportRows(){
@@ -6946,14 +6971,17 @@ function openAcCopyOptions(){
   const row=(label,id,icon,text,hint)=>`<div class="acpo-row"><label>${label}</label>`
     + `<button type="button" class="btn wide" id="${id}">${icon} ${text}</button>`
     + `<div class="acpo-hint">${hint}</div></div>`;
-  openSheet(`<h2>Copy the chart</h2>
-    <div class="hint" style="margin:-4px 2px 12px">Copies <b>${n}</b> seat${n===1?"":"s"} from ${where}${filt}${acDraftMode?" (<b>draft</b> chart)":""}.</div>
-    ${row("Picture","cp-png","🖼","Copy as an image","Paste straight into PowerPoint, Google Slides, Word, Slack or an email. Best for showing the chart.")}
+  openSheet(`<h2>Download / copy the chart</h2>
+    <div class="hint" style="margin:-4px 2px 12px">From ${where}${filt}${acDraftMode?" (<b>draft</b> chart)":""} — <b>${n}</b> seat${n===1?"":"s"}.</div>
+    ${row("Best for zooming ★","cp-pdf","⤢","Download zoomable PDF","One vector page — zoom in as far as you want and it stays razor-sharp, like a Keynote export. Opens “Save as PDF”. The best way to share or present the whole chart.")}
+    ${row("Picture","cp-png","🖼","Copy as an image","Paste straight into PowerPoint, Google Slides, Word, Slack or an email. A fixed-size image — it blurs if you zoom in far.")}
     ${row("Vector","cp-svg","◇","Copy as SVG","Stays sharp at any size and every box is still editable. Paste into Figma, Illustrator, Lucidchart or Miro.")}
     ${row("Data","cp-tsv","▦","Copy as a table","A row per seat with who it reports to. Paste into Excel or Google Sheets — this is also the shape org-chart tools import.")}
     ${row("Text","cp-txt","≡","Copy as an outline","Indented plain text with each seat's responsibilities. Paste into Word, Notion or an email.")}
-    <div class="sheet-actions"><button class="btn ghost" id="cp-cancel">Close</button><button class="btn ghost" id="cp-dl">⤓ Download PNG</button></div>`);
+    <div class="sheet-actions"><button class="btn ghost" id="cp-cancel">Close</button><button class="btn ghost" id="cp-dl">⤓ PNG file</button><button class="btn" id="cp-pdf2">⤢ Zoomable PDF</button></div>`);
   const go=fn=>()=>{ closeSheet(); setTimeout(fn, 40); };   // let the sheet close before the clipboard write
+  $("#cp-pdf").onclick=go(acDownloadPDF);
+  $("#cp-pdf2").onclick=go(acDownloadPDF);
   $("#cp-png").onclick=go(acCopyPNG);
   $("#cp-svg").onclick=go(()=>{ const ex=acExportSVG();
     if(!ex){ setSync("Nothing to copy — no seats in this view", true); return; }
