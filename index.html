@@ -4783,7 +4783,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=153;
+const BUILD=154;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5320,7 +5320,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
   window.__mt={ get MULTI(){return MULTI;}, persistMulti, assembleMulti, adoptMulti, companyOf, migrateToMultiDoc, revertFromMultiDoc,
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
     meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
-    acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats, get BUILD(){return BUILD;},
+    acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats,
+    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -8502,8 +8503,11 @@ function pillarSeatOf(seatId){    // walk up to the Integrator's direct child = 
   return pillar;
 }
 function nearestL10Ancestor(seatId){   // the L10 team a seat's occupant is a MEMBER of (their manager's L10)
-  let s=acSeatById(seatId), guard=0;
-  s=s?acSeatById(s.parent):null;
+  const self=acSeatById(seatId);
+  // A SIDE report (dashed advisory seat) or STAFF (EA/support) is NOT a member of their manager's L10, so
+  // they get no view/switch access to it just by hanging off a person who runs that team.
+  if(self && (self.staff || self.side==="left" || self.side==="right")) return null;
+  let s=self?acSeatById(self.parent):null, guard=0;
   while(s && guard++<60){ if(s.l10) return s; s=acSeatById(s.parent); }
   return null;
 }
