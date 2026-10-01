@@ -4815,7 +4815,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=157;
+const BUILD=158;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -9577,6 +9577,7 @@ function renderTools(){
       </div>`;
     wrap.querySelectorAll("[data-open-dept]").forEach(b=>b.onclick=()=>{ procOpen=b.dataset.openDept; $("main").scrollTop=0; renderTools(); });
     { const b=$("#cp-add-dept"); if(b) b.onclick=addProcessDept; }
+    { const b=$("#cp-import"); if(b) b.onclick=importProcesses; }
     $("#tl-back").onclick=()=>{ toolOpen=null; renderTools(); };
     { const e=$("#tl-edit"); if(e) e.onclick=()=>editTool(t.id); }
     { const d=$("#tl-del"); if(d) d.onclick=()=>{
@@ -9609,7 +9610,7 @@ function deptListHtml(){
     <h4>Our Documented Core Processes</h4>
     <div class="hint" style="margin:0 0 10px">Tap a department to pull up its core processes — purpose, key steps, owner and success metrics.</div>
     ${rows}
-    ${canEd?`<div class="row-add" style="margin-top:12px"><button class="btn wide" id="cp-add-dept">+ Add a department</button></div>`:""}
+    ${canEd?`<div class="row-add" style="margin-top:12px;display:flex;gap:8px"><button class="btn wide" id="cp-add-dept">+ Add a department</button><button class="btn ghost wide" id="cp-import">⤵ Import / paste</button></div>`:""}
   </div>`;
 }
 function editTool(id){
@@ -9676,6 +9677,70 @@ function editProcess(deptId, procId){
     rec.owner=$("#pr-owner").value.trim(); rec.body=$("#pr-body").value;
     if(isNew) d.processes.push(rec);
     renumberProcs(d); saveProcesses(); closeSheet(); renderTools();
+  };
+}
+/* Bulk import: paste a plain-text block (one or more departments, each with PROCESS/OWNER + body) and it
+   creates the departments and their core processes in one shot. Idempotent-ish: a process whose name already
+   exists in a department is REPLACED, so re-pasting an updated block updates rather than duplicates. */
+function parseProcessText(txt){
+  const lines=String(txt||"").replace(/\r/g,"").split("\n");
+  const depts=[]; let dept=null, proc=null, body=[];
+  const flushProc=()=>{ if(proc){ proc.body=body.join("\n").replace(/\n{3,}/g,"\n\n").trim(); if(dept) dept.processes.push(proc); } proc=null; body=[]; };
+  const flushDept=()=>{ flushProc(); if(dept) depts.push(dept); dept=null; };
+  lines.forEach(line=>{
+    const mD=line.match(/^\s*DEPARTMENT\s*:\s*(.+?)\s*$/i);
+    const mP=line.match(/^\s*(?:CORE\s*)?PROCESS\s*(?:#?\s*\d+)?\s*[:\-–]\s*(.+?)\s*$/i);
+    const mO=line.match(/^\s*OWNER\s*:\s*(.*?)\s*$/i);
+    if(mD){ flushDept(); dept={dept:mD[1], processes:[]}; }
+    else if(mP){ flushProc(); proc={name:mP[1], owner:""}; }
+    else if(mO && proc){ proc.owner=mO[1]; }
+    else if(proc){ body.push(line); }
+  });
+  flushDept();
+  return depts.filter(d=>d.dept);
+}
+function importProcesses(){
+  if(!canEditCompany()) return;
+  openSheet(`
+    <h2>Import / paste core processes</h2>
+    <div class="hint" style="margin:-4px 2px 12px">Paste a block in this shape. Repeat <b>PROCESS:</b> for each one, and start a new <b>DEPARTMENT:</b> for another area. Everything under a process (Purpose, Key Steps, Success Metrics) becomes its body, exactly as typed.</div>
+    <pre style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11.5px;overflow:auto;margin:0 0 12px">DEPARTMENT: Client Relations
+
+PROCESS: Intake &amp; Orientation
+OWNER: Intake Team
+Purpose
+...
+Key Steps
+Step 1: ...
+Success Metrics
+• ...</pre>
+    <div class="field"><textarea id="imp-text" rows="12" placeholder="Paste here…"></textarea></div>
+    <div class="hint" id="imp-prev" style="margin:2px 2px 10px">Nothing detected yet.</div>
+    <div class="sheet-actions"><button class="btn ghost" id="imp-cancel">Cancel</button><button class="btn" id="imp-go">Import</button></div>`);
+  const prev=()=>{ const parsed=parseProcessText($("#imp-text").value); const el=$("#imp-prev");
+    if(!parsed.length){ el.innerHTML="Nothing detected yet."; return; }
+    el.innerHTML="Detected: "+parsed.map(d=>`<b>${esc(d.dept)}</b> — ${d.processes.length} process${d.processes.length===1?"":"es"}`).join(" · "); };
+  { const t=$("#imp-text"); if(t) t.oninput=prev; }
+  $("#imp-cancel").onclick=closeSheet;
+  $("#imp-go").onclick=()=>{
+    const parsed=parseProcessText($("#imp-text").value);
+    if(!parsed.length){ alert("Nothing to import — check the format (needs at least one DEPARTMENT: and PROCESS: line)."); return; }
+    data.processes=data.processes||[];
+    let added=0, firstDeptId=null;
+    parsed.forEach(pd=>{
+      let d=data.processes.find(x=>sameName(x.dept, pd.dept));
+      if(!d){ d={id:uid(), dept:pd.dept, processes:[]}; data.processes.push(d); }
+      if(!firstDeptId) firstDeptId=d.id;
+      pd.processes.forEach(p=>{ const rec={id:uid(), num:0, name:p.name, owner:p.owner||"", body:p.body||""};
+        const i=d.processes.findIndex(x=>sameName(x.name, p.name));
+        if(i>=0) rec.id=d.processes[i].id, d.processes[i]=rec; else d.processes.push(rec);   // replace same-name, else add
+        added++; });
+      renumberProcs(d);
+    });
+    saveProcesses(); closeSheet();
+    if(parsed.length===1 && firstDeptId) procOpen=firstDeptId;   // one department → drop into it so they can eyeball it
+    renderTools();
+    setSync(`Imported ${added} core process${added===1?"":"es"} ✓`);
   };
 }
 
