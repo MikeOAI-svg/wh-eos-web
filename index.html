@@ -824,6 +824,9 @@
     padding:4px 10px;border-radius:20px;white-space:nowrap}
   .cp-body{font-size:14px;line-height:1.7;color:var(--text)}
   @media (min-width:900px){ .cp-card{max-width:820px} .cp-body{font-size:14.5px} }
+  .cp-edit{flex:0 0 auto;margin-left:auto}
+  .cp-dept-actions{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+  .cp-head{position:relative}
 
   /* ================= MEETING ARCHIVE / MINUTES ================= */
   .arch-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;
@@ -4812,7 +4815,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=156;
+const BUILD=157;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -9534,17 +9537,27 @@ function renderTools(){
   if(procOpen){
     const d=(data.processes||[]).find(x=>x.id===procOpen);
     if(!d){ procOpen=null; renderTools(); return; }
+    const canEd=canEditCompany();
     wrap.innerHTML=`
       <button class="btn ghost sm" id="cp-back">‹ Core Processes</button>
       <div class="cp-head"><h2>${esc(d.dept)}</h2>
-        <div class="cp-count">${d.processes.length} core process${d.processes.length===1?"":"es"}</div></div>
+        <div class="cp-count">${d.processes.length} core process${d.processes.length===1?"":"es"}</div>
+        ${canEd?`<div class="cp-dept-actions"><button class="btn ghost sm" id="cp-dept-rename">Rename dept</button><button class="btn ghost sm danger" id="cp-dept-del">Delete dept</button></div>`:""}</div>
       ${d.processes.map(p=>`<div class="cp-card">
           <div class="cp-top"><div class="cp-num">${p.num}</div>
             <div class="cp-title">${esc(p.name)}</div>
-            ${p.owner?`<span class="cp-owner">${esc(p.owner)}</span>`:""}</div>
+            ${p.owner?`<span class="cp-owner">${esc(p.owner)}</span>`:""}
+            ${canEd?`<button class="btn ghost sm cp-edit" data-edit-proc="${p.id}">Edit</button>`:""}</div>
           <div class="cp-body">${nl2br(p.body)}</div>
-        </div>`).join("")}`;
+        </div>`).join("")}
+      ${canEd?`<div class="row-add" style="margin-top:12px"><button class="btn wide" id="cp-add-proc">+ Add a core process</button></div>`:(d.processes.length?"":'<div class="hint">No core processes documented here yet.</div>')}`;
     $("#cp-back").onclick=()=>{ procOpen=null; toolOpen="tl_process"; $("main").scrollTop=0; renderTools(); };
+    if(canEd){
+      { const b=$("#cp-add-proc"); if(b) b.onclick=()=>editProcess(d.id, null); }
+      { const b=$("#cp-dept-rename"); if(b) b.onclick=()=>renameProcessDept(d.id); }
+      { const b=$("#cp-dept-del"); if(b) b.onclick=()=>deleteProcessDept(d.id); }
+      wrap.querySelectorAll("[data-edit-proc]").forEach(b=>b.onclick=()=>editProcess(d.id, b.dataset.editProc));
+    }
     return;
   }
   if(toolOpen){
@@ -9563,6 +9576,7 @@ function renderTools(){
         </div>`:""}
       </div>`;
     wrap.querySelectorAll("[data-open-dept]").forEach(b=>b.onclick=()=>{ procOpen=b.dataset.openDept; $("main").scrollTop=0; renderTools(); });
+    { const b=$("#cp-add-dept"); if(b) b.onclick=addProcessDept; }
     $("#tl-back").onclick=()=>{ toolOpen=null; renderTools(); };
     { const e=$("#tl-edit"); if(e) e.onclick=()=>editTool(t.id); }
     { const d=$("#tl-del"); if(d) d.onclick=()=>{
@@ -9585,16 +9599,17 @@ function renderTools(){
   wrap.querySelectorAll("[data-open-tool]").forEach(c=>c.onclick=()=>{ toolOpen=c.dataset.openTool; $("main").scrollTop=0; renderTools(); });
 }
 function deptListHtml(){
-  const ds=data.processes||[];
-  if(!ds.length) return "";
-  return `<div class="dept-list">
-    <h4>Our Documented Core Processes</h4>
-    <div class="hint" style="margin:0 0 10px">Tap a department to pull up its core processes — purpose, key steps, owner and success metrics.</div>
-    ${ds.map(d=>`<div class="dept-row" data-open-dept="${d.id}">
+  const ds=data.processes||[], canEd=canEditCompany();
+  const rows = ds.length ? ds.map(d=>`<div class="dept-row" data-open-dept="${d.id}">
         <div><div class="dept-name">${esc(d.dept)}</div>
           <div class="dept-meta">${d.processes.length} core process${d.processes.length===1?"":"es"}</div></div>
         <span class="dept-go">→</span>
-      </div>`).join("")}
+      </div>`).join("") : '<div class="hint" style="margin:0 0 10px">No departments documented yet.</div>';
+  return `<div class="dept-list">
+    <h4>Our Documented Core Processes</h4>
+    <div class="hint" style="margin:0 0 10px">Tap a department to pull up its core processes — purpose, key steps, owner and success metrics.</div>
+    ${rows}
+    ${canEd?`<div class="row-add" style="margin-top:12px"><button class="btn wide" id="cp-add-dept">+ Add a department</button></div>`:""}
   </div>`;
 }
 function editTool(id){
@@ -9616,6 +9631,51 @@ function editTool(id){
     rec.summary=$("#tl-sum").value.trim(); rec.howTo=$("#tl-how").value;
     if(isNew){ data.tools=tools.concat([rec]); toolOpen=rec.id; }
     save(); closeSheet(); renderTools();
+  };
+}
+/* ===== Core Processes editor (leadership) — add/edit the departments + numbered processes shown under
+   the "Core Processes" tool. data.processes is company-scoped, so writes go through mergeCompany (merge-safe,
+   like the V/TO). New processes render in the SAME cp-card format as the seeded ones. ===== */
+function saveProcesses(){ mergeCompany(comp=>{ comp.processes=JSON.parse(JSON.stringify(data.processes||[])); }); }
+function renumberProcs(d){ (d.processes||[]).forEach((p,i)=>p.num=i+1); }   // keep numbers 1..N in board order
+function addProcessDept(){
+  if(!canEditCompany()) return;
+  const nm=(prompt("New department / area (e.g. Admissions, Clinical, HR)")||"").trim(); if(!nm) return;
+  data.processes=data.processes||[]; const d={id:uid(), dept:nm, processes:[]}; data.processes.push(d);
+  saveProcesses(); procOpen=d.id; $("main").scrollTop=0; renderTools();   // drop into the new dept to add processes
+}
+function renameProcessDept(deptId){
+  if(!canEditCompany()) return; const d=(data.processes||[]).find(x=>x.id===deptId); if(!d) return;
+  const nm=(prompt("Rename department", d.dept)||"").trim(); if(!nm) return; d.dept=nm; saveProcesses(); renderTools();
+}
+function deleteProcessDept(deptId){
+  if(!canEditCompany()) return; const d=(data.processes||[]).find(x=>x.id===deptId); if(!d) return;
+  if(!confirm(`Delete the "${d.dept}" department and all ${d.processes.length} of its core processes?`)) return;
+  data.processes=(data.processes||[]).filter(x=>x.id!==deptId); saveProcesses(); procOpen=null; renderTools();
+}
+function editProcess(deptId, procId){
+  if(!canEditCompany()) return; const d=(data.processes||[]).find(x=>x.id===deptId); if(!d) return;
+  d.processes=d.processes||[];
+  const p=procId?d.processes.find(x=>x.id===procId):null, isNew=!p;
+  const rec=p||{id:uid(), num:d.processes.length+1, name:"", owner:"", body:""};
+  const TMPL="Purpose (define): \n\nKey Steps\n• Step 1: \n• Step 2: \n• Step 3: \n\nOwner: \n\nSuccess Metrics (how you know you accomplished it):\n• Metric one – \n• Metric two – ";
+  openSheet(`
+    <h2>${isNew?"New Core Process":"Edit Core Process"} <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">· ${esc(d.dept)}</small></h2>
+    <div class="field"><label>Process name</label><input id="pr-name" value="${esc(rec.name)}" placeholder="e.g. First Contact"></div>
+    <div class="field"><label>Owner <small>(optional)</small></label><input id="pr-owner" value="${esc(rec.owner)}" placeholder="Accountable person or role"></div>
+    <div class="field"><label>The process</label>
+      <textarea id="pr-body" rows="15" placeholder="${esc(TMPL)}">${esc(rec.body)}</textarea>
+      <div class="hint" style="margin-top:5px">Line breaks are kept — it renders exactly like the others (Purpose · Key Steps · Owner · Success Metrics). ${isNew?'<a href="#" id="pr-tmpl">Insert the standard template</a>':""}</div></div>
+    <div class="sheet-actions">${isNew?"":'<button class="btn danger" id="pr-del">Delete</button>'}<button class="btn ghost" id="pr-cancel">Cancel</button><button class="btn" id="pr-save">Save</button></div>`);
+  $("#pr-cancel").onclick=closeSheet;
+  { const tl=$("#pr-tmpl"); if(tl) tl.onclick=e=>{ e.preventDefault(); const b=$("#pr-body"); if(b && !b.value.trim()){ b.value=TMPL; b.focus(); } }; }
+  if(!isNew){ const db=$("#pr-del"); if(db) db.onclick=()=>{ if(!confirm(`Delete "${rec.name||"this process"}"?`)) return;
+      d.processes=d.processes.filter(x=>x.id!==rec.id); renumberProcs(d); saveProcesses(); closeSheet(); renderTools(); }; }
+  $("#pr-save").onclick=()=>{
+    rec.name=$("#pr-name").value.trim(); if(!rec.name){ $("#pr-name").focus(); return; }
+    rec.owner=$("#pr-owner").value.trim(); rec.body=$("#pr-body").value;
+    if(isNew) d.processes.push(rec);
+    renumberProcs(d); saveProcesses(); closeSheet(); renderTools();
   };
 }
 
