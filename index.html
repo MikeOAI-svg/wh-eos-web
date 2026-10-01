@@ -1452,6 +1452,27 @@
     background:var(--accent-soft); color:var(--accent); border-radius:6px; padding:1px 6px; margin-left:6px}
   .dept-row.shared td{color:var(--accent)}
 
+  /* ===== TANGENT! alert (anyone on the L10 can fire it — pops on everyone's screen) ===== */
+  .lp-tangent{margin-left:auto; background:#e0483d; color:#fff; border:0; border-radius:20px;
+    padding:6px 14px; font-size:12.5px; font-weight:800; letter-spacing:.3px; cursor:pointer;
+    box-shadow:0 2px 8px rgba(224,72,61,.35)}
+  .lp-tangent:hover{filter:brightness(1.06)}
+  .lp-tangent:active{transform:scale(.96)}
+  #tangentOverlay{position:fixed; inset:0; z-index:600; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:24px;
+    background:radial-gradient(120% 120% at 50% 30%, rgba(224,72,61,.30), rgba(0,0,0,.62)); cursor:pointer}
+  #tangentOverlay.hide{display:none}
+  .tg-card{background:var(--card); border:3px solid #e0483d; border-radius:24px; padding:28px 30px 30px;
+    max-width:440px; width:100%; box-shadow:0 24px 70px rgba(0,0,0,.45); animation:tgPop .45s cubic-bezier(.18,1.5,.5,1)}
+  .tg-emoji{font-size:104px; line-height:1; display:block; animation:tgWobble 1.1s ease-in-out infinite}
+  .tg-title{font-size:34px; font-weight:900; letter-spacing:1px; color:#e0483d; margin:6px 0 4px; text-transform:uppercase}
+  .tg-line{font-size:17px; font-weight:600; color:var(--text); margin:2px 0 10px; line-height:1.4}
+  .tg-by{font-size:12.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px}
+  .tg-hint{font-size:11.5px; color:var(--muted); margin-top:14px}
+  @keyframes tgPop{0%{transform:scale(.4) rotate(-6deg); opacity:0} 100%{transform:scale(1) rotate(0); opacity:1}}
+  @keyframes tgWobble{0%,100%{transform:rotate(-9deg) translateY(0)} 50%{transform:rotate(9deg) translateY(-6px)}}
+  @media (prefers-reduced-motion: reduce){ .tg-card,.tg-emoji{animation:none} }
+
   /* ===== Live app-version update bar ===== */
   #updateBar{position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:400;
     display:flex; align-items:center; gap:12px; background:var(--accent); color:#fff;
@@ -1784,6 +1805,14 @@
   <div class="sync-dot" id="syncDot"></div>
   <!-- Shown by markUpdate() when a newer app version is deployed; auto-reloads when the user is idle. -->
   <div id="updateBar" class="hide"><span class="ub-t">✨ A new version is available.</span><button class="btn sm" id="updateReload">Reload now</button></div>
+  <!-- TANGENT! alert — broadcast to everyone on the L10 via the presence channel; tap anywhere to dismiss. -->
+  <div id="tangentOverlay" class="hide"><div class="tg-card">
+    <span class="tg-emoji" id="tgEmoji">🐿️</span>
+    <div class="tg-title">Tangent!</div>
+    <div class="tg-line" id="tgLine"></div>
+    <div class="tg-by" id="tgBy"></div>
+    <div class="tg-hint">tap anywhere to dismiss</div>
+  </div></div>
   <div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
   <input type="file" id="importFile" accept="application/json,.json" style="display:none">
 
@@ -4783,7 +4812,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=154;
+const BUILD=156;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5321,7 +5350,7 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
     meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
     acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats,
-    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, get BUILD(){return BUILD;},
+    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -5349,7 +5378,13 @@ function beatPresence(){ const em=myEmail(); if(!presRef||!em) return;
 function startPresence(){
   const em=myEmail(); if(!em) return;
   if(!presRef){ try{ presRef=firebase.firestore().doc("workspaces/main_presence"); }catch(e){ return; } }
-  if(!presUnsub) presUnsub=presRef.onSnapshot(s=>{ presUsers=(s.data()&&s.data().users)||{}; renderPresence(); }, ()=>{});
+  if(!presUnsub) presUnsub=presRef.onSnapshot(s=>{ const d=s.data()||{}; presUsers=d.users||{}; renderPresence();
+    // A tangent someone fired: show it if it's for MY current L10 team, is newer than the last one I saw,
+    // and is fresh (so joining late never replays an old one).
+    const tg=d.tangent;
+    if(tg && tg.at && tg.at>_tangentSeenAt){ _tangentSeenAt=tg.at;
+      if(String(tg.team||"")===presTeamId() && (Date.now()-tg.at)<12000) showTangent(tg); }
+  }, ()=>{});
   beatPresence();
   if(!presTimer) presTimer=setInterval(beatPresence, 20000);
   renderPresence();
@@ -5370,12 +5405,49 @@ function renderPresence(){
     // one — excluded rather than shown everywhere, which is the bug this replaced.
     .filter(u=>u && u.at>0 && (now-u.at)<PRES_FRESH && String(u.team||"")===team)
     .sort((a,b)=> a.k===meKey?-1 : b.k===meKey?1 : String(a.name||"").localeCompare(String(b.name||"")));
+  // "🚨 Tangent!" — only while a meeting is actually running; anyone on the L10 can fire it.
+  const tBtn = meeting ? '<button class="lp-tangent" id="lpTangent" title="Call a tangent — everyone on this L10 sees it!">🚨 Tangent!</button>' : '';
   box.classList.remove("hide");
-  if(!list.length){ box.innerHTML='<span class="lp-lbl">On this L10'+tName+'</span><span class="lp-empty">Connecting…</span>'; return; }
-  box.innerHTML='<span class="lp-lbl">On this L10'+tName+' · '+list.length+'</span>'+list.map(u=>{
+  if(!list.length){ box.innerHTML='<span class="lp-lbl">On this L10'+tName+'</span><span class="lp-empty">Connecting…</span>'+tBtn; }
+  else box.innerHTML='<span class="lp-lbl">On this L10'+tName+' · '+list.length+'</span>'+list.map(u=>{
     const me=u.k===meKey;
     return `<span class="lp-chip"><span class="lp-dot"></span><span class="lp-av">${esc(initialsOf(u.name))}</span>${esc(u.name||"Someone")}${me?" (you)":""}</span>`;
-  }).join("");
+  }).join("")+tBtn;
+  { const tb=$("#lpTangent"); if(tb) tb.onclick=callTangent; }
+}
+/* ===== TANGENT! — a shared, ephemeral alert that pops on EVERY screen on this L10 =====
+   Rides the presence doc (same channel/rule anyone already writes their heartbeat to), so no rules
+   change and any attendee — not just the facilitator — can fire it. It's not saved to the minutes. */
+const TANGENT_EMOJI=["🐿️","🚂","🎢","🙊","🪃","🌀","🧨","🚋","🛸","🐇","🎣","🧲"];
+const TANGENT_LINES=[
+  "SQUIRREL! 🐿️ Back to the issue…",
+  "We've officially left the agenda.",
+  "That's a rathole — make it an Issue and move on!",
+  "Off the rails! Reeling it back in… 🚂💨",
+  "Parking lot, please. 🅿️",
+  "Great topic… for a totally different meeting.",
+  "Tangent detected. Return to your regularly scheduled L10.",
+  "We're solving a problem nobody has. Next!",
+  "Focus, team — the Issues List misses you."
+];
+let _tangentSeenAt=0;
+function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+function showTangent(rec){
+  if(!rec) return; _tangentSeenAt=Math.max(_tangentSeenAt, rec.at||0);
+  const ov=$("#tangentOverlay"); if(!ov) return;
+  const em=$("#tgEmoji"), ln=$("#tgLine"), by=$("#tgBy");
+  if(em) em.textContent=rec.emoji||pick(TANGENT_EMOJI);
+  if(ln) ln.textContent=rec.msg||pick(TANGENT_LINES);
+  if(by) by.textContent=rec.by?("called by "+rec.by):"";
+  ov.classList.remove("hide");
+  ov.onclick=hideTangent;
+  clearTimeout(showTangent._t); showTangent._t=setTimeout(hideTangent, 4800);
+}
+function hideTangent(){ const ov=$("#tangentOverlay"); if(ov) ov.classList.add("hide"); clearTimeout(showTangent._t); }
+function callTangent(){
+  const rec={at:Date.now(), by:(myName()||"Someone"), team:presTeamId(), emoji:pick(TANGENT_EMOJI), msg:pick(TANGENT_LINES)};
+  showTangent(rec);                                   // instant feedback for the clicker
+  if(presRef){ presRef.set({tangent:rec},{merge:true}).catch(()=>{}); }   // broadcast to everyone else on this L10
 }
 
 /* ===== PERFORMANCE EVALUATIONS — separate, LOCKED per-supervisor doc =====
@@ -7490,9 +7562,12 @@ function renderAdmin(){
       const shown=(data.teams||[]).filter(t=> admTeamFac==='all' ? true : (admTeamFac==='__none__' ? !facilityOfTeam(t) : facilityOfTeam(t)===admTeamFac));
       const facName=id=>{ const f=facs.find(x=>x.id===id); return f?(f.role||'Facility'):id; };
       const rows=shown.map(t=>{ const ls=t.seatId?(data.accountability.seats||[]).find(s=>s.id===t.seatId):null;
+        // Count the EFFECTIVE roster (what you see when you open the team): chart-driven / custom teams get
+        // their members from the chart, so t.members is empty for them — counting it showed a false "0".
+        const memCount=(teamHasCustomMembers(t)||teamIsChartDriven(t)) ? teamMemberNames(t).length : (t.members||[]).length;
         return `<div class="adm-row">
         <div><div class="nm">${esc(t.name)}</div>
-          <div class="em">${t.leader?`Leader: <b>${esc(t.leader)}</b> · `:""}${(t.members||[]).length} member${(t.members||[]).length===1?"":"s"}${(t.editors||[]).length?" · Editors: "+t.editors.map(esc).join(", "):""}${ls?" · 🔗 <b>"+esc(ls.role||"seat")+"</b>":' · <span style="color:var(--amber)">not linked to a seat</span>'}</div></div>
+          <div class="em">${t.leader?`Leader: <b>${esc(t.leader)}</b> · `:""}${memCount} member${memCount===1?"":"s"}${(t.editors||[]).length?" · Editors: "+t.editors.map(esc).join(", "):""}${ls?" · 🔗 <b>"+esc(ls.role||"seat")+"</b>":' · <span style="color:var(--amber)">not linked to a seat</span>'}</div></div>
         <button class="btn ghost sm" data-team-editors="${t.id}">Manage</button>
       </div>`; }).join("");
       const empty=`<div class="hint" style="margin:2px 2px 0;padding:10px 12px;border:1px dashed var(--line);border-radius:10px">No teams in <b>${esc(facName(admTeamFac))}</b> yet. Add one below — it'll be tagged to this facility.</div>`;
@@ -9940,6 +10015,7 @@ function renderL10(){
   if(noTeamAccess()){ const w=$("#l10Wrap"); if(w) w.innerHTML=NO_TEAM_HTML; return; }
   if(l10Mode==="archive"){ renderArchive(); return; }
   const wrap=$("#l10Wrap");
+  renderPresence();   // reflect the current meeting state in the presence bar (shows/hides the Tangent button)
   if(!meeting){
     const hist=TEAM().meetings.slice().reverse().slice(0,8).map(m=>`<div class="meeting-hist">
       <div><div style="font-weight:700">${fmtLong(m.date)}</div><div style="font-size:12px;color:var(--muted)">${m.durationMin} min</div></div>
