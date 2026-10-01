@@ -4815,7 +4815,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=158;
+const BUILD=159;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5353,7 +5353,7 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
     meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
     acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats,
-    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, get BUILD(){return BUILD;},
+    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -5753,7 +5753,8 @@ function startNewQuarter(){
   const curW1=t.week1Start||firstMondayOfQuarter();
   const nextW1=nextQuarterFirstMonday(curW1);
   const st=rockStats(t.rocks);
-  const unfinished=(t.rocks||[]).filter(r=>r.status!=="done");
+  // No Rocks carry forward — EVERY current Rock (Done, Not Done, On/Off Track) is archived to this quarter's
+  // record, and the new board starts clean with only the drafted next-quarter Rocks (or blank).
   const weeksFilled=(t.measurables||[]).reduce((a,m)=>{ let c=0; for(let i=0;i<13;i++) if((m.values||{})[i]&&(m.values||{})[i].s) c++; return a+c; },0);
   openSheet(`<h2>Close ${esc(quarterLabel(curW1))}</h2>
     <div class="hint" style="margin:-4px 2px 12px">Starting <b>${esc(quarterLabel(nextW1))}</b> for <b>${esc(t.name)}</b>. Here's exactly what happens:</div>
@@ -5762,21 +5763,17 @@ function startNewQuarter(){
       <div class="cb-line">${(t.measurables||[]).length} measurable${(t.measurables||[]).length===1?"":"s"} carry over · ${weeksFilled} filled week${weeksFilled===1?"":"s"} archived, then cleared for the new quarter.</div></div>
 
     <div class="close-box"><div class="cb-h">Rocks${st.n?` · ${st.pct}% completed`:""}</div>
-      ${st.n?`<div class="cb-stats"><span class="cb-s good">${st.done} done</span><span class="cb-s">${st.on} on track</span><span class="cb-s bad">${st.off} off track</span></div>
-        <div class="cb-line">All ${st.n} are archived to this quarter's record, so ${esc(quarterLabel(curW1))} keeps its score.</div>`
+      ${st.n?`<div class="cb-stats"><span class="cb-s good">${st.done} done</span><span class="cb-s">${st.on} on track</span><span class="cb-s bad">${st.off} off track</span>${st.notdone?`<span class="cb-s bad">${st.notdone} not done</span>`:""}</div>
+        <div class="cb-line"><b>All ${st.n} Rocks are archived</b> to this quarter's record — none carry forward. ${esc(quarterLabel(curW1))} keeps its score, and the new board starts clean.</div>`
         :`<div class="cb-line">No Rocks on the board to archive.</div>`}
-      ${unfinished.length?`<label class="cb-check"><input type="checkbox" id="q-carry" checked>
-          <span><b>Carry the ${unfinished.length} unfinished Rock${unfinished.length===1?"":"s"} into ${esc(quarterLabel(nextW1))}</b>
-          <small>Unticked, they're archived and cleared off the board. They stay in the ${esc(quarterLabel(curW1))} record either way.</small></span></label>`:""}
-      ${(t.nextRocks||[]).length?`<div class="cb-line" style="margin-top:6px">▶ Your <b>${(t.nextRocks||[]).length}</b> drafted Rock${(t.nextRocks||[]).length===1?"":"s"} for ${esc(quarterLabel(nextW1))} become the new board.</div>`:""}
+      ${(t.nextRocks||[]).length?`<div class="cb-line" style="margin-top:6px">▶ The new board = your <b>${(t.nextRocks||[]).length}</b> drafted Rock${(t.nextRocks||[]).length===1?"":"s"} for ${esc(quarterLabel(nextW1))}.</div>`:`<div class="cb-line" style="margin-top:6px">The new ${esc(quarterLabel(nextW1))} board starts <b>empty</b> — add this quarter's Rocks after closing (or draft them first under <b>Next</b>).</div>`}
     </div>
 
     <div class="sheet-actions"><button class="btn ghost" id="q-cancel">Cancel</button>
       <button class="btn" id="q-go">Close ${esc(quarterLabel(curW1))} &amp; start ${esc(quarterLabel(nextW1))}</button></div>`);
   $("#q-cancel").onclick=()=>closeSheet();
   $("#q-go").onclick=()=>{
-    const carry=!!($("#q-carry")&&$("#q-carry").checked);
-    snapshotNow('before closing '+quarterLabel(curW1)+' · '+t.name);   // restore point in case the wrong quarter/box was clicked
+    snapshotNow('before closing '+quarterLabel(curW1)+' · '+t.name);   // restore point in case the wrong quarter was clicked
     // Scorecard: snapshot, then clear the weeks (definitions carry over)
     t.scorecardArchive=t.scorecardArchive||[];
     t.scorecardArchive.push({ label:quarterLabel(curW1), week1Start:curW1,
@@ -5785,8 +5782,9 @@ function startNewQuarter(){
     t.rockArchive=t.rockArchive||[];
     t.rockArchive.push({ label:quarterLabel(curW1), week1Start:curW1, closed:todayIso(),
       stats:st, rocks:JSON.parse(JSON.stringify(t.rocks||[])) });
-    // New board = the drafted next-quarter Rocks (if any) + any unfinished ones you chose to carry.
-    t.rocks = [ ...JSON.parse(JSON.stringify(t.nextRocks||[])), ...(carry ? (t.rocks||[]).filter(r=>r.status!=="done") : []) ];
+    // New board = ONLY the drafted next-quarter Rocks (or blank). Nothing carries over — every current
+    // Rock was archived above, Done or not.
+    t.rocks = JSON.parse(JSON.stringify(t.nextRocks||[]));
     t.nextRocks=[];
     t.week1Start=nextW1;
     (t.measurables||[]).forEach(m=>{ m.values={}; });
