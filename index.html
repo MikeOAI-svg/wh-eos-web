@@ -4864,7 +4864,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=163;
+const BUILD=164;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5086,6 +5086,29 @@ function saveL10(immediate){   // persist the current L10 team's meeting + to-do
                         : mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) apply(st); });
   clearTimeout(_l10Timer);
   if(immediate) fire(); else _l10Timer=setTimeout(fire, 650);
+}
+// Add a To-Do created DURING the L10. Persists the to-do AND its meeting link SURGICALLY onto the latest
+// server team doc (mergeTeam + upsertById) — so a teammate's sync landing in the split second after you click
+// Add can never drop it. (The old path leaned on saveL10's role-merge, where a non-scribe's createdTodos link
+// wasn't written, plus an adopt-time rescue that could miss the first add — "click Add once, it didn't save;
+// second time always works".) The to-do itself always persists; the meeting link is added when a live meeting
+// exists on the server.
+function addMeetingTodo(nt){
+  const tt=TEAM(); if(!tt) return; const teamId=tt.id;
+  tt.todos=tt.todos||[]; if(!tt.todos.some(x=>x&&x.id===nt.id)) tt.todos.unshift(nt);   // optimistic local add
+  tt.liveMeeting=tt.liveMeeting||{}; tt.liveMeeting.createdTodos=tt.liveMeeting.createdTodos||[];
+  if(tt.liveMeeting.createdTodos.indexOf(nt.id)<0) tt.liveMeeting.createdTodos.push(nt.id);
+  if(meeting && meeting!==tt.liveMeeting){ meeting.createdTodos=meeting.createdTodos||[]; if(meeting.createdTodos.indexOf(nt.id)<0) meeting.createdTodos.push(nt.id); }
+  mergeTeam(teamId, st=>{ st.todos=upsertById(st.todos,[nt]);
+    if(st.liveMeeting){ st.liveMeeting.createdTodos=st.liveMeeting.createdTodos||[]; if(st.liveMeeting.createdTodos.indexOf(nt.id)<0) st.liveMeeting.createdTodos.push(nt.id); } });
+}
+// Carry an issue's Lists-tab note (the 💬 button → issue.discussion) into the L10 IDS "Discussion" box.
+// Seeds it when IDS starts on the issue; if Discussion is still empty and a note exists, pulls it in.
+// One-way and non-destructive — it never overwrites Discussion text already typed in the L10.
+function seedIdsFromNote(x){
+  if(!x) return;
+  if(!x.ids) x.ids={what:x.text||"",clarify:"",discuss:"",solve:""};
+  if(!(x.ids.discuss||"").trim() && (x.discussion||"").trim()) x.ids.discuss=x.discussion;
 }
 // Persist ONE Rock (create/edit/delete) by MERGING it into the latest copy of its home team — same anti-clobber
 // discipline as scorecard cells, so a Rock is never lost to a concurrent save or a remote refresh. key selects
@@ -10335,7 +10358,7 @@ function renderSegContent(i){
     c.innerHTML=`<div class="seg-panel"><h4>Last Week's To-Dos${list.length?` <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">— ${openN} open · ${doneN} done</small>`:""}</h4>${rows||'<div class="hint">No to-dos to review.</div>'}
       <div class="mini-add" style="margin-top:10px"><input id="seg-todo" placeholder="New 7-day to-do…"><input id="seg-todo-owner" placeholder="Owner" style="max-width:92px"><button class="btn sm" id="seg-todo-add">Add</button></div></div>`;
     c.querySelectorAll("[data-todo-toggle]").forEach(b=>b.onclick=()=>{ const t=TEAM().todos.find(x=>x.id===b.dataset.todoToggle); if(!t) return; t.done=!t.done; t.doneAt=t.done?new Date().toISOString():""; saveL10(true); renderSegContent(i); });
-    const add=()=>{ const el2=$("#seg-todo"), ow=$("#seg-todo-owner"); const v=el2.value.trim(); if(!v) return; const nt={id:uid(),text:v,owner:ow.value.trim(),due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); (meeting.createdTodos=meeting.createdTodos||[]).push(nt.id); saveL10(true); renderSegContent(i); };
+    const add=()=>{ const el2=$("#seg-todo"), ow=$("#seg-todo-owner"); const v=el2.value.trim(); if(!v) return; const nt={id:uid(),text:v,owner:ow.value.trim(),due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; addMeetingTodo(nt); renderSegContent(i); };
     $("#seg-todo-add").onclick=add;
   }else if(seg.key==="ids"){
     const active=meeting.activeIssue?TEAM().issues.find(x=>x.id===meeting.activeIssue):null;   // allow revisiting a SOLVED issue too
@@ -10348,12 +10371,12 @@ function renderSegContent(i){
         ${solvedRows?`<div class="ids-solved-head">Solved this list <small>— tap Revisit to reopen &amp; add to one, or ✕ to clear it</small></div>${solvedRows}`:""}
         <div class="ids-addnote" style="margin-top:12px">📝 Need to add an issue? Add it from your <b>Lists</b> tab (Issues) — it drops right into this list.</div>
         <div class="hint" style="margin-top:8px">Tap “Work on it” to Identify, Discuss & Solve an issue, or ✕ to drop one that no longer belongs.</div></div>`;
-      c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=TEAM().issues.find(y=>y.id===b.dataset.work); if(x&&!x.ids){ x.ids={what:x.text||"",clarify:"",discuss:"",solve:""}; } meeting.activeIssue=b.dataset.work; saveL10(true); renderSegContent(i); });
+      c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=TEAM().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; saveL10(true); renderSegContent(i); });
       c.querySelectorAll("[data-del-issue]").forEach(b=>b.onclick=()=>{ const id=b.dataset.delIssue, x=TEAM().issues.find(y=>y.id===id);
         if(!confirm(`Delete this issue from the meeting?\n\n"${(x&&x.text)||""}"\n\nThis removes it for everyone. To-Dos already created from it are kept.`)) return;
         TEAM().issues=TEAM().issues.filter(y=>y.id!==id); if(meeting.activeIssue===id) meeting.activeIssue=null; saveL10(true); renderSegContent(i); });
     }else{
-      if(!active.ids) active.ids={what:active.text||"",clarify:"",discuss:"",solve:""};
+      seedIdsFromNote(active);
       const linked=TEAM().todos.filter(t=>t.fromIssue===active.id);
       const tdl=linked.map(t=>`<div class="tdl-row"><div class="tdl-txt ${t.done?"done":""}">${esc(t.text)}</div><div class="tdl-meta">${t.owner?esc(t.owner)+" · ":""}${t.due?"due "+fmtShort(t.due):"7-day"}${t.done?" · done":""}</div></div>`).join("");
       c.innerHTML=`<div class="seg-panel ids-work">
@@ -10405,8 +10428,8 @@ function renderSegContent(i){
       }; }
       const addTodo=()=>{ const ti=$("#ids-todo"), oi=$("#ids-todo-owner"), di=$("#ids-todo-due"); const v=ti.value.trim(); if(!v) return;
         const nt={id:uid(),text:v,owner:oi.value.trim(),due:di.value||isoAddDays(todayIso(),7),done:false,created:todayIso(),fromIssue:active.id,fromIssueText:active.text};
-        TEAM().todos.unshift(nt); (meeting.createdTodos=meeting.createdTodos||[]).push(nt.id);
-        saveL10(true); renderSegContent(i); };
+        addMeetingTodo(nt);                 // merge-safe: the to-do + link can't be lost to a concurrent sync
+        saveL10(true); renderSegContent(i); };   // saveL10 still flushes any IDS discussion notes (to-do already safe)
       $("#ids-todo-add").onclick=addTodo;
       // Enter in the to-do box shouldn't skip past assigning it — move to the owner field instead.
       const idsT=$("#ids-todo"); if(idsT) idsT.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#ids-todo-owner").focus(); } };
