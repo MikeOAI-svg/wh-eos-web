@@ -4770,11 +4770,12 @@ function BLANK_TEAM(){ if(!__blankTeam) __blankTeam=Object.assign(newTeam("— n
 function TEAM(){
   const ts=(data&&data.teams)||[];
   let t=ts.find(x=>x.id===curTeamId);
+  if(t && !canSeeTeam(t)) t=null;   // parked on a restricted team you may not open → fall through to an allowed one
   if(!t){
     // Fall back ONLY to a team this person may actually see — never to data.teams[0], which would
     // park an unassigned/facility-only user on someone else's board (e.g. a Texas leader on Shared
     // Services). No accessible team → a blank placeholder, so scoped views render empty, not a leak.
-    const allowed=seesAllTeams()?ts:teamsForUser();
+    const allowed=teamsForUser();
     t=allowed[0]||null; curTeamId=t?t.id:null;
   }
   return t||BLANK_TEAM();
@@ -4782,6 +4783,7 @@ function TEAM(){
 function noTeamAccess(){ return !seesAllTeams() && !teamsForUser().length; }
 const NO_TEAM_HTML=`<div class="empty"><span class="emoji">👥</span>You're not assigned to a team yet.<br><span style="font-size:13px;color:var(--muted)">Ask your admin to add you to your team — or, for a facility leader, tag your facility's teams to your facility seat in Admin → Manage.</span></div>`;
 function setTeam(id){
+  { const tt=(data.teams||[]).find(x=>x&&x.id===id); if(tt && !canSeeTeam(tt)) return; }   // click-throughs can't open a restricted team
   curTeamId=id;
   try{ localStorage.setItem("eostracker.team",id); }catch(e){}
   scQuarter=null; rkQuarter=null; syncMeetingRef();     // each team has its own live L10 + archives
@@ -4791,9 +4793,30 @@ function setTeam(id){
    (their roster membership), plus any they lead or edit. Leadership (owner + Visionary +
    Integrator) sees every team. Someone on one team is locked to it (no picker); on several,
    they switch among just those; on none, they stay read-only on the default team. */
+/* RESTRICTED TEAM (team.restricted, set in Admin → team → Manage) — a confidential board such as HR.
+   It is visible ONLY to: the Visionary / Integrator (and full admins), the LEADER OF ITS FACILITY (e.g. the
+   Shared Services leader), and the team's own leader + members. Nothing else opens it — not a "See every
+   team" grant, not facility peers, not an editor/edit grant — and it is left out of every roll-up
+   (Cabana Boy, Company Rocks, mirrored rows, print packets, the AI digest, notifications) for everyone else.
+   NB: like all permissions here this is a UI boundary; the data still syncs to every signed-in browser. */
+function canSeeTeam(t){
+  if(!t || !t.restricted) return true;
+  if(isLeadership()) return true;
+  const me=myName(); if(!me) return false;
+  const pillar=t.seatId?pillarSeatOf(t.seatId):null;
+  if(pillar ? seatHasName(pillar,me) : leadsFacilityOf(t,me)) return true;
+  return sameName(t.leader,me) || teamRoster(t).some(n=>sameName(n,me));
+}
+// Seats a new login may NOT self-select at onboarding, because sitting there would open a restricted team:
+// the team's own seats, its facility leader's seat, and the Visionary / Integrator seats. An admin places them.
+function seatOpensRestricted(s){
+  const rt=(data.teams||[]).filter(t=>t&&t.restricted); if(!rt.length || !s) return false;
+  if(/visionary|integrator/i.test(String(s.role||""))) return true;
+  return rt.some(t=>{ if(teamSeatIds(t).indexOf(s.id)>=0) return true; const pl=t.seatId?pillarSeatOf(t.seatId):null; return !!(pl&&pl.id===s.id); });
+}
 function seesAllTeams(){ return isLeadership() || iHavePerm("viewAll"); }        // owner, Visionary, Integrator, or a "See every team" grant
 function teamsForUser(){
-  const ts=(data.teams||[]);
+  const ts=(data.teams||[]).filter(canSeeTeam);   // a restricted team never reaches anyone outside its allow-list
   if(seesAllTeams()) return ts;
   const me=myName(); if(!me) return [];
   const viewSeats=myTeamSeatIds();
@@ -4841,7 +4864,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=162;
+const BUILD=163;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5616,7 +5639,7 @@ function mirroredRows(t, key){
   const add=(o,h)=>{ if(seen.has(o.id)) return; seen.add(o.id); rows.push({o,home:h,mirror:true}); };
   // EXPLICIT surfacing: an item shows on its home team + any team in item.showOn (the chips you clicked).
   // Same rule for Rocks AND measurables — nothing implicit, so nothing surprises you.
-  (data.teams||[]).forEach(h=>{ if(h===t) return;
+  (data.teams||[]).forEach(h=>{ if(h===t || !canSeeTeam(h)) return;   // a restricted team's items never mirror onto a board for people who can't see it
     (h[key]||[]).forEach(o=>{ if(Array.isArray(o.showOn) && o.showOn.indexOf(t.id)>=0) add(o,h); }); });
   return rows;
 }
@@ -5941,7 +5964,7 @@ function rockPct(r){ const ms=r.milestones||[]; if(!ms.length) return r.status==
 function renderCompanyRocks(){
   const wrap=$("#rocksWrap");
   // Defense-in-depth: even if reached, a non-leadership viewer only rolls up their OWN pillar's teams.
-  const teams=canSeeAllPillars()?(data.teams||[]):(data.teams||[]).filter(t=>myPillarIds().has(facilityOfTeam(t)));
+  const teams=(canSeeAllPillars()?(data.teams||[]):(data.teams||[]).filter(t=>myPillarIds().has(facilityOfTeam(t)))).filter(canSeeTeam);
   const all=[]; teams.forEach(t=>(t.rocks||[]).forEach(r=>all.push(r)));
   if(!all.length){
     wrap.innerHTML=`<div class="empty"><span class="emoji">🎯</span>No Rocks anywhere yet.<br>Rocks added by any team will appear here automatically.</div>`;
@@ -6582,7 +6605,7 @@ function printSnapshot(){
 function printVTO(){
   if(!canPrintVTO()) return;   // leadership + facility leaders only
   // "Pick the team each time": choose whose Quarterly Rocks join the packet (or V/TO only).
-  const teams = seesAllTeams() ? (data.teams||[]) : teamsForUser();
+  const teams = teamsForUser();
   openSheet(`<h2>Print V/TO Packet</h2>
     <div class="hint" style="margin:-4px 2px 12px">Include a team's Quarterly Rocks with the V/TO${canSeeFinancials()?" &amp; RPM":""}? Pick a team, or print the V/TO on its own.</div>
     <div class="who-list" id="pk-teams">
@@ -7229,9 +7252,9 @@ function showOnboard(){
   const facs=acFunctionSeats(), facIds=new Set(facs.map(f=>f.id));
   const facOf=s=>{ const pl=pillarSeatOf(s.id); return (pl&&facIds.has(pl.id))?pl.id:ONB_COMPANY; };
   const useFac=facs.length>0;   // no Integrator/facilities on the chart yet → fall back to the full list
-  const hasCompany=useFac && seats.some(s=>facOf(s)===ONB_COMPANY);
+  const hasCompany=useFac && seats.some(s=>facOf(s)===ONB_COMPANY && !seatOpensRestricted(s));
   if(useFac && onbFac && onbFac!==ONB_COMPANY && !facIds.has(onbFac)) onbFac=null;
-  const shown=useFac?(onbFac?seats.filter(s=>facOf(s)===onbFac):[]):seats;
+  const shown=(useFac?(onbFac?seats.filter(s=>facOf(s)===onbFac):[]):seats).filter(s=>!seatOpensRestricted(s));
   if(onbSeat && !shown.some(s=>s.id===onbSeat)) onbSeat=null;   // switched facility → drop a seat from the old one
   const picked=onbSeat?seats.find(s=>s.id===onbSeat):null;
   // The admin builds the chart; a new user PICKS their existing seat (no self-created duplicates).
@@ -7275,7 +7298,7 @@ function finishOnboard(skipSeat){
   let joinSeat=null;
   if(skipSeat!==true){
     const seats=data.accountability.seats;
-    const seat=onbSeat?seats.find(s=>s.id===onbSeat):null;
+    const seat=onbSeat?seats.find(s=>s.id===onbSeat&&!seatOpensRestricted(s)):null;
     if(!seat){ $("#onb-msg").textContent=(acFunctionSeats().length&&!onbFac)?"Choose your facility first, then pick your seat.":"Pick your seat from the list — or use the link below if it isn't there yet."; return; }
     seat.names=seatNames(seat);
     if(!seat.names.some(n=>sameName(n,name))) seat.names.push(name);   // add me to the seat; several people may share it
@@ -7464,6 +7487,7 @@ function canSeePlanning(){ return isLeadership() || iHavePerm("viewAll") || faci
 function facilitiesLedBy(name){ if(!name) return []; return acFunctionSeats().filter(s=>seatHasName(s,name)).map(s=>s.id); }
 function leadsFacilityOf(t, me){ return !!(t && t.facility && facilitiesLedBy(me).indexOf(t.facility)>=0); }
 function canEditTeam(t){ t=t||TEAM(); if(isLeadership()) return true; const me=myName(); if(!me) return false;
+  if(!canSeeTeam(t)) return false;   // restricted team: no edit path (grant, editor list) works for someone who may not even see it
   // Explicit seat grant: "Edit Rocks & Scorecards" for this seat + everyone below covers this team.
   if(t.seatId && permScope("work").has(t.seatId)) return true;
   // The team's designated LEADER can always manage their own team (add Rocks/measurables, run the
@@ -7618,7 +7642,7 @@ function renderAdmin(){
         // their members from the chart, so t.members is empty for them — counting it showed a false "0".
         const memCount=(teamHasCustomMembers(t)||teamIsChartDriven(t)) ? teamMemberNames(t).length : (t.members||[]).length;
         return `<div class="adm-row">
-        <div><div class="nm">${esc(t.name)}</div>
+        <div><div class="nm">${esc(t.name)}${t.restricted?' <span title="Restricted team — hidden from everyone outside its allow-list">🔒</span>':""}</div>
           <div class="em">${t.leader?`Leader: <b>${esc(t.leader)}</b> · `:""}${memCount} member${memCount===1?"":"s"}${(t.editors||[]).length?" · Editors: "+t.editors.map(esc).join(", "):""}${ls?" · 🔗 <b>"+esc(ls.role||"seat")+"</b>":' · <span style="color:var(--amber)">not linked to a seat</span>'}</div></div>
         <button class="btn ghost sm" data-team-editors="${t.id}">Manage</button>
       </div>`; }).join("");
@@ -8009,6 +8033,9 @@ function manageTeamEditors(teamId){
       <div class="who-list" id="te-list">${people.length?people.map(n=>`<button class="onb-seat ${t.editors.some(e=>sameName(e,n))?"on":""}" data-toggle-editor="${esc(n)}">${esc(n)}</button>`).join(""):'<div class="hint">No people yet.</div>'}</div>`;
   }
   openSheet(`<h2>Team · ${esc(t.name)}</h2>${body}
+    <div style="margin-top:16px"><div class="sec-title" style="margin:0 2px 4px">Restricted team</div>
+      <label class="ck-lbl" style="margin:2px 2px 6px"><input type="checkbox" id="te-restricted" ${t.restricted?"checked":""}> 🔒 Only leadership, this facility's leader and this team's own members can see it</label>
+      <div class="hint" style="margin:0 2px">When on, this team's Rocks, Scorecard, L10 and Lists are hidden from everyone except the Visionary, the Integrator, full admins, the leader of ${esc((t.seatId&&pillarSeatOf(t.seatId)&&pillarSeatOf(t.seatId).role)||"its facility")}, and the people on the team. It also drops out of Cabana Boy, Company Rocks and every other roll-up for everyone else — a "See every team" grant does not open it.</div></div>
     <div class="field" style="margin-top:16px"><label>Sales Card <small>(custom weekly grid — e.g. Admissions)</small></label>
       <div class="hint" style="margin:0 2px 8px">${t.salesCard?"✓ This team has a Sales Card. Its members &amp; supervisors see the <b>Sales Card</b> tab.":"Give this team a weekly people×metrics grid. Only this team's members &amp; supervisors will see it."}</div>
       <button class="btn ghost sm" id="te-sales">${t.salesCard?"Open Sales Card":"＋ Enable Sales Card (Admissions template)"}</button></div>
@@ -8018,6 +8045,7 @@ function manageTeamEditors(teamId){
       if(!confirm("Add the Admissions Sales Card to “"+t.name+"”?\n\nIts members and supervisors will get a Sales Card tab with the weekly grid.")) return;
       t.salesCard=SALES_TEMPLATE(); save(true); closeSheet(); setTeam(t.id); switchView("sales"); setSync("Sales Card enabled ✓"); }; }
   { const nm=$("#te-name"); if(nm) nm.onchange=()=>{ t.name=nm.value.trim()||"Team"; save(); renderTeamPicker(); }; }
+  { const rs=$("#te-restricted"); if(rs) rs.onchange=()=>{ if(rs.checked) t.restricted=true; else delete t.restricted; save(true); setSync(rs.checked?"🔒 "+t.name+" is now restricted":t.name+" is no longer restricted"); }; }
   { const ss=$("#te-seat"); if(ss) ss.onchange=()=>{ t.seatId=ss.value||""; if(t.seatId){ const s=acSeatById(t.seatId); if(s) s.l10=true; } save(); closeSheet(); manageTeamEditors(teamId); }; }
   { const cc=$("#te-custom"); if(cc) cc.onclick=()=>{
       if(cc.checked){ if(!teamHasCustomMembers(t)) t.seatIds=(t.seatId?[t.seatId]:[]); }   // start from the leader seat, then add
@@ -8105,7 +8133,7 @@ function myNotes(){
   // A live L10 is worth surfacing to everyone but the person already running it.
   (data.teams||[]).forEach(t=>{
     const lm=t.liveMeeting;
-    if(lm && lm.facilitatorEmail!==myEmail())
+    if(lm && canSeeTeam(t) && lm.facilitatorEmail!==myEmail())
       out.push({id:"l10:"+t.id+":"+(lm.date||"")+":"+(lm.facilitatorEmail||""), icon:"📋",
         title:t.name+" L10 is running now",
         sub:(lm.facilitatorName||"Someone")+" is facilitating · tap to follow along",
@@ -9424,9 +9452,9 @@ function editSeat(id, newParent){
     <div class="field"><label>Key Roles / Responsibilities <button type="button" class="btn ghost sm ai-btn" id="s-ai-lma" style="margin-left:8px;padding:2px 9px">✨ Suggest</button></label>
       <div class="hint ai-status" id="s-ai-status" hidden></div>
       ${resp.map((r,i)=>`<input class="resp-in" value="${esc(r)}" placeholder="Responsibility ${i+1}" style="margin-bottom:7px">`).join("")}</div>
-    ${(data.teams||[]).filter(t=>t.seatId!==rec.id).length?`<div class="field"><label>Also reports into <small>(other team meetings this person attends — a dotted-line report)</small></label>
+    ${(data.teams||[]).filter(t=>t.seatId!==rec.id&&canSeeTeam(t)).length?`<div class="field"><label>Also reports into <small>(other team meetings this person attends — a dotted-line report)</small></label>
       <div class="hint" style="margin:0 2px 8px">Tick another team's meeting and this person joins its L10 — they get a spot in its WIFLS/Headlines and can see that team's board, on top of their own.</div>
-      <div class="who-list" id="s-also">${(data.teams||[]).filter(t=>t.seatId!==rec.id).map(t=>`<button type="button" class="onb-seat ${(rec.alsoTeams||[]).indexOf(t.id)>=0?"on":""}" data-also="${t.id}">${esc(t.name)}</button>`).join("")}</div></div>`:""}
+      <div class="who-list" id="s-also">${(data.teams||[]).filter(t=>t.seatId!==rec.id&&canSeeTeam(t)).map(t=>`<button type="button" class="onb-seat ${(rec.alsoTeams||[]).indexOf(t.id)>=0?"on":""}" data-also="${t.id}">${esc(t.name)}</button>`).join("")}</div></div>`:""}
     ${canGrantPerms()?(()=>{ const allow=grantableKeys();
         const shown=PERM_DEFS.filter(p=>allow.indexOf(p.key)>=0);
         const restricted=PERM_DEFS.filter(p=>allow.indexOf(p.key)<0 && seatHasPerm(rec,p.key));
@@ -9475,6 +9503,7 @@ function editSeat(id, newParent){
     { const cb=document.querySelector('.s-color.on'); const cv=cb?cb.dataset.color:""; if(cv) rec.color=cv; else delete rec.color; }
     rec.responsibilities=[...document.querySelectorAll(".resp-in")].map(i=>i.value.trim()).filter(Boolean);
     { const al=[...document.querySelectorAll('#s-also [data-also].on')].map(b=>b.dataset.also);   // dotted-line meetings
+      (rec.alsoTeams||[]).forEach(id=>{ const tt=(data.teams||[]).find(x=>x&&x.id===id); if(tt && !canSeeTeam(tt) && al.indexOf(id)<0) al.push(id); });   // keep ticks this editor couldn't see
       if(al.length) rec.alsoTeams=al; else delete rec.alsoTeams; }
     if(canGrantPerms()){   // whoever can edit this seat may set its permissions
       const allow=grantableKeys();
@@ -10641,7 +10670,7 @@ function teamQuarterView(t, qW1, qLabel){
 function healthData(){
   const qW1=companyQuarterW1(), qLabel=quarterLabel(qW1), wi=quarterWeekIndex(qW1);
   // Filter to the selected facility; the pillar is DERIVED from each team's seat on the chart ("" = whole company).
-  const teams=(data.teams||[]).filter(t=> t && (!healthFacility || facilityOfTeam(t)===healthFacility));
+  const teams=(data.teams||[]).filter(t=> t && canSeeTeam(t) && (!healthFacility || facilityOfTeam(t)===healthFacility));
   const rocks=[], weeks=[], byTeam=[], behindTeams=[];
   for(let i=0;i<13;i++) weeks.push({i:i, on:0, off:0, tot:0, pct:null});
   let totalMeas=0, wOn=0, wOff=0, qOn=0, qOff=0, qBlank=0;
@@ -11404,8 +11433,8 @@ function renderPAWorksheet(){
     || Object.keys(r.qc||{}).some(k=>(r.qc[k]||"").trim());
 
   // Their Rocks and Scorecard trend, pulled live — steps 3 & 4 of your leader prep
-  const rocks=[]; (data.teams||[]).forEach(t=>(t.rocks||[]).forEach(x=>{ if(sameName(x.owner,person)) rocks.push({t:t.name,r:x}); }));
-  const meas=[];  (data.teams||[]).forEach(t=>(t.measurables||[]).forEach(m=>{ if(sameName(m.owner,person)) meas.push({t:t,m:m}); }));
+  const rocks=[]; (data.teams||[]).filter(canSeeTeam).forEach(t=>(t.rocks||[]).forEach(x=>{ if(sameName(x.owner,person)) rocks.push({t:t.name,r:x}); }));
+  const meas=[];  (data.teams||[]).filter(canSeeTeam).forEach(t=>(t.measurables||[]).forEach(m=>{ if(sameName(m.owner,person)) meas.push({t:t,m:m}); }));
 
   wrap.innerHTML=`
     <button class="btn ghost sm" id="pa-back">‹ Back to my people</button>
@@ -11736,7 +11765,7 @@ function showSalesArchiveWeek(idx){
 // Quarter-to-date rolling tally, rendered on Cabana Boy for every sales-card team in the current filter.
 function salesTallyHtml(){
   const qk=salesQuarterKey(companyQuarterW1());
-  const teams=(data.teams||[]).filter(t=> t.salesCard && (!healthFacility || facilityOfTeam(t)===healthFacility));
+  const teams=(data.teams||[]).filter(t=> t.salesCard && canSeeTeam(t) && (!healthFacility || facilityOfTeam(t)===healthFacility));
   if(!teams.length) return "";
   let html=`<div class="sec-title" style="margin-top:26px">Sales Card · quarter-to-date <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">(${esc(qk.replace('-',' '))} — resets each quarter)</small></div>
     <div class="hint" style="margin:0 2px 10px">Each advocate's numbers added up across this quarter's weeks.</div>`;
@@ -11764,7 +11793,7 @@ function renderSetup(){
       <div class="hint" style="margin:0">A team's <b>Week&nbsp;1 date, departments</b> and the <b>quarter close-out</b> now live on that team's <b>Scorecard</b> — tap the <b>⚙</b> there. Adding or removing <b>teams &amp; people</b> (leaders, reporting, rosters, editors) is in <b>Admin</b>.</div>
     </div>
 
-    ${canSeeAllPillars()?`<div class="sec-title" style="margin-top:26px">Backup & Share</div>
+    ${(canSeeAllPillars() && (data.teams||[]).every(canSeeTeam))?`<div class="sec-title" style="margin-top:26px">Backup & Share</div>
     <div class="hint" style="margin-bottom:12px">Export saves a full snapshot file (the whole company's data, including confidential Quarterly-Conversation ratings) — leadership only. Careful: Import replaces the team's live data for everyone. For point-in-time recovery use <b>Admin → Restore points</b> instead.</div>
     <button class="btn ghost wide" id="s-export" style="margin-bottom:10px">⤓ Export backup file</button>
     <button class="btn ghost wide" id="s-import">⤒ Import from file</button>`:""}
@@ -11989,7 +12018,7 @@ function editGuide(){
    to-dos, the accountability chart, and the V/TO) and lets Claude answer questions over it. People-Analyzer
    ratings are NEVER included. Team boards are scoped to what this user can already see (facility isolation). */
 function coachDigest(){
-  const L=[], teams = seesAllTeams() ? (data.teams||[]) : teamsForUser();
+  const L=[], teams = teamsForUser();
   L.push("=== TEAMS & THEIR BOARDS ===");
   teams.forEach(t=>{
     const cwi=currentWeekIndexFor(t);
