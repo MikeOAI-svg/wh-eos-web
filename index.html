@@ -4798,8 +4798,7 @@ function teamsForUser(){
   const me=myName(); if(!me) return [];
   const viewSeats=myTeamSeatIds();
   const also=alsoTeamIdsFor(me);      // teams I'm a dotted-line member of, via my seat's "Also reports into"
-  const work=permScope("work");       // teams I was explicitly granted "Edit Rocks & Scorecards" on — can't edit a board you can't open
-  return ts.filter(t=> also.has(t.id) || (t.seatId && work.has(t.seatId)) || teamMemberNames(t).some(n=>sameName(n,me))   // any team I'm derived to be a member of
+  return ts.filter(t=> also.has(t.id) || teamMemberNames(t).some(n=>sameName(n,me))   // any team I'm derived to be a member of
       || (teamIsChartDriven(t)
           ? viewSeats.has(t.seatId)                                    // CHART-DRIVEN: teams at/below my seat + my own L10
           : ((t.members||[]).some(m=>sameName(m.name,me))              // legacy fallback for teams not yet linked to a seat
@@ -8668,12 +8667,11 @@ function permScope(key){ const ids=new Set(); const me=myName(); if(!me) return 
     seatsAtOrBelowId(s.id).forEach(id=>ids.add(id));
     // "Edit Rocks & Scorecards" is about the team you WORK ON: also cover your own team (the L10 seat above you),
     // not only teams below you — so ticking the box lets a member build their team's Rocks & Scorecard.
-    if(key==="work"){ let a=nearestL10Ancestor(s.id);
-      // A SIDE report / staff seat (coach, EA) isn't auto-placed on their manager's L10, so nearestL10Ancestor
-      // is null for them — but this is an EXPLICIT grant, so it must still reach the team they hang off…
-      if(!a){ let p=acSeatById(s.parent), g=0; while(p && g++<60){ if(p.l10){ a=p; break; } p=acSeatById(p.parent); } }
-      if(a) ids.add(a.id);
-      // …and any team ticked under "Also reports into" on this seat.
+    if(key==="work"){ const a=nearestL10Ancestor(s.id); if(a) ids.add(a.id);
+      // A SIDE report / staff seat (coach, Special Ops, EA) is deliberately NOT on their manager's L10, so
+      // nearestL10Ancestor is null and this grant must NEVER reach up to that team on its own (Special Ops
+      // must not get the C-Suite team just for having edit rights over their own branch). The one way in is
+      // explicit: tick that team under "Also reports into" on the seat — then the grant covers it too.
       (s.alsoTeams||[]).forEach(tid=>{ const t=(data.teams||[]).find(x=>x&&x.id===tid); if(t&&t.seatId) ids.add(t.seatId); });
     }
   } }); return ids; }
