@@ -4798,7 +4798,8 @@ function teamsForUser(){
   const me=myName(); if(!me) return [];
   const viewSeats=myTeamSeatIds();
   const also=alsoTeamIdsFor(me);      // teams I'm a dotted-line member of, via my seat's "Also reports into"
-  return ts.filter(t=> also.has(t.id) || teamMemberNames(t).some(n=>sameName(n,me))   // any team I'm derived to be a member of
+  const work=permScope("work");       // teams I was explicitly granted "Edit Rocks & Scorecards" on — can't edit a board you can't open
+  return ts.filter(t=> also.has(t.id) || (t.seatId && work.has(t.seatId)) || teamMemberNames(t).some(n=>sameName(n,me))   // any team I'm derived to be a member of
       || (teamIsChartDriven(t)
           ? viewSeats.has(t.seatId)                                    // CHART-DRIVEN: teams at/below my seat + my own L10
           : ((t.members||[]).some(m=>sameName(m.name,me))              // legacy fallback for teams not yet linked to a seat
@@ -4841,7 +4842,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=161;
+const BUILD=162;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -8667,7 +8668,14 @@ function permScope(key){ const ids=new Set(); const me=myName(); if(!me) return 
     seatsAtOrBelowId(s.id).forEach(id=>ids.add(id));
     // "Edit Rocks & Scorecards" is about the team you WORK ON: also cover your own team (the L10 seat above you),
     // not only teams below you — so ticking the box lets a member build their team's Rocks & Scorecard.
-    if(key==="work"){ const a=nearestL10Ancestor(s.id); if(a) ids.add(a.id); }
+    if(key==="work"){ let a=nearestL10Ancestor(s.id);
+      // A SIDE report / staff seat (coach, EA) isn't auto-placed on their manager's L10, so nearestL10Ancestor
+      // is null for them — but this is an EXPLICIT grant, so it must still reach the team they hang off…
+      if(!a){ let p=acSeatById(s.parent), g=0; while(p && g++<60){ if(p.l10){ a=p; break; } p=acSeatById(p.parent); } }
+      if(a) ids.add(a.id);
+      // …and any team ticked under "Also reports into" on this seat.
+      (s.alsoTeams||[]).forEach(tid=>{ const t=(data.teams||[]).find(x=>x&&x.id===tid); if(t&&t.seatId) ids.add(t.seatId); });
+    }
   } }); return ids; }
 // Who may hand out permissions = anyone who can edit that part of the chart (leadership, pillar leaders,
 // or anyone with the "Edit the org chart" grant). They can delegate branch-scoped powers to their reports.
