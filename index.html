@@ -4864,7 +4864,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=164;
+const BUILD=165;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5425,7 +5425,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     mergeCompany, mergeTeam, saveRock, savePaRec, scorecardPrintHtml, rocksPrintHtml,
     meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
     acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats,
-    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter, get BUILD(){return BUILD;},
+    teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter,
+    canSeeRatingsFor, canRatePerson, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -7443,11 +7444,31 @@ function directReportsOf(name){
   return [...m.values()].sort((a,b)=>a.localeCompare(b));
 }
 const isSupervisor=()=>directReportsOf(myName()).length>0;
-/* YOUR RULE: a supervisor sees the people who report directly to them, and never
-   their own rating. Everything that renders someone else's PA goes through here. */
+// Everyone at or BELOW one of my seats on the chart — my whole branch, every level down. Excludes me and
+// my seat's co-occupants. (Uses seatsAtOrBelow, which includes side/staff reports — they're people I oversee.)
+function peopleBelowMe(name){
+  if(!name) return [];
+  const mine=new Set(seatsFor(name).map(s=>s.id)), m=new Map();
+  seatsAtOrBelow(name).forEach(id=>{ if(mine.has(id)) return;
+    const s=acSeatById(id); if(s) seatNames(s).forEach(v=>{ v=(v||"").trim(); if(v && !sameName(v,name)) m.set(v.toLowerCase(),v); }); });
+  return [...m.values()].sort((a,b)=>a.localeCompare(b));
+}
+/* VISIBILITY cascades UP the chart: you can SEE the People Analyzer of anyone in your branch — your direct
+   reports AND everyone below them, all the way down — so a team lead sees their team, that lead's manager
+   sees everyone below her, her director sees everyone below them, and so on. (HR/eval admins see all.)
+   EDITING a PA stays with the person's DIRECT leader — see canRatePerson. Everything that renders someone
+   else's PA goes through canSeeRatingsFor; everything that edits one goes through canRatePerson. */
 function canSeeRatingsFor(person){
   const me=myName(); if(!me||!person) return false;
   if(sameName(person,me)) return false;              // never your own
+  if(isEvalAdmin()) return true;
+  return peopleBelowMe(me).some(n=>sameName(n,person));
+}
+// Who may EDIT (rate) a person's PA: their DIRECT leader on the chart, plus HR/eval admins. People higher up
+// the branch can VIEW it (above) but not change it — "the leader owns the rating".
+function canRatePerson(person){
+  const me=myName(); if(!me||!person||sameName(person,me)) return false;
+  if(isEvalAdmin()) return true;
   return directReportsOf(me).some(n=>sameName(n,person));
 }
 
@@ -11358,6 +11379,24 @@ function renderPeople(){
   } else {
     html+=`<div class="hint" style="margin-top:18px">You have no direct reports on the Accountability Chart, so there's no dashboard here. If that's wrong, add the reporting line under Vision → Accountability.</div>`;
   }
+
+  // ── everyone BELOW your direct reports — the rest of your branch, read-only, grouped by their leader.
+  //    This is how visibility cascades up: a manager sees her leads' teams, a director sees everyone under them.
+  const below=peopleBelowMe(me), directSet=new Set(reports.map(n=>n.trim().toLowerCase()));
+  const indirect=below.filter(n=>!directSet.has(n.trim().toLowerCase()));
+  if(indirect.length){
+    const byMgr={}; indirect.forEach(p=>{ const mgr=managerOf(p)||"—"; (byMgr[mgr]=byMgr[mgr]||[]).push(p); });
+    html+=`<div class="sec-title" style="margin-top:24px">Everyone Below You · ${qLabel(q)} <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">— ${indirect.length} ${indirect.length===1?"person":"people"}, read-only</small></div>
+      <div class="hint" style="margin:0 2px 10px">Everyone in your branch beneath your direct reports, grouped by their leader. Open any to review their People Analyzer — only their direct leader can edit it.</div>`;
+    Object.keys(byMgr).sort((a,b)=>a.localeCompare(b)).forEach(mgr=>{
+      html+=`<div style="margin:12px 2px 5px;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)">Under ${esc(mgr)}</div>
+        <div class="pa-tablewrap" style="margin-bottom:6px"><table class="pa-table">
+          <thead><tr><th class="pn">Person</th>${CORE_VALUES.map(c=>`<th title="${esc(c.label)}">${esc(c.abbr)}</th>`).join("")}
+            ${GWC_KEYS.map(g=>`<th title="${esc(g.label)}">${g.k.toUpperCase()}</th>`).join("")}<th>Status</th><th></th></tr></thead>
+          <tbody>${byMgr[mgr].sort((a,b)=>a.localeCompare(b)).map(p=>paRow(p,q)).join("")}</tbody></table></div>`;
+    });
+  }
+
   wrap.innerHTML=html;
 
   // wire my self-assessment
@@ -11439,10 +11478,12 @@ function paGrid(rating, scope, readOnly){
 function renderPAWorksheet(){
   const wrap=$("#peopleWrap"), me=myName(), person=paPerson, q=paQuarter||curQuarter();
   if(!canSeeRatingsFor(person)){    // hard stop — never render someone you may not see
-    wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>You can only open the people who report directly to you.</div>`;
+    wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>You can only open the People Analyzer of someone in your branch — your reports and everyone below them.</div>`;
     paPerson=null; return;
   }
   const r=paRec(person,q,true);
+  const canEdit=canRatePerson(person);     // the DIRECT leader (or HR) edits; higher-ups above them view only
+  const directMgr=managerOf(person);
   const mm=mismatches(r.self,r.sup);
   const low=belowBar(rateDone(r.final)?r.final:r.sup);
   const breaches=barBreaches(rateDone(r.final)?r.final:r.sup);
@@ -11464,21 +11505,22 @@ function renderPAWorksheet(){
     <div class="pa-head"><div><h2 style="margin:8px 0 2px">${esc(person)}</h2>
       <div class="hint">Quarterly Conversation · ${qLabel(q)}</div></div>
       ${low?`<span class="pill red">▲ Below the bar</span>`:rateDone(r.sup)?`<span class="pill green">At/above bar</span>`:`<span class="pill amber">Not rated yet</span>`}</div>
+    ${!canEdit?`<div class="hint" style="margin:8px 2px 0;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)">👁 <b>Read-only.</b> ${esc(person)} is in your branch${directMgr?` — their direct leader is <b>${esc(directMgr)}</b>`:""}. You can see everything; only their direct leader${isEvalAdmin()?" (or HR)":""} changes the ratings, notes and status.</div>`:""}
 
     <div class="sec-title" style="margin-top:16px">Track record</div>
     <div class="hint" style="margin:0 2px 8px">Where ${esc(person)} has landed in past quarters — look for movement, not one bad line.</div>
     ${paHistoryHtml(person, q)}
 
-    <div class="sec-title" style="margin-top:18px">1 · Your read of ${esc(person)}</div>
-    <div class="hint" style="margin:0 2px 8px">Score the last 90 days on evidence, not impressions.</div>
-    <div class="card">${paGrid(r.sup,"sup")}</div>
+    <div class="sec-title" style="margin-top:18px">1 · ${canEdit?"Your read of ":"Leader's read of "}${esc(person)}</div>
+    <div class="hint" style="margin:0 2px 8px">${canEdit?"Score the last 90 days on evidence, not impressions.":"Their direct leader's read of the last 90 days."}</div>
+    <div class="card">${paGrid(r.sup,"sup",!canEdit)}</div>
 
     <div class="sec-title" style="margin-top:18px">2 · ${esc(person)}'s self-assessment</div>
     ${!rateStarted(r.self)
       ? `<div class="hint" style="margin:0 2px 8px">${esc(person)} hasn't started a self-assessment for ${esc(qLabel(q))} yet — ask them to before you meet.</div>`
       : `<div class="hint" style="margin:0 2px 8px">${rateDone(r.self)?`Exactly how ${esc(person)} rated themselves. Compare it with your read above.`:`⚠ ${esc(person)} has only <b>partly</b> filled this in — here's what they've entered so far.`}</div>
          <div class="card">${paGrid(r.self,"selfview",true)}</div>
-         <div style="margin:8px 2px 0"><button class="btn ghost sm" id="pa-reset-self">↺ Reset ${esc(person)}'s self-assessment</button></div>
+         ${canEdit?`<div style="margin:8px 2px 0"><button class="btn ghost sm" id="pa-reset-self">↺ Reset ${esc(person)}'s self-assessment</button></div>`:""}
          ${!rateDone(r.sup)
             ? `<div class="hint" style="margin:10px 2px 0">Fill in your own read above and where you differ from ${esc(person)} shows up here.</div>`
             : mm.length
@@ -11490,7 +11532,7 @@ function renderPAWorksheet(){
     ${breaches.length?`<div class="sec-title" style="margin-top:18px">3 · Below the bar — three examples required</div>
       <div class="hint" style="margin:0 2px 8px">Non-negotiable: Core Value <b>behaviour</b>, not performance. Not “your numbers are low” — “your behaviour violated X in these specific ways.”</div>
       ${breaches.map(b=>`<div class="field"><label>${esc(b.label)} — three specific examples, and what at/above the bar looks like</label>
-        <textarea data-note="${b.k}" rows="3" placeholder="1. On [date]…&#10;2. …&#10;3. …">${esc(r.notes[b.k]||"")}</textarea></div>`).join("")}`:""}
+        <textarea data-note="${b.k}" rows="3" ${canEdit?"":"readonly"} placeholder="1. On [date]…&#10;2. …&#10;3. …">${esc(r.notes[b.k]||"")}</textarea></div>`).join("")}`:""}
 
     <div class="sec-title" style="margin-top:18px">4 · Their Rocks</div>
     ${rocks.length?rocks.map(x=>`<div class="qc-rock"><div><b>${esc(x.r.title||"(untitled)")}</b><div class="hint">${esc(x.t)} · ${rockPct(x.r)}% · ${(x.r.milestones||[]).filter(m=>m.done).length}/${(x.r.milestones||[]).length} milestones</div></div>
@@ -11503,33 +11545,34 @@ function renderPAWorksheet(){
     <div class="sec-title" style="margin-top:18px">6 · The Five Questions</div>
     ${[["working","What is working?"],["notWorking","What is not working?"],["start","One thing we should START doing"],
        ["stop","One thing we should STOP doing"],["cont","One thing we should CONTINUE doing"]]
-      .map(([k,l])=>`<div class="field"><label>${l}</label><textarea data-qc="${k}" rows="2">${esc(r.qc[k]||"")}</textarea></div>`).join("")}
+      .map(([k,l])=>`<div class="field"><label>${l}</label><textarea data-qc="${k}" rows="2" ${canEdit?"":"readonly"}>${esc(r.qc[k]||"")}</textarea></div>`).join("")}
 
     <div class="field"><label>“Where can I be a better leader for you?”</label>
       <div class="hint" style="margin:-4px 2px 6px">Ask it, then sit in the silence. Don't defend. Listen and thank them.</div>
-      <textarea data-qc="leaderAsk" rows="2">${esc(r.qc.leaderAsk||"")}</textarea></div>
+      <textarea data-qc="leaderAsk" rows="2" ${canEdit?"":"readonly"}>${esc(r.qc.leaderAsk||"")}</textarea></div>
 
     <div class="sec-title" style="margin-top:18px">7 · Commitments</div>
-    <div class="field"><label>What ${esc(person)} commits to before next quarter</label><textarea data-qc="commitReport" rows="2">${esc(r.qc.commitReport||"")}</textarea></div>
-    <div class="field"><label>What you commit to</label><textarea data-qc="commitLeader" rows="2">${esc(r.qc.commitLeader||"")}</textarea></div>
+    <div class="field"><label>What ${esc(person)} commits to before next quarter</label><textarea data-qc="commitReport" rows="2" ${canEdit?"":"readonly"}>${esc(r.qc.commitReport||"")}</textarea></div>
+    <div class="field"><label>What you commit to</label><textarea data-qc="commitLeader" rows="2" ${canEdit?"":"readonly"}>${esc(r.qc.commitLeader||"")}</textarea></div>
 
     <div class="sec-title" style="margin-top:18px">8 · Final rating <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">— the leader owns this</small></div>
     <div class="hint" style="margin:0 2px 8px">After the discussion, set where it actually lands. This is what shows on your dashboard and in ${esc(person)}'s history.</div>
-    <div class="card">${paGrid(r.final,"final")}
-      <button class="btn ghost sm" id="pa-copy" style="margin-top:10px">Copy my read into final</button></div>
+    <div class="card">${paGrid(r.final,"final",!canEdit)}
+      ${canEdit?`<button class="btn ghost sm" id="pa-copy" style="margin-top:10px">Copy my read into final</button>`:""}</div>
 
     <div class="sheet-actions" style="margin:16px 0 8px">
       <button class="btn ghost" id="pa-back2">Back</button>
-      ${paHasWork?`<button class="btn ghost" id="pa-reset">↺ Reset</button>`:""}
-      <button class="btn" id="pa-complete">${r.status==="complete"?"Conversation complete ✓":"Mark conversation complete"}</button>
+      ${(canEdit&&paHasWork)?`<button class="btn ghost" id="pa-reset">↺ Reset</button>`:""}
+      ${canEdit?`<button class="btn" id="pa-complete">${r.status==="complete"?"Conversation complete ✓":"Mark conversation complete"}</button>`:(r.status==="complete"?`<span class="pill green">Conversation complete ✓</span>`:"")}
     </div>
-    ${paHasWork?`<div style="text-align:center;margin:0 0 30px">
+    ${(canEdit&&paHasWork)?`<div style="text-align:center;margin:0 0 30px">
         <button class="btn danger" id="pa-delete" style="max-width:240px">Delete this quarter's record</button>
         <div class="hint" style="margin-top:7px;line-height:1.45"><b>Reset</b> re-opens it and clears your ratings, notes &amp; answers — it keeps ${esc(person)}'s own self-assessment.<br><b>Delete</b> removes the whole ${esc(qLabel(q))} record from ${esc(person)}'s history.</div>
       </div>`:`<div style="margin-bottom:30px"></div>`}`;
 
   const back=()=>{ paPerson=null; renderPeople(); };
   $("#pa-back").onclick=back; $("#pa-back2").onclick=back;
+  if(canEdit){   // only the direct leader (or HR) gets the interactive handlers; higher-ups view read-only
   wrap.querySelectorAll('.pa-grid[data-scope="sup"] [data-cv]').forEach(c=>c.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>{
     r.sup.v[c.dataset.cv]=b.dataset.rate; r.sup.at=todayIso(); r.sup.by=myEmail(); savePaRec(r); renderPAWorksheet(); }));
   wrap.querySelectorAll('.pa-grid[data-scope="sup"] [data-gwc]').forEach(c=>c.querySelectorAll("[data-yn]").forEach(b=>b.onclick=()=>{
@@ -11562,6 +11605,7 @@ function renderPAWorksheet(){
       if(!confirm(`Reset ${person}'s self-assessment for ${qLabel(q)}?\n\nThis clears only the ratings ${person} entered about themselves, so they can fill it in again. Your read, the final rating and your notes stay put.`)) return;
       r.self=blankRating(); savePaRec(r); renderPAWorksheet();
     }; }
+  }   // end if(canEdit)
 }
 // A person's 13-week trend for one measurable — "trends matter more than any single week"
 function qcSpark(team,m){
