@@ -4864,7 +4864,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=166;
+const BUILD=167;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -8869,6 +8869,7 @@ function discardDraftChart(){ if(!canDraftChart()||!data.accountabilityDraft) re
   delete data.accountabilityDraft; acDraftMode=false; save(); renderAccountability(); setSync("Draft discarded");
 }
 function renderAccountability(){
+  if(acView==="free") acView="chart";   // Free layout removed — anyone still on it falls back to the Chart
   if(acDraftMode && !data.accountabilityDraft) acDraftMode=false;   // draft removed by another leader → back to live
   const wrap=$("#visionWrap"), seats=acSeats();
   // Filter to the chosen function branch (Visionary → Integrator → function → below).
@@ -8898,11 +8899,10 @@ function renderAccountability(){
     <div class="ac-modes">
       <button class="${acView==='chart'?'active':''}" data-acview="chart">Accountability Chart</button>
       <button class="${acView==='list'?'active':''}" data-acview="list">List</button>
-      <button class="${acView==='free'?'active':''}" data-acview="free">Free layout</button>
     </div>
     <div class="ac-right">
-      ${(acView==='chart'||acView==='free')
-        ? `<div class="ac-zoom"><button data-zoom="out">−</button><button data-zoom="fit">Fit</button><button data-zoom="in">+</button>${(acView==='free'&&canEditChart())?`<button id="freeAuto" title="Re-arrange automatically">⟲ Auto-arrange</button>`:""}${canEditChart()?`${acDraftMode?"":`<button data-zoom="person" title="Add a team member">＋Person</button>`}<button data-zoom="add" title="Add seat">＋Seat</button>`:""}</div>`
+      ${(acView==='chart')
+        ? `<div class="ac-zoom"><button data-zoom="out">−</button><button data-zoom="fit">Fit</button><button data-zoom="in">+</button>${canEditChart()?`${acDraftMode?"":`<button data-zoom="person" title="Add a team member">＋Person</button>`}<button data-zoom="add" title="Add seat">＋Seat</button>`:""}</div>`
         : (canEditChart()?`<button class="btn sm" id="addSeatL">+ Add Seat</button>`:"")}
       <button class="btn sm" id="acCopy" title="Copy the chart to paste into Slides, Word, Excel, Figma or an org-chart tool">⧉ Copy Chart</button>
       <button class="btn sm" id="acPrint" title="Print the Accountability Chart — graphical, one facility per page, fit to page">🖨 Print Chart</button>
@@ -8919,11 +8919,6 @@ function renderAccountability(){
       <div class="hint" style="margin:8px 2px 0">Drag empty space to pan · Fit / − / + to zoom · tap a box to edit · use the − / + on a box to collapse a branch.</div>`;
     tidyChartOnce();   // first open of a facility → collapse deep branches so a big org doesn't open as a wall of boxes
     renderChartD3();
-  } else if(acView==="free"){
-    wrap.innerHTML=`${titleHtml}${toolbar}${picker}
-      <div class="chart-vp" id="chartVp"><div class="chart-canvas" id="chartCanvas"></div></div>
-      <div class="hint free-hint"><b>Drag any box</b> to place it — down, across, anywhere. The line to its manager follows. Tap a box to edit · drag empty space to pan · Fit / − / + to zoom · <b>⟲ Auto-arrange</b> resets the placement.</div>`;
-    renderFreeChart();
   } else {
     const seen=new Set();   // SAME renderer as the printout (seatListHtml) so screen List view === print
     wrap.innerHTML=`${titleHtml}${toolbar}${picker}
