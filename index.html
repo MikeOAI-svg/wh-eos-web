@@ -1340,6 +1340,9 @@
   .tm-d{font-size:13px;line-height:1.4} .tm-d span{display:block;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
   /* ===== Annual Evaluations ===== */
   .ev-note{background:var(--accent-soft);border:1px solid var(--border);border-radius:12px;padding:11px 13px;font-size:12.5px;line-height:1.5;color:var(--text);margin-bottom:14px}
+  .ev-appr-box{border:1px solid var(--border);border-radius:10px;padding:9px 12px;margin:8px 0 2px;background:var(--card);font-size:12.5px}
+  .ev-appr{padding:2px 0;color:var(--text)} .ev-appr.pend{color:var(--muted)} .ev-appr.back{color:var(--red);margin-top:4px}
+  .rev-row:hover{border-color:var(--accent)}
   .ev-row{display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;margin-bottom:9px;box-shadow:var(--shadow)}
   .ev-row.flag{border-left:3px solid var(--accent)}
   .ev-row.hrclick{cursor:pointer}
@@ -1355,6 +1358,7 @@
   .ev-pill.due{color:var(--amber);background:var(--amber-soft)}
   .ev-pill.over{color:#fff;background:var(--red)}
   .ev-pill.set{color:var(--muted);background:var(--bg);border:1px dashed var(--border)}
+  .ev-grp{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:12px 2px 6px}
   .ev-form{display:flex;flex-direction:column;gap:2px}
   .ev-form input[readonly]{opacity:.7}
   .ev-sec{border-top:1px solid var(--border);margin-top:14px;padding-top:14px}
@@ -4864,7 +4868,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=167;
+const BUILD=169;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5531,7 +5535,11 @@ function callTangent(){
    own doc `evaluations/<their-email>`; Firestore rules let ONLY that supervisor (+ HR/admins)
    read or write it — enforced on Google's servers, not the screen. This is a second sync channel,
    independent of `data`/`save()`. Single-writer in practice (the supervisor), so last-write-wins. */
-const EVAL_HR_EMAILS=["odellmike76@gmail.com","michael.odell@warriorsheart.com","kayle.christian@warriorsheart.com"];
+const EVAL_HR_EMAILS=["odellmike76@gmail.com","michael.odell@warriorsheart.com","kayle.christian@warriorsheart.com","gwen.sanchez@warriorsheart.com","ashtyn.morgan@warriorsheart.com"];
+// All three HR specialists can open and approve ANY evaluation (they cover for each other), but each facility's
+// evals route to its own HR first. Keyed by the pillar seat's role (AC_FUNCTIONS): Shared Services → Kayle,
+// Texas → Gwen, Virginia → Ashtyn. Company-wide / shared staff (no single facility) show to all three.
+const EVAL_HR_PRIMARY={"Shared Services":"kayle.christian@warriorsheart.com","Texas Facility":"gwen.sanchez@warriorsheart.com","Virginia Facility":"ashtyn.morgan@warriorsheart.com"};
 const isEvalAdmin=()=>{ const e=myEmail(); return isAdmin() || EVAL_HR_EMAILS.indexOf(e)>=0; };
 const canDoEvals=()=>isSupervisor()||isEvalAdmin()||iHavePerm("evals");
 let evalData={reports:{}}, evalRef=null, evalUnsub=null, evalSaveTimer=null, evalPending=null;
@@ -8292,7 +8300,27 @@ function renderEvals(){
   else body=`<div class="sec-title">Your direct reports (${reports.length})</div>`+reports.map(evalReportRow).join("");
   const guideBtn=`<button class="btn ghost wide" id="ev-guide" style="margin-bottom:14px">📖 How to run an evaluation</button>`;
   const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-top:18px">🗂️ HR · view all evaluations (audit)</button>`:"";
-  wrap.innerHTML=note+guideBtn+body+hrBtn;
+  wrap.innerHTML=note+guideBtn+`<div id="ev-inbox"></div>`+body+hrBtn;
+  // "Awaiting your approval" — evals submitted for the current user to review (as supervisor or HR).
+  evReviewInbox(list=>{ const box=$("#ev-inbox"); if(!box) return;
+    if(!list.length){ box.innerHTML=""; return; }
+    const myE=(myEmail()||"").toLowerCase();
+    const rowHtml=(x,i)=>`<div class="ev-row rev-row" data-rev="${i}" style="cursor:pointer"><div class="ev-main"><div class="ev-name">${esc(x.rep.name||x.reportKey)}</div>
+          <div class="ev-meta">by ${esc(x.leadName)} · submitted ${esc(x.rev.submittedAt||"")} · you review as ${esc(x.as)}${x.region?" · "+esc(x.region):(isEvalAdmin()?" · company-wide":"")}</div></div>
+          <div class="ev-right"><span class="ev-pill due">Review ›</span></div></div>`;
+    let html=`<div class="sec-title" style="margin-top:2px">Awaiting your approval (${list.length})</div>
+      <div class="hint" style="margin:0 2px 10px">Evaluations submitted for your sign-off. Open one to read it, then Approve or Send back.</div>`;
+    if(isEvalAdmin()){   // HR view: your facility first, everyone else's below (you can still approve any)
+      const mine=[], other=[];
+      list.forEach((x,i)=>{ const prim=evPrimaryHrEmail(x.region); (prim && prim===myE ? mine : other).push([x,i]); });
+      if(mine.length) html+=`<div class="ev-grp">Your facility</div>`+mine.map(([x,i])=>rowHtml(x,i)).join("");
+      if(other.length) html+=`<div class="ev-grp">Other facilities — assisting</div>`+other.map(([x,i])=>rowHtml(x,i)).join("");
+    } else {
+      html+=list.map((x,i)=>rowHtml(x,i)).join("");
+    }
+    box.innerHTML=html+`<div style="border-top:1px solid var(--border);margin:14px 0 0"></div>`;
+    box.querySelectorAll("[data-rev]").forEach(b=>b.onclick=()=>{ const x=list[+b.dataset.rev]; evalReviewSheet(x.leadEmail, x.leadName, x.reportKey, x.rep); });
+  });
   wrap.querySelectorAll("[data-ev-hire]").forEach(b=>b.onclick=()=>setHireDate(b.dataset.evHire));
   wrap.querySelectorAll("[data-ev-do]").forEach(b=>b.onclick=()=>evaluateReport(b.dataset.evDo));
   wrap.querySelectorAll("[data-ev-hist]").forEach(b=>b.onclick=()=>showEvalHistory(b.dataset.evHist));
@@ -8327,10 +8355,14 @@ function evalReportRow(name){
   else if(d<0) pill=`<span class="ev-pill over">Overdue ${-d}d</span>`;
   else if(tier) pill=`<span class="ev-pill due">Due in ${d}d</span>`;
   else pill=`<span class="ev-pill ok">Due ${fmtShort(due)}</span>`;
+  const rev=(r.draft||{}).review||null; let revChip="";
+  if(rev&&rev.status==="cleared") revChip=`<span class="ev-pill ok">✓ Approved</span>`;
+  else if(rev&&rev.status==="changes") revChip=`<span class="ev-pill over">↩ Changes requested</span>`;
+  else if(rev&&rev.status==="submitted") revChip=`<span class="ev-pill due">⏳ Awaiting approval</span>`;
   return `<div class="ev-row${(hire&&(d<0||tier))?" flag":""}">
     <div class="ev-main"><div class="ev-name">${esc(name)}</div>
       <div class="ev-meta">${seat?esc(seat)+" · ":""}${hire?"Hired "+fmtShort(hire):"<i>no hire date set</i>"}${nHist?" · "+nHist+" on file":""}${r.draft?' · <span class="ev-draft">draft</span>':""}</div></div>
-    <div class="ev-right">${pill}
+    <div class="ev-right">${revChip}${pill}
       <div class="ev-actions">
         <button class="btn ghost sm" data-ev-hire="${esc(name)}">${hire?"Hire date":"Set hire date"}</button>
         ${nHist?`<button class="btn ghost sm" data-ev-hist="${esc(name)}">History</button>`:""}
@@ -8363,6 +8395,7 @@ function evaluateReport(name){
 }
 function evRatingRow(val){ return `<div class="ev-rate">`+EVAL_RATINGS.map(([v,l])=>`<button type="button" class="ev-rb${val===v?" on "+v:""}" data-v="${v}">${l}</button>`).join("")+`</div>`; }
 function openEvalForm(name,f){
+  const rev0=(f&&f.review)||null;   // review/approval state carried on the draft
   const accHtml=f.accountabilities.map(a=>`<div class="ev-acc">
       <div class="ev-acc-top"><input class="ev-acc-text" value="${esc(a.text)}" placeholder="Accountability from the chart…"><button type="button" class="ev-acc-del" title="Remove">✕</button></div>
       ${evRatingRow(a.rating)}<textarea class="ev-cc" rows="2" placeholder="Comments">${esc(a.comments)}</textarea></div>`).join("");
@@ -8393,8 +8426,11 @@ function openEvalForm(name,f){
         <div class="ev-sig"><input data-sig="supervisor-name" value="${esc(f.sigSupervisor.name)}" placeholder="Supervisor name"><input data-sig="supervisor-date" type="date" value="${esc(f.sigSupervisor.date)}"></div>
         <div class="ev-sig"><input data-sig="hr-name" value="${esc(f.sigHr.name)}" placeholder="HR name"><input data-sig="hr-date" type="date" value="${esc(f.sigHr.date)}"></div></div>
     </div>
-    <div class="hint" style="margin:16px 2px 2px;line-height:1.5"><b>Save draft</b> keeps this private and unfiled — use it until you've had the conversation and it's signed. <b>Mark complete</b> files it permanently (read-only) and schedules next year, so only do that when it's final.</div>
-    <div class="sheet-actions"><button class="btn ghost" id="ef-cancel">Close</button><button class="btn ghost" id="ef-draft">Save draft</button><button class="btn" id="ef-complete">Mark complete</button></div>`);
+    ${(rev0&&rev0.status)
+      ? `<div style="margin:16px 2px 2px"><div class="ev-note">${evReviewStatusLabel(rev0)}</div>${evApprovalTrailHtml(rev0)}</div>`
+      : `<div class="hint" style="margin:16px 2px 2px;line-height:1.5"><b>Policy:</b> your <b>supervisor</b> and <b>HR</b> must approve this before you can conduct it with ${esc(name)}. Fill it in, then <b>Submit for review</b>. <b>Save draft</b> keeps progress private in the meantime.</div>`}
+    <div class="sheet-actions"><button class="btn ghost" id="ef-cancel">Close</button><button class="btn ghost" id="ef-draft">Save draft</button>${evCleared(rev0)?`<button class="btn" id="ef-complete">Mark complete</button>`:`<button class="btn" id="ef-submit">${(rev0&&rev0.status==="submitted")?"Re-submit for review":"Submit for review"}</button>`}</div>
+    ${evCleared(rev0)?"":`<div class="hint" style="margin:8px 2px 0;color:var(--muted)">“Mark complete” unlocks once your supervisor and HR approve.</div>`}`);
   const wireRates=()=>document.querySelectorAll(".ev-rate").forEach(g=>g.querySelectorAll(".ev-rb").forEach(b=>b.onclick=()=>{ g.querySelectorAll(".ev-rb").forEach(x=>x.className="ev-rb"); b.className="ev-rb on "+b.dataset.v; }));
   const wireAccDel=()=>document.querySelectorAll(".ev-acc-del").forEach(b=>b.onclick=()=>b.closest(".ev-acc").remove());
   wireRates(); wireAccDel();
@@ -8415,8 +8451,14 @@ function openEvalForm(name,f){
       sigEmployee:sig("employee"), sigSupervisor:sig("supervisor"), sigHr:sig("hr") };
   };
   $("#ef-cancel").onclick=closeSheet;
-  $("#ef-draft").onclick=()=>{ const r=evalReport(name); r.draft=collect(); saveEvals(); closeSheet(); renderEvals(); setSync("Draft saved"); };
-  $("#ef-complete").onclick=()=>{
+  $("#ef-draft").onclick=()=>{ const r=evalReport(name); const keep=rev0; r.draft=collect(); if(keep) r.draft.review=keep; saveEvals(); closeSheet(); renderEvals(); setSync("Draft saved"); };
+  { const sb=$("#ef-submit"); if(sb) sb.onclick=()=>{
+      const form=collect();
+      if(!form.lead.rating||!form.manage.rating||!form.execution){ alert("Set the Lead rating, the Manage rating and the Execution Summary before submitting for review."); return; }
+      const r=evalReport(name); r.draft=form; saveEvals();   // save the content first, then stamp the review
+      evSubmitForReview(name); closeSheet(); }; }
+  { const cb=$("#ef-complete"); if(cb) cb.onclick=()=>{
+    const r0=evalReport(name); if(!evCleared((r0.draft||{}).review)){ alert("This evaluation must be approved by your supervisor AND HR before you can conduct and file it."); return; }
     const form=collect();
     if(!form.lead.rating||!form.manage.rating||!form.execution){ alert("Please set the Lead rating, the Manage rating, and the Execution Summary before completing."); return; }
     if(!confirm("Mark this evaluation complete?\n\nIt files as a locked, read-only record and schedules the next review for "+name+"'s next hire anniversary.")) return;
@@ -8425,7 +8467,7 @@ function openEvalForm(name,f){
     r.draft=null;
     if(r.hireDate){ const base=r.nextDue||nextAnniversary(r.hireDate,todayIso()); r.nextDue=nextAnniversary(r.hireDate, addDaysIso(base,1)); }
     saveEvals(); closeSheet(); renderEvals(); setSync("Evaluation filed ✓");
-  };
+  }; }
 }
 function showEvalHistory(name){
   const r=evalReport(name); const hist=(r.history||[]);
@@ -8435,20 +8477,127 @@ function showEvalHistory(name){
   $("#eh-close").onclick=closeSheet;
   document.querySelectorAll("[data-hi]").forEach(b=>b.onclick=()=>evalRecordSheet(name,(evalReport(name).history||[])[+b.dataset.hi]));
 }
+// Read-only body of an evaluation (ratings, accountabilities, execution, next focus) — shared by the filed
+// record view and the reviewer's approval sheet.
+function evalContentHtml(rec){
+  const sec=(h,b)=>`<div class="min-sec"><h4>${h}</h4>${b}</div>`;
+  const accs=(rec.accountabilities||[]).map(a=>`<div class="min-row"><span>${esc(a.text)}</span> — <b>${evRatingLabel(a.rating)}</b>${a.comments?`<div style="color:var(--muted)">${esc(a.comments)}</div>`:""}</div>`).join("")||"—";
+  return `${sec("Lead",`<b>${evRatingLabel((rec.lead||{}).rating)}</b>${(rec.lead||{}).comments?`<p>${esc(rec.lead.comments)}</p>`:""}`)}
+    ${sec("Manage",`<b>${evRatingLabel((rec.manage||{}).rating)}</b>${(rec.manage||{}).comments?`<p>${esc(rec.manage.comments)}</p>`:""}`)}
+    ${sec("Accountabilities",accs)}
+    ${sec("Execution",`<b>${esc(evExecLabel(rec.execution))}</b>${rec.supervisorSummary?`<p>${esc(rec.supervisorSummary)}</p>`:""}`)}
+    ${sec("Next period focus",(rec.nextFocus||[]).filter(Boolean).map((t,i)=>`<div>${i+1}. ${esc(t)}</div>`).join("")||"—")}`;
+}
 function evalRecordSheet(name,rec){
   if(!rec) return;
   const sec=(h,b)=>`<div class="min-sec"><h4>${h}</h4>${b}</div>`;
-  const accs=(rec.accountabilities||[]).map(a=>`<div class="min-row"><span>${esc(a.text)}</span> — <b>${evRatingLabel(a.rating)}</b>${a.comments?`<div style="color:var(--muted)">${esc(a.comments)}</div>`:""}</div>`).join("")||"—";
   openSheet(`<h2>LMA Evaluation · ${esc(name)}</h2>
     <div class="min-head">Reviewed ${esc(fmtLong(rec.reviewDate||rec.completedAt))} · ${esc(rec.jobTitle||"")}${rec.completedAt?" · filed "+esc(fmtLong(rec.completedAt)):""}</div>
-    ${sec("Lead",`<b>${evRatingLabel(rec.lead.rating)}</b>${rec.lead.comments?`<p>${esc(rec.lead.comments)}</p>`:""}`)}
-    ${sec("Manage",`<b>${evRatingLabel(rec.manage.rating)}</b>${rec.manage.comments?`<p>${esc(rec.manage.comments)}</p>`:""}`)}
-    ${sec("Accountabilities",accs)}
-    ${sec("Execution",`<b>${esc(evExecLabel(rec.execution))}</b>${rec.supervisorSummary?`<p>${esc(rec.supervisorSummary)}</p>`:""}`)}
-    ${sec("Next period focus",(rec.nextFocus||[]).filter(Boolean).map((t,i)=>`<div>${i+1}. ${esc(t)}</div>`).join("")||"—")}
+    ${evalContentHtml(rec)}
     ${sec("Sign-off",`<div>Employee: <b>${esc(rec.sigEmployee.name||"—")}</b>${rec.sigEmployee.date?" · "+esc(rec.sigEmployee.date):""}</div><div>Supervisor: <b>${esc(rec.sigSupervisor.name||"—")}</b>${rec.sigSupervisor.date?" · "+esc(rec.sigSupervisor.date):""}</div><div>HR: <b>${esc(rec.sigHr.name||"—")}</b>${rec.sigHr.date?" · "+esc(rec.sigHr.date):""}</div>`)}
     <div class="sheet-actions"><button class="btn" id="er-close">Close</button></div>`);
   $("#er-close").onclick=closeSheet;
+}
+
+/* ===== EVALUATION REVIEW / APPROVAL WORKFLOW =====
+   Policy: before a lead conducts an evaluation with staff, it must be approved by the lead's SUPERVISOR
+   (their manager one level up) AND HR. The review state lives on the draft (draft.review); the eval doc also
+   carries a top-level `reviewers:[supervisorEmail]` so Firestore rules can let that manager + HR READ it.
+   Reviewers record their approval by writing only the review block back onto the lead's doc — the app never
+   lets them change the eval content. The lead's "Mark complete" stays hard-locked until status==="cleared". */
+const evMyE=()=>(myEmail()||"").toLowerCase();
+function evSupEmailFor(leadName){ const mgr=managerOf(leadName); return mgr?((emailForName(mgr)||"").toLowerCase()):""; }
+// Facility a person rolls up to on the chart — "Shared Services" / "Texas Facility" / "Virginia Facility",
+// or "" for company-wide/shared staff. Drives which HR specialist an eval routes to.
+function evRegionOf(personName){ const seat=(seatsFor(personName)||[])[0]; if(!seat) return ""; const p=pillarSeatOf(seat.id); return (p&&p.role)||""; }
+function evPrimaryHrEmail(region){ return (EVAL_HR_PRIMARY[region]||"").toLowerCase(); }
+function evCleared(rev){ return !!(rev&&rev.status==="cleared"); }
+function evReviewStatusLabel(rev){
+  if(!rev||!rev.status) return "";
+  if(rev.status==="cleared") return "✓ Approved — cleared to conduct";
+  if(rev.status==="changes") return "↩ Changes requested — revise &amp; resubmit";
+  if(rev.status==="submitted"){ const need=[]; if(rev.supEmail && !rev.sup) need.push("Supervisor"); if(!rev.hr) need.push("HR"); return "⏳ In review — waiting on "+(need.join(" + ")||"final check"); }
+  return "";
+}
+function evApprovalTrailHtml(rev){
+  if(!rev) return "";
+  const line=(lbl,a)=>a?`<div class="ev-appr"><b>${lbl}:</b> ✓ ${esc(a.name||a.by)} · ${esc(a.at)}${a.note?` — “${esc(a.note)}”`:""}</div>`:`<div class="ev-appr pend"><b>${lbl}:</b> pending</div>`;
+  let h=(rev.supEmail?line("Supervisor",rev.sup):`<div class="ev-appr"><b>Supervisor:</b> not required</div>`)+line("HR",rev.hr);
+  if(rev.status==="changes"&&rev.changes) h+=`<div class="ev-appr back">↩ <b>Sent back</b> by ${esc(rev.changes.name||rev.changes.by)} (${rev.changes.role==="hr"?"HR":"Supervisor"}) · ${esc(rev.changes.at)}${rev.changes.note?` — “${esc(rev.changes.note)}”`:""}</div>`;
+  return `<div class="ev-appr-box">${h}</div>`;
+}
+// The current user submits THEIR own draft eval of `name` for review.
+function evSubmitForReview(name){
+  const r=evalReport(name); if(!r.draft){ setSync("Fill in the evaluation first",true); return; }
+  const supEmail=evSupEmailFor(myName());
+  if(!supEmail && !isEvalAdmin()){ if(!confirm("You don't have a manager set on the Accountability Chart, so only HR can review this. Submit for HR review only?")) return; }
+  r.draft.review={ status:"submitted", submittedAt:todayIso(), submittedBy:(myName()||myEmail()), supEmail:supEmail, sup:null, hr:null, changes:null };
+  evalData.reviewers = supEmail?[supEmail]:[];   // doc-level reviewer list — the Firestore read rule keys off this
+  saveEvals(); renderEvals(); setSync("Submitted for review ✓");
+}
+// Reviewer action on ANOTHER lead's eval doc. Reads fresh, sets ONLY the review block, writes back. role: "sup"|"hr".
+function evReviewWrite(leadEmail, reportKey, role, decision, note, done){
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ setSync("Offline",true); return; }
+  const ref=fs.doc("evaluations/"+leadEmail);
+  ref.get().then(s=>{ const st=(s.exists&&s.data()&&s.data().state)||null;
+    const rep=st&&st.reports&&st.reports[reportKey];
+    if(!rep||!rep.draft||!rep.draft.review){ setSync("That evaluation changed — reload",true); return; }
+    const rev=rep.draft.review, stamp={ by:evMyE(), name:(myName()||myEmail()), at:todayIso(), note:note||"" };
+    if(decision==="approved"){ rev[role]=stamp; if(rev.hr && (!rev.supEmail || rev.sup)) rev.status="cleared"; }   // cleared = HR approved + supervisor approved (or no supervisor to require)
+    else { rev.status="changes"; rev.changes={...stamp, role}; rev.sup=null; rev.hr=null; }   // send-back resets both approvals
+    ref.set({ state:st, updatedAt:Date.now(), updatedBy:evMyE() })
+      .then(()=>{ setSync(decision==="approved"?"Approved ✓":"Sent back ↩"); if(done) done(); })
+      .catch(e=>{ console.error("eval review write",e); setSync("Couldn't save your review (permissions?)",true); });
+  }).catch(e=>{ console.error("eval review read",e); setSync("Couldn't open that evaluation (permissions?)",true); });
+}
+// The reviewer's sheet — read-only eval content + Approve / Send back for the role(s) they can fill.
+function evalReviewSheet(leadEmail, leadName, reportKey, rep){
+  const form=rep.draft||{}, rev=form.review||{};
+  const canSup = rev.supEmail && evMyE()===String(rev.supEmail).toLowerCase() && !rev.sup;
+  const canHr  = isEvalAdmin() && !rev.hr;
+  const who = canSup&&canHr ? "Supervisor &amp; HR" : canSup ? "Supervisor" : canHr ? "HR" : "";
+  openSheet(`<h2>Review evaluation · ${esc(rep.name||reportKey)}</h2>
+    <div class="min-head">By <b>${esc(leadName||leadEmail)}</b> · ${esc(form.jobTitle||"")} · submitted ${esc(rev.submittedAt||"")}</div>
+    <div class="ev-note" style="margin:0 0 12px">${evReviewStatusLabel(rev)}</div>
+    ${evApprovalTrailHtml(rev)}
+    ${evalContentHtml(form)}
+    ${(canSup||canHr)?`<div class="field" style="margin-top:14px"><label>Note ${canSup&&canHr?"":"(optional for approve · required for send-back)"}</label><textarea id="erv-note" rows="2" placeholder="Optional for approval; required if you send it back for changes."></textarea></div>
+      <div class="sheet-actions"><button class="btn ghost" id="erv-close">Close</button><button class="btn danger" id="erv-back">↩ Send back</button><button class="btn" id="erv-ok">✓ Approve${who?" as "+who.replace(" &amp; HR","")+(canSup&&canHr?" + HR":""):""}</button></div>`
+      : `<div class="hint" style="margin-top:12px">You can view this evaluation but there's no approval pending for you.</div><div class="sheet-actions"><button class="btn" id="erv-close">Close</button></div>`}`);
+  $("#erv-close").onclick=closeSheet;
+  const refresh=()=>{ closeSheet(); if(currentView==="evals") renderEvals(); };
+  { const b=$("#erv-ok"); if(b) b.onclick=()=>{ const note=($("#erv-note").value||"").trim();
+      const roles=[]; if(canSup) roles.push("sup"); if(canHr) roles.push("hr");
+      let i=0; const next=()=>{ if(i>=roles.length){ refresh(); return; } evReviewWrite(leadEmail,reportKey,roles[i++],"approved",note,next); }; next(); }; }
+  { const b=$("#erv-back"); if(b) b.onclick=()=>{ const note=($("#erv-note").value||"").trim();
+      if(!note){ alert("Add a note saying what needs to change before sending it back."); $("#erv-note").focus(); return; }
+      evReviewWrite(leadEmail, reportKey, canSup?"sup":"hr", "changes", note, refresh); }; }
+}
+// Gather evals awaiting the current user's approval. HR → read the whole collection; a supervisor → read just
+// their direct reports' docs (specific-doc reads the Firestore rule allows). Calls cb(list).
+function evReviewInbox(cb){
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ cb([]); return; }
+  const myE=evMyE(), out=[], seen=new Set();
+  const addFromDoc=(leadEmail, st)=>{ const reports=(st&&st.reports)||{};
+    Object.keys(reports).forEach(k=>{ const rep=reports[k], rev=rep&&rep.draft&&rep.draft.review;
+      if(!rev||rev.status!=="submitted") return;
+      const needSup = rev.supEmail && myE===String(rev.supEmail).toLowerCase() && !rev.sup;
+      const needHr  = isEvalAdmin() && !rev.hr;
+      if(!needSup && !needHr) return;
+      const id=leadEmail+"|"+k; if(seen.has(id)) return; seen.add(id);
+      out.push({ leadEmail, leadName:st._lead||leadEmail, reportKey:k, rep, rev, region:evRegionOf(rep.name||k), as: needSup&&needHr?"Supervisor + HR":needSup?"Supervisor":"HR" }); }); };
+  const finish=()=>{ out.sort((a,b)=>String(a.rev.submittedAt).localeCompare(String(b.rev.submittedAt))); cb(out); };
+  if(isEvalAdmin()){
+    fs.collection("evaluations").get().then(qs=>{ qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st){ st._lead=ds.id; addFromDoc(ds.id, st); } }); finish(); })
+      .catch(e=>{ console.error("inbox HR",e); finish(); });
+  } else {
+    const mgrOfReport={}; const reports=directReportsOf(myName());
+    const emails=reports.map(n=>({n, e:(emailForName(n)||"").toLowerCase()})).filter(x=>x.e);
+    if(!emails.length){ cb([]); return; }
+    let pending=emails.length;
+    emails.forEach(({n,e})=>{ fs.doc("evaluations/"+e).get().then(s=>{ const st=(s.exists&&s.data()&&s.data().state); if(st){ st._lead=n; addFromDoc(e, st); } })
+      .catch(()=>{}).finally(()=>{ if(--pending===0) finish(); }); });
+  }
 }
 /* HR/admin audit roster — reads EVERY supervisor's locked doc (Firestore rules allow HR/admins). */
 function evalHRRoster(){
@@ -8461,7 +8610,8 @@ function evalHRRoster(){
     rows.sort((a,b)=>(a.d==null?99999:a.d)-(b.d==null?99999:b.d));
     const box=$("#hr-list"); if(!box) return;
     box.innerHTML=rows.length?rows.map((x,i)=>{ let pill=x.d==null?`<span class="ev-pill set">no date</span>`:x.d<0?`<span class="ev-pill over">Overdue ${-x.d}d</span>`:evalTier(x.due)?`<span class="ev-pill due">Due ${x.d}d</span>`:`<span class="ev-pill ok">${fmtShort(x.due)}</span>`;
-      return `<div class="ev-row${x.rec?" hrclick":""}" data-hr="${i}"><div class="ev-main"><div class="ev-name">${esc(x.name)}</div><div class="ev-meta">supervisor: ${esc(x.sup)} · ${x.n} on file</div></div><div class="ev-right">${pill}</div></div>`; }).join(""):'<div class="hint">No evaluations recorded yet.</div>';
+      const reg=evRegionOf(x.name);
+      return `<div class="ev-row${x.rec?" hrclick":""}" data-hr="${i}"><div class="ev-main"><div class="ev-name">${esc(x.name)}</div><div class="ev-meta">${reg?esc(reg)+" · ":""}supervisor: ${esc(x.sup)} · ${x.n} on file</div></div><div class="ev-right">${pill}</div></div>`; }).join(""):'<div class="hint">No evaluations recorded yet.</div>';
     box.querySelectorAll("[data-hr]").forEach(b=>b.onclick=()=>{ const x=rows[+b.dataset.hr]; if(x&&x.rec) evalRecordSheet(x.name,x.rec); });
   }).catch(e=>{ const box=$("#hr-list"); if(box) box.innerHTML=`<div class="hint">Couldn't load — ${esc(e.code||e.message||"error")}. (Only HR/admins listed in the security rules can view all.)</div>`; });
 }
