@@ -4864,7 +4864,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=165;
+const BUILD=166;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -5426,7 +5426,7 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     meetingScorecardSnap, meetingRocksSnap, minutesText, scorecardSnapHtml, rocksSnapHtml, minutesInnerHtml, printMinutes, showMinutes,
     acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats,
     teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter,
-    canSeeRatingsFor, canRatePerson, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
+    canSeeRatingsFor, canRatePerson, canSeeSelfAssessment, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
 }
 
@@ -7469,6 +7469,13 @@ function canSeeRatingsFor(person){
 function canRatePerson(person){
   const me=myName(); if(!me||!person||sameName(person,me)) return false;
   if(isEvalAdmin()) return true;
+  return directReportsOf(me).some(n=>sameName(n,person));
+}
+// A person's RAW SELF-ASSESSMENT is private — visible ONLY to that person and their DIRECT leader. Unlike the
+// official leader/final ratings (which cascade up the branch and are auditable by HR), the self-rating is NOT
+// shown to higher-ups, peers, or HR/admins who aren't the person's direct leader. (No isEvalAdmin override.)
+function canSeeSelfAssessment(person){
+  const me=myName(); if(!me||!person||sameName(person,me)) return false;
   return directReportsOf(me).some(n=>sameName(n,person));
 }
 
@@ -11447,7 +11454,8 @@ function paRow(person,q){
   // their self-assessment right here (styled as "self") so you can see what they put without opening.
   const leaderRead=(r&&rateDone(r.final))?r.final:((r&&rateDone(r.sup))?r.sup:null);
   const selfDone=rateDone(r&&r.self), selfStarted=rateStarted(r&&r.self);
-  const preview=!leaderRead && selfStarted;          // no leader read yet → show their self-ratings
+  const seeSelf=canSeeSelfAssessment(person);        // only the DIRECT leader may see the raw self-rating
+  const preview=!leaderRead && selfStarted && seeSelf;   // no leader read yet → preview their self-ratings (direct leader only)
   const shown=leaderRead||(preview?r.self:null);
   const low=!!leaderRead && belowBar(leaderRead);
   const cc=preview?"self-cell":"";
@@ -11455,9 +11463,9 @@ function paRow(person,q){
     + GWC_KEYS.map(g=>{ const v=shown?(shown[g.k]||""):""; return `<td class="rc ${cc} ${v==="N"?"bad":v==="Y"?"good":""}">${v||"—"}</td>`; }).join("");
   const status=leaderRead
     ? (low?`<span class="pill red">▲ Below bar</span>`:(r&&r.status==="complete"?`<span class="pill green">Complete</span>`:`<span class="pill green">At/above bar</span>`))
-    : (selfStarted?`<span class="pill blue" title="They've self-assessed — add your own read to reconcile">${selfDone?"Self submitted":"Self (partial)"} · your read pending</span>`:`<span class="pill amber">Not rated</span>`);
-  const tick=selfDone?'<span class="self-tick" title="Self-assessment submitted">✓ self</span>'
-    :(selfStarted?'<span class="self-tick" title="Partly filled in">◐ self</span>':'<span class="self-none" title="No self-assessment yet">self pending</span>');
+    : (seeSelf&&selfStarted?`<span class="pill blue" title="They've self-assessed — add your own read to reconcile">${selfDone?"Self submitted":"Self (partial)"} · your read pending</span>`:`<span class="pill amber">Not rated</span>`);
+  const tick=(seeSelf&&selfDone)?'<span class="self-tick" title="Self-assessment submitted">✓ self</span>'
+    :(seeSelf&&selfStarted?'<span class="self-tick" title="Partly filled in">◐ self</span>':'');
   return `<tr><td class="pn">${esc(person)}${tick}</td>
     ${cells}<td>${status}</td><td><button class="btn ghost sm" data-open-pa="${esc(person)}">Open</button></td></tr>`;
 }
@@ -11483,6 +11491,7 @@ function renderPAWorksheet(){
   }
   const r=paRec(person,q,true);
   const canEdit=canRatePerson(person);     // the DIRECT leader (or HR) edits; higher-ups above them view only
+  const seeSelf=canSeeSelfAssessment(person);   // the raw self-rating is private to the person + DIRECT leader only
   const directMgr=managerOf(person);
   const mm=mismatches(r.self,r.sup);
   const low=belowBar(rateDone(r.final)?r.final:r.sup);
@@ -11516,7 +11525,9 @@ function renderPAWorksheet(){
     <div class="card">${paGrid(r.sup,"sup",!canEdit)}</div>
 
     <div class="sec-title" style="margin-top:18px">2 · ${esc(person)}'s self-assessment</div>
-    ${!rateStarted(r.self)
+    ${!seeSelf
+      ? `<div class="hint" style="margin:0 2px 8px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)">🔒 <b>Private.</b> ${esc(person)}'s self-assessment is between ${esc(person)} and their direct leader${directMgr?` (<b>${esc(directMgr)}</b>)`:""} — it isn't shown here.</div>`
+      : (!rateStarted(r.self)
       ? `<div class="hint" style="margin:0 2px 8px">${esc(person)} hasn't started a self-assessment for ${esc(qLabel(q))} yet — ask them to before you meet.</div>`
       : `<div class="hint" style="margin:0 2px 8px">${rateDone(r.self)?`Exactly how ${esc(person)} rated themselves. Compare it with your read above.`:`⚠ ${esc(person)} has only <b>partly</b> filled this in — here's what they've entered so far.`}</div>
          <div class="card">${paGrid(r.self,"selfview",true)}</div>
@@ -11527,7 +11538,7 @@ function renderPAWorksheet(){
               ? `<div class="recon" style="margin-top:12px"><b>${mm.length} to reconcile</b>
                   <div class="hint" style="margin:4px 0 8px">Not to meet in the middle — to agree on reality. Share three behaviour-based examples, hear them out, then make the call.</div>
                   ${mm.map(x=>`<div class="recon-row"><span>${esc(x.label)}</span><span class="rc mid">they said ${esc(x.self)}</span><span class="rc mid">you said ${esc(x.sup)}</span></div>`).join("")}</div>`
-              : `<div class="aligned" style="margin-top:12px">✓ You're aligned on every line. Acknowledge it and reinforce the behaviour you want more of.</div>`}`}
+              : `<div class="aligned" style="margin-top:12px">✓ You're aligned on every line. Acknowledge it and reinforce the behaviour you want more of.</div>`}`)}
 
     ${breaches.length?`<div class="sec-title" style="margin-top:18px">3 · Below the bar — three examples required</div>
       <div class="hint" style="margin:0 2px 8px">Non-negotiable: Core Value <b>behaviour</b>, not performance. Not “your numbers are low” — “your behaviour violated X in these specific ways.”</div>
