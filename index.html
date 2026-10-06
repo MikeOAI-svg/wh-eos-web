@@ -1359,6 +1359,9 @@
   .ev-pill.over{color:#fff;background:var(--red)}
   .ev-pill.set{color:var(--muted);background:var(--bg);border:1px dashed var(--border)}
   .ev-grp{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:12px 2px 6px}
+  .hr-search{width:100%;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:10px;padding:10px 12px;font-size:14px;margin:0 0 12px;box-sizing:border-box}
+  .hr-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .hr-yr{display:inline-block;margin-left:7px;font-size:12px;font-weight:800;color:var(--accent);background:var(--accent-soft);padding:1px 8px;border-radius:999px;vertical-align:middle}
   .ev-form{display:flex;flex-direction:column;gap:2px}
   .ev-form input[readonly]{opacity:.7}
   .ev-sec{border-top:1px solid var(--border);margin-top:14px;padding-top:14px}
@@ -4868,7 +4871,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=169;
+const BUILD=170;
 let updateReady=false, lastActivity=Date.now();
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
@@ -8488,15 +8491,35 @@ function evalContentHtml(rec){
     ${sec("Execution",`<b>${esc(evExecLabel(rec.execution))}</b>${rec.supervisorSummary?`<p>${esc(rec.supervisorSummary)}</p>`:""}`)}
     ${sec("Next period focus",(rec.nextFocus||[]).filter(Boolean).map((t,i)=>`<div>${i+1}. ${esc(t)}</div>`).join("")||"—")}`;
 }
-function evalRecordSheet(name,rec){
+function evalRecordSheet(name,rec,fromHr){
   if(!rec) return;
   const sec=(h,b)=>`<div class="min-sec"><h4>${h}</h4>${b}</div>`;
+  const se=rec.sigEmployee||{}, ss=rec.sigSupervisor||{}, sh=rec.sigHr||{};
   openSheet(`<h2>LMA Evaluation · ${esc(name)}</h2>
     <div class="min-head">Reviewed ${esc(fmtLong(rec.reviewDate||rec.completedAt))} · ${esc(rec.jobTitle||"")}${rec.completedAt?" · filed "+esc(fmtLong(rec.completedAt)):""}</div>
     ${evalContentHtml(rec)}
-    ${sec("Sign-off",`<div>Employee: <b>${esc(rec.sigEmployee.name||"—")}</b>${rec.sigEmployee.date?" · "+esc(rec.sigEmployee.date):""}</div><div>Supervisor: <b>${esc(rec.sigSupervisor.name||"—")}</b>${rec.sigSupervisor.date?" · "+esc(rec.sigSupervisor.date):""}</div><div>HR: <b>${esc(rec.sigHr.name||"—")}</b>${rec.sigHr.date?" · "+esc(rec.sigHr.date):""}</div>`)}
-    <div class="sheet-actions"><button class="btn" id="er-close">Close</button></div>`);
+    ${sec("Sign-off",`<div>Employee: <b>${esc(se.name||"—")}</b>${se.date?" · "+esc(se.date):""}</div><div>Supervisor: <b>${esc(ss.name||"—")}</b>${ss.date?" · "+esc(ss.date):""}</div><div>HR: <b>${esc(sh.name||"—")}</b>${sh.date?" · "+esc(sh.date):""}</div>`)}
+    <div class="sheet-actions">${fromHr?`<button class="btn ghost" id="er-back">‹ All evaluations</button>`:""}<button class="btn ghost" id="er-pdf">⬇ Download PDF</button><button class="btn" id="er-close">Close</button></div>`);
   $("#er-close").onclick=closeSheet;
+  { const b=$("#er-pdf"); if(b) b.onclick=()=>printEvalRecord(name,rec); }
+  { const b=$("#er-back"); if(b) b.onclick=()=>evalHRRoster(); }
+}
+// Render a filed evaluation into the print layer and open the browser's print dialog ("Save as PDF").
+// Portrait, WH-branded — a clean one-pager for the employee's HR file. Same no-library path as the minutes/V-TO.
+function printEvalRecord(name, rec){
+  const doc=$("#printDoc"); if(!doc) return;
+  const sec=(h,b)=>`<div class="min-sec"><h4>${h}</h4>${b}</div>`;
+  const se=rec.sigEmployee||{}, ss=rec.sigSupervisor||{}, sh=rec.sigHr||{}, reg=evRegionOf(name);
+  doc.innerHTML=`<div class="p-vto-head"><img class="p-vto-logo" src="${MARK_LIGHT}" alt="Warriors Heart">
+      <div><div class="p-vto-title">Performance Evaluation — ${esc(name)}</div>
+        <div class="p-vto-sub">${reg?esc(reg)+" · ":""}Reviewed ${esc(fmtLong(rec.reviewDate||rec.completedAt))}${rec.jobTitle?" · "+esc(rec.jobTitle):""}${rec.completedAt?" · Filed "+esc(fmtLong(rec.completedAt)):""}</div></div></div>
+    <div class="min-print">${evalContentHtml(rec)}
+      ${sec("Sign-off",`<div>Employee: <b>${esc(se.name||"—")}</b>${se.date?" · "+esc(se.date):""}</div><div>Supervisor: <b>${esc(ss.name||"—")}</b>${ss.date?" · "+esc(ss.date):""}</div><div>HR: <b>${esc(sh.name||"—")}</b>${sh.date?" · "+esc(sh.date):""}</div>`)}</div>`;
+  let st=document.getElementById("minDynPage"); if(!st){ st=document.createElement("style"); st.id="minDynPage"; document.head.appendChild(st); }
+  st.textContent=`@media print{@page{size:portrait; margin:14mm}}`;
+  const cleanup=()=>{ const s=document.getElementById("minDynPage"); if(s) s.remove(); window.removeEventListener("afterprint",cleanup); };
+  window.addEventListener("afterprint",cleanup);
+  setTimeout(()=>{ window.print(); setTimeout(cleanup,1500); }, 30);
 }
 
 /* ===== EVALUATION REVIEW / APPROVAL WORKFLOW =====
@@ -8601,18 +8624,37 @@ function evReviewInbox(cb){
 }
 /* HR/admin audit roster — reads EVERY supervisor's locked doc (Firestore rules allow HR/admins). */
 function evalHRRoster(){
-  openSheet(`<h2>All evaluations · HR audit</h2><div class="hint" style="margin:-4px 2px 12px">Every supervisor's records, for compliance. Only HR/admins can load this.</div><div id="hr-list"><div class="hint">Loading…</div></div><div class="sheet-actions"><button class="btn" id="hr-close">Close</button></div>`);
+  openSheet(`<h2>All evaluations · HR audit</h2>
+    <div class="hint" style="margin:-4px 2px 10px">Every supervisor's records, for compliance. Only HR/admins can load this. Each completed evaluation is listed by year — open one to download a PDF for the employee's file.</div>
+    <input id="hr-search" class="hr-search" type="search" placeholder="Search a name or year — e.g. Misty Anthony 2026…" autocomplete="off">
+    <div id="hr-list"><div class="hint">Loading…</div></div>
+    <div class="sheet-actions"><button class="btn" id="hr-close">Close</button></div>`);
   $("#hr-close").onclick=closeSheet;
   firebase.firestore().collection("evaluations").get().then(qs=>{
-    const rows=[];
-    qs.forEach(ds=>{ const st=(ds.data()||{}).state||{}; Object.keys(st.reports||{}).forEach(k=>{ const r=st.reports[k]||{};
-      rows.push({sup:ds.id, name:r.name||k, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null, n:(r.history||[]).length, rec:(r.history||[]).slice(-1)[0], name2:r.name||k}); }); });
-    rows.sort((a,b)=>(a.d==null?99999:a.d)-(b.d==null?99999:b.d));
+    const entries=[];
+    qs.forEach(ds=>{ const st=(ds.data()||{}).state||{}; Object.keys(st.reports||{}).forEach(k=>{ const r=st.reports[k]||{}; const nm=r.name||k;
+      const hist=(r.history||[]);
+      hist.forEach(rec=>{ const yr=String(rec.completedAt||rec.reviewDate||"").slice(0,4);
+        entries.push({ kind:"filed", name:nm, year:yr, rec, sup:ds.id, due:"", d:null }); });
+      if(!hist.length) entries.push({ kind:"none", name:nm, year:"", rec:null, sup:ds.id, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null });
+    }); });
+    // Name A→Z, then most-recent year first; a person with nothing on file sorts after their filed rows.
+    entries.sort((a,b)=>{ const an=a.name.toLowerCase(), bn=b.name.toLowerCase(); if(an<bn) return -1; if(an>bn) return 1; return String(b.year).localeCompare(String(a.year)); });
     const box=$("#hr-list"); if(!box) return;
-    box.innerHTML=rows.length?rows.map((x,i)=>{ let pill=x.d==null?`<span class="ev-pill set">no date</span>`:x.d<0?`<span class="ev-pill over">Overdue ${-x.d}d</span>`:evalTier(x.due)?`<span class="ev-pill due">Due ${x.d}d</span>`:`<span class="ev-pill ok">${fmtShort(x.due)}</span>`;
-      const reg=evRegionOf(x.name);
-      return `<div class="ev-row${x.rec?" hrclick":""}" data-hr="${i}"><div class="ev-main"><div class="ev-name">${esc(x.name)}</div><div class="ev-meta">${reg?esc(reg)+" · ":""}supervisor: ${esc(x.sup)} · ${x.n} on file</div></div><div class="ev-right">${pill}</div></div>`; }).join(""):'<div class="hint">No evaluations recorded yet.</div>';
-    box.querySelectorAll("[data-hr]").forEach(b=>b.onclick=()=>{ const x=rows[+b.dataset.hr]; if(x&&x.rec) evalRecordSheet(x.name,x.rec); });
+    const rowHtml=(x,i)=>{ const reg=evRegionOf(x.name); let right, meta;
+      if(x.kind==="filed"){ right=`<span class="ev-pill ok">PDF ›</span>`;
+        meta=`${reg?esc(reg)+" · ":""}filed ${esc(fmtLong(x.rec.completedAt||x.rec.reviewDate))} · supervisor: ${esc(x.sup)}`; }
+      else { right = x.d==null?`<span class="ev-pill set">no date</span>`:x.d<0?`<span class="ev-pill over">Overdue ${-x.d}d</span>`:evalTier(x.due)?`<span class="ev-pill due">Due ${x.d}d</span>`:`<span class="ev-pill ok">${fmtShort(x.due)}</span>`;
+        meta=`${reg?esc(reg)+" · ":""}no evaluation on file yet · supervisor: ${esc(x.sup)}`; }
+      const title=`${esc(x.name)}${x.kind==="filed"?` <span class="hr-yr">${esc(x.year||"—")}</span>`:""}`;
+      return `<div class="ev-row${x.kind==="filed"?" hrclick":""}" data-hr="${i}"><div class="ev-main"><div class="ev-name">${title}</div><div class="ev-meta">${meta}</div></div><div class="ev-right">${right}</div></div>`; };
+    const draw=q=>{ const toks=(q||"").trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const show=entries.map((x,i)=>[x,i]).filter(([x])=>{ const hay=(x.name+" "+x.year).toLowerCase(); return toks.every(t=>hay.indexOf(t)>=0); });
+      box.innerHTML = entries.length ? (show.length?show.map(([x,i])=>rowHtml(x,i)).join(""):'<div class="hint">No evaluations match that search.</div>') : '<div class="hint">No evaluations recorded yet.</div>';
+      box.querySelectorAll("[data-hr]").forEach(b=>b.onclick=()=>{ const x=entries[+b.dataset.hr]; if(x&&x.rec) evalRecordSheet(x.name,x.rec,true); });
+    };
+    draw("");
+    const si=$("#hr-search"); if(si){ si.oninput=()=>draw(si.value); setTimeout(()=>si.focus(),60); }
   }).catch(e=>{ const box=$("#hr-list"); if(box) box.innerHTML=`<div class="hint">Couldn't load — ${esc(e.code||e.message||"error")}. (Only HR/admins listed in the security rules can view all.)</div>`; });
 }
 function renderNPanel(){
