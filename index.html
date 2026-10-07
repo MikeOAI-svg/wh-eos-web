@@ -1268,6 +1268,10 @@
   #segContent .locked{opacity:.75; cursor:not-allowed}
   #segContent textarea.locked,#segContent input.locked{background:var(--bg); border-style:dashed}
   .lock-badge{display:block; font-size:11px; font-weight:700; color:var(--accent); margin:2px 0 3px}
+  .mic-btn{display:inline-flex; align-items:center; gap:6px; margin-top:8px; font-size:13px; font-weight:700; color:var(--muted); background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 12px; cursor:pointer}
+  .mic-btn:hover{border-color:var(--accent); color:var(--text)}
+  .mic-btn.rec{color:#fff; background:var(--red); border-color:var(--red); animation:micpulse 1.2s infinite}
+  @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.55}}
   /* Admin */
   .adm-row{display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border);
     border-radius:12px; background:var(--card); margin-bottom:7px}
@@ -4893,7 +4897,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=176;
+const BUILD=177;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5233,7 +5237,7 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); } }
+function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); } }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -10264,6 +10268,8 @@ let _lockedKey=null, _lockHb=null, _touchedRate=new Set();
 // summary. Typed fields are written only while you hold their lock; these have no lock, so the merge must
 // still write them or the AI draft is silently dropped on the next sync.
 let _progNotes=new Set();
+// Voice dictation (speak your notes) state.
+let _rec=null, _recTarget=null, _recBtn=null, _recKey="", _recBase="", _recFinal="", _recManual=false;
 /* ===== Meeting guests =====
    People who attend THIS L10 but aren't on the team roster (a cross-functional colleague who joins some
    weeks). A guest gets a WIFLS row, a Headlines row and a spot in the concluding rating — but is NOT added
@@ -10907,6 +10913,7 @@ function applyMeetingPerms(){
       el.disabled=true; el.classList.add("locked"); });
   }
   wireFieldLocks();
+  wireDictation();
 }
 function wireFieldLocks(){
   const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
@@ -10927,7 +10934,54 @@ function wireFieldLocks(){
     }
   });
 }
-function advanceSeg(to){ if(!isFacilitator()) return; commitSegTime();
+/* ===== Voice dictation — speak your notes =====
+   A mic on each note / IDS box: tap, speak, it types; tap again to stop. Uses the browser's built-in
+   SpeechRecognition (needs an internet connection; Chrome, Edge and the desktop app). Dictation CLAIMS the
+   box's lock so it stays multi-scribe-safe, and writes through the box's normal input handler, so it saves
+   and syncs exactly like typing. */
+function speechSupported(){ return !!(window.SpeechRecognition||window.webkitSpeechRecognition); }
+function stopDictation(){ if(_rec){ _recManual=true; try{ _rec.stop(); }catch(e){} } }
+function cleanupDictation(){ if(_recBtn){ _recBtn.classList.remove("rec"); _recBtn.innerHTML="🎤 Dictate"; }
+  _rec=null; _recTarget=null; _recBtn=null; _recKey=""; _recBase=""; _recFinal=""; }
+function startDictation(ta, btn, key){
+  if(!speechSupported()||!ta) return;
+  if(_rec){ const same=(_recTarget===ta); stopDictation(); if(same) return; }   // tap the live mic to stop it
+  if(key && !claimLock(key)){ const o=lockedByOther(key); setSync(((o&&o.name)?o.name.split(" ")[0]:"Someone")+" is editing that box",true); return; }
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition; let rec;
+  try{ rec=new SR(); }catch(e){ return; }
+  rec.continuous=true; rec.interimResults=true; rec.lang="en-US";
+  _rec=rec; _recTarget=ta; _recBtn=btn; _recKey=key||""; _recManual=false;
+  _recBase = ta.value ? (ta.value.replace(/\s*$/,"")+" ") : "";   // dictation appends after what's already there
+  _recFinal="";
+  rec.onresult=(e)=>{ lastCommit=Date.now();            // keep the segment from rebuilding mid-sentence
+    let interim="";
+    for(let i=e.resultIndex;i<e.results.length;i++){ const tr=e.results[i][0].transcript;
+      if(e.results[i].isFinal) _recFinal += (_recFinal && !/\s$/.test(_recFinal) ? " " : "") + tr.trim();
+      else interim += tr; }
+    ta.value = _recBase + _recFinal + (interim ? ((_recFinal?" ":"")+interim) : "");
+    ta.dispatchEvent(new Event("input"));               // the box's own handler updates the model + touches the lock + saves
+  };
+  rec.onerror=(ev)=>{ if(ev.error==="not-allowed"||ev.error==="service-not-allowed") setSync("Allow microphone access to dictate",true);
+    else if(ev.error==="network") setSync("Dictation needs an internet connection",true); };
+  rec.onend=()=>{ try{ if(_recTarget){ saveL10(true); if(_recKey) releaseLock(_recKey); } }catch(e){} cleanupDictation(); };
+  try{ rec.start(); if(btn){ btn.classList.add("rec"); btn.innerHTML="● Listening… tap to stop"; } setSync("🎤 Listening…"); }
+  catch(e){ cleanupDictation(); }
+}
+function wireDictation(){
+  if(!speechSupported()) return;
+  const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
+  wrap.querySelectorAll("#segContent textarea[data-lock]").forEach(ta=>{
+    if(ta.readOnly) return;                                      // someone else is holding this box → no mic
+    if(ta.nextSibling && ta.nextSibling.className==="mic-btn") return;
+    const key=ta.getAttribute("data-lock");
+    const btn=document.createElement("button");
+    btn.type="button"; btn.className="mic-btn"; btn.innerHTML="🎤 Dictate";
+    btn.onmousedown=(e)=>e.preventDefault();                     // don't blur the box when the mic is tapped
+    btn.onclick=()=>startDictation(ta, btn, key);
+    if(ta.parentNode) ta.parentNode.insertBefore(btn, ta.nextSibling);
+  });
+}
+function advanceSeg(to){ if(!isFacilitator()) return; stopDictation(); commitSegTime();
   meeting.totalElapsed=(meeting.totalElapsed||0)+(meeting.segElapsed||0);   // roll the finished segment into the meeting total
   meeting.seg=to; meeting.segStart=Date.now(); meeting.segElapsed=0; saveL10(true); renderL10(); }
 function commitSegTime(){ if(!meeting||!meeting.segStart) return; const add=(Date.now()-meeting.segStart)/1000; meeting.segElapsed=(meeting.segElapsed||0)+add; }
