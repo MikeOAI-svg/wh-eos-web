@@ -1246,6 +1246,8 @@
   @keyframes fpulse{0%,100%{opacity:1; transform:scale(1)}50%{opacity:.35; transform:scale(.8)}}
   .agenda.ro .ag-item{cursor:default}
   #segContent .locked{opacity:.75; cursor:not-allowed}
+  #segContent textarea.locked,#segContent input.locked{background:var(--bg); border-style:dashed}
+  .lock-badge{display:block; font-size:11px; font-weight:700; color:var(--accent); margin:2px 0 3px}
   /* Admin */
   .adm-row{display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border);
     border-radius:12px; background:var(--card); margin-bottom:7px}
@@ -4871,7 +4873,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=172;
+const BUILD=173;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5083,19 +5085,39 @@ function saveL10(immediate){   // persist the current L10 team's meeting + to-do
   // the whole object, so a facilitator clicking "Next" can't wipe the scribe's just-typed note (and vice-versa).
   // When one person is both (the common case), both roles are true → this is the same as "local wins".
   const NAV=["seg","segStart","segElapsed","totalElapsed","capMin"];
-  const CONTENT=["notes","byPerson","ratings","createdTodos","activeIssue","solvedIssues","guests"];   // "guests" = attendees added in-meeting (WIFLS/Headlines/ratings); must merge or added attendees vanish on the next sync
   const IDENT=["date","startedAt","facilitatorEmail","facilitatorName","scribeEmail","scribeName"];
+  const FAC=["activeIssue","solvedIssues","guests","locks"];   // facilitator drives IDS focus, solving, attendee list (locks ride along too)
   const apply=(st)=>{ const lt=JSON.parse(snapJson), loc=lt.liveMeeting;
     if(!loc){ st.liveMeeting=null; }                      // meeting ended → clear it for everyone
     else if(!st.liveMeeting){ st.liveMeeting=loc; }       // server has no meeting yet (we just started it) → take ours whole
-    else { const merged=Object.assign({}, st.liveMeeting);
-      const fac=isFacilitator(), scr=isScribe();          // isScribe() falls back to the facilitator when no separate scribe
-      if(fac) NAV.concat(IDENT).forEach(k=>{ if(k in loc) merged[k]=loc[k]; });
-      if(scr) CONTENT.forEach(k=>{ if(k in loc) merged[k]=loc[k]; });
+    else { const merged=Object.assign({}, st.liveMeeting);   // start from the SERVER's latest, overlay only what we own
+      const fac=isFacilitator();
+      if(fac) NAV.concat(IDENT,["activeIssue","solvedIssues","guests"]).forEach(k=>{ if(k in loc) merged[k]=loc[k]; });
+      // ---- PER-FIELD note merge: write ONLY the boxes this client holds a live lock on, so a teammate
+      // editing a different box at the same instant is never overwritten (that was the old same-box chaos). ----
+      merged.notes=Object.assign({}, st.liveMeeting.notes||{});
+      merged.byPerson=JSON.parse(JSON.stringify(st.liveMeeting.byPerson||{}));
+      Object.keys(loc.locks||{}).forEach(k=>{ const l=loc.locks[k]; if(!lockMine(l)||!lockActive(l)) return;
+        if(k.indexOf("note:")===0){ const f=k.slice(5); if(loc.notes && (f in loc.notes)) merged.notes[f]=loc.notes[f]; }
+        else if(k.indexOf("by:")===0){ const rest=k.slice(3), si=rest.indexOf(":"); const seg=rest.slice(0,si), person=rest.slice(si+1);
+          const v=((loc.byPerson||{})[seg]||{})[person]; if(v!==undefined){ merged.byPerson[seg]=merged.byPerson[seg]||{}; merged.byPerson[seg][person]=v; } }
+      });
+      // ratings: per-member, only the members this client actually entered
+      merged.ratings=Object.assign({}, st.liveMeeting.ratings||{});
+      _touchedRate.forEach(id=>{ if(loc.ratings && (id in loc.ratings)) merged.ratings[id]=loc.ratings[id]; });
+      merged.createdTodos=unionArr(st.liveMeeting.createdTodos, loc.createdTodos);   // never drop a to-do link
+      merged.locks=mergeLocks(st.liveMeeting.locks, loc.locks);   // my live locks + everyone else's live locks; stale ones pruned
       st.liveMeeting=merged;
     }
     st.todos=upsertById(st.todos, lt.todos);              // adds/edits merge by id, so a to-do added elsewhere at the same time survives
+    // IDS discussion text: upsert issues by id, then restore any ids sub-field we DON'T hold a live lock on to
+    // the server's value — so two people typing different IDS fields of the SAME issue don't clobber each other.
+    const serverIds={}; (st.issues||[]).forEach(x=>{ if(x&&x.ids) serverIds[x.id]=Object.assign({}, x.ids); });
     st.issues=upsertById(st.issues, lt.issues);
+    const mineIds={}; Object.keys((loc&&loc.locks)||{}).forEach(k=>{ if(k.indexOf("ids:")!==0) return; const l=loc.locks[k]; if(!lockMine(l)||!lockActive(l)) return;
+      const rest=k.slice(4), si=rest.indexOf(":"); const iid=rest.slice(0,si), f=rest.slice(si+1); (mineIds[iid]=mineIds[iid]||{})[f]=1; });
+    (st.issues||[]).forEach(x=>{ if(!x||!x.ids) return; const sv=serverIds[x.id]; if(!sv) return; const mine=mineIds[x.id]||{};
+      Object.keys(sv).forEach(f=>{ if(!mine[f]) x.ids[f]=sv[f]; }); });
   };
   const fire=()=> MULTI ? mergeTeamMulti(teamId, apply)
                         : mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) apply(st); });
@@ -5188,7 +5210,7 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else stopTick(); }
+function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); } }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -10166,6 +10188,14 @@ const SEGMENTS=[
   {key:"conclude",  name:"Conclude",    min:5, sub:"Recap to-dos, cascade, rate 1–10"}
 ];
 let meeting=null, tick=null;
+/* ===== Field-level scribe locks (multi-scribe) =====
+   Everyone in the meeting can take notes at once; each editable note/IDS box is soft-locked to whoever is
+   currently typing in it, so two people never fight over the SAME box (the old chaos) — but different people
+   can fill different boxes simultaneously. A lock is {email,name,at}; it auto-expires after LOCK_TTL so a
+   crashed/closed tab never freezes a box. saveL10's per-field merge writes ONLY the boxes you hold a live
+   lock on, so your edits and a teammate's land side by side instead of overwriting each other. */
+const LOCK_TTL=9000;
+let _lockedKey=null, _lockHb=null, _touchedRate=new Set();
 /* ===== Meeting guests =====
    People who attend THIS L10 but aren't on the team roster (a cross-functional colleague who joins some
    weeks). A guest gets a WIFLS row, a Headlines row and a spot in the concluding rating — but is NOT added
@@ -10506,11 +10536,8 @@ function renderL10(){
   const scribeName=(meeting.scribeName || (meetingHasScribe()?"" : meeting.facilitatorName) || "—");
   const canAssignScribe=isFacilitator()||canEditTeam();
   const scMembers=teamMembers();
-  const scribeBar=`<div class="scribe-bar ${scribing?"me":""}">
-      <span class="sb-lbl">✍️ Scribe: <b>${esc(scribeName)}</b>${scribing?' <span class="sb-you">· you</span>':' <span class="sb-ro">· only they can edit the minutes</span>'}</span>
-      ${canAssignScribe
-        ? `<select id="scribeSel" title="Assign the note-taker — only the scribe can edit the minutes">${scMembers.map(p=>`<option value="${esc(p.name)}" ${sameName(p.name,scribeName)?"selected":""}>${esc(p.name)}</option>`).join("")}${scMembers.some(p=>sameName(p.name,scribeName))?"":`<option selected>${esc(scribeName)}</option>`}</select>`
-        : (scribing?"":`<button class="btn ghost sm" id="beScribe">Make me the scribe</button>`)}
+  const scribeBar=`<div class="scribe-bar">
+      <span class="sb-lbl">✍️ <b>Everyone can take notes.</b> <span class="sb-ro">The box you're typing in locks to you, so no one types over you.</span></span>
     </div>`;
   wrap.innerHTML=`
     ${driving?"":`<div class="follow-bar"><span class="fdot"></span><div><b>Following ${esc(meeting.facilitatorName||"the facilitator")}</b>
@@ -10560,7 +10587,7 @@ function renderSegContent(i){
          <div class="hint" style="margin-top:2px">Advocates enter/update their numbers on the <b>Sales Card</b> tab; this reviews them.</div>` : "";
     c.innerHTML=`<div class="seg-panel"><h4>This Week (W${cwi+1})</h4>${rows||'<div class="hint">No measurables. Add them on the Scorecard tab.</div>'}
       ${salesBlock}
-      <textarea id="seg-note" placeholder="Notes / off-track measurables to drop into IDS…">${esc(meeting.notes.scorecard||"")}</textarea></div>`;
+      <textarea id="seg-note" data-lock="note:scorecard" placeholder="Notes / off-track measurables to drop into IDS…">${esc(meeting.notes.scorecard||"")}</textarea></div>`;
   }else if(seg.key==="rocks"){
     // Same board as the Rocks TAB: this team's own Rocks PLUS any shared onto it (showOn).
     // Owner is shown as a prominent accent chip so it's obvious at a glance who's accountable.
@@ -10614,13 +10641,13 @@ function renderSegContent(i){
         <div class="ids-working">${active.solved?'<span class="ids-solved-tag">✓ Solved</span> Revisiting':"Working on"} this issue${active.owner?` <span class="ids-raiser">· raised by ${esc(active.owner)}</span>`:""}</div>
         ${active.solved?'<div class="hint" style="margin:-2px 0 4px">This issue is already solved. You can add to it below, then Reopen it if it needs more work.</div>':""}
         <label class="ids-lbl">1 · What's the issue?</label>
-        <textarea class="ids-ta" data-f="what" placeholder="State the real issue…">${esc(active.ids.what)}</textarea>
+        <textarea class="ids-ta" data-f="what" data-lock="ids:${active.id}:what" placeholder="State the real issue…">${esc(active.ids.what)}</textarea>
         <label class="ids-lbl">2 · Clarifying questions</label>
-        <textarea class="ids-ta" data-f="clarify" placeholder="Any questions so everyone understands it the same way?">${esc(active.ids.clarify)}</textarea>
+        <textarea class="ids-ta" data-f="clarify" data-lock="ids:${active.id}:clarify" placeholder="Any questions so everyone understands it the same way?">${esc(active.ids.clarify)}</textarea>
         <label class="ids-lbl">3 · Discussion</label>
-        <textarea class="ids-ta" data-f="discuss" placeholder="Root cause, options, tangents to park…">${esc(active.ids.discuss)}</textarea>
+        <textarea class="ids-ta" data-f="discuss" data-lock="ids:${active.id}:discuss" placeholder="Root cause, options, tangents to park…">${esc(active.ids.discuss)}</textarea>
         <label class="ids-lbl">4 · Solve</label>
-        <textarea class="ids-ta" data-f="solve" placeholder="The decision / how it's resolved…">${esc(active.ids.solve)}</textarea>
+        <textarea class="ids-ta" data-f="solve" data-lock="ids:${active.id}:solve" placeholder="The decision / how it's resolved…">${esc(active.ids.solve)}</textarea>
         <label class="ids-lbl">5 · To-Dos (TDL) from this issue</label>
         ${tdl?`<div class="tdl-list">${tdl}</div>`:'<div class="hint" style="margin:0 0 8px">No to-dos yet. If solving created an action, add it below — it stays linked to this issue.</div>'}
         <div class="tdl-add">
@@ -10638,7 +10665,7 @@ function renderSegContent(i){
             ? `<button class="btn" id="ids-reopen">↩ Reopen issue</button>`
             : `<button class="btn" id="ids-solved">Mark Solved</button>`}
         </div></div>`;
-      c.querySelectorAll(".ids-ta").forEach(t=>t.oninput=()=>{ active.ids[t.dataset.f]=t.value; saveL10(); });
+      c.querySelectorAll(".ids-ta").forEach(t=>t.oninput=()=>{ active.ids[t.dataset.f]=t.value; touchLock("ids:"+active.id+":"+t.dataset.f); saveL10(); });
       const back=()=>{ meeting.activeIssue=null; renderSegContent(i); };
       $("#ids-back").onclick=back; $("#ids-keep").onclick=back;
       { const bs=$("#ids-solved"); if(bs) bs.onclick=()=>{
@@ -10685,7 +10712,7 @@ function renderSegContent(i){
       <button type="button" class="btn ghost sm ai-btn" id="cc-ai" style="margin:0 0 6px">✨ Draft summary &amp; cascade with AI</button>
       <div class="hint ai-status" id="cc-ai-status" hidden></div>
       <div class="ai-summary" id="cc-ai-summary" ${meeting.notes.aiSummary?"":"hidden"}>${meeting.notes.aiSummary?"<b>Meeting summary</b><br>"+esc(meeting.notes.aiSummary).replace(/\n/g,"<br>"):""}</div>
-      <textarea id="seg-cascade" placeholder="What needs to be communicated to the rest of the team?">${esc(meeting.notes.cascade||"")}</textarea>
+      <textarea id="seg-cascade" data-lock="note:cascade" placeholder="What needs to be communicated to the rest of the team?">${esc(meeting.notes.cascade||"")}</textarea>
       <h4 style="margin-top:16px">Meeting Rating (1–10)</h4>${rows}
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
       <div class="rate-avg" id="rateAvg">Average: —</div></div>`;
@@ -10697,7 +10724,7 @@ function renderSegContent(i){
       if(g) g.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addG(); } }; }
     const recompute=()=>{ const vals=[...c.querySelectorAll("[data-rate]")].map(i2=>parseFloat(i2.value)).filter(v=>!isNaN(v));
       $("#rateAvg").textContent="Average: "+(vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):"—"); };
-    c.querySelectorAll("[data-rate]").forEach(i2=>i2.oninput=()=>{ meeting.ratings[i2.dataset.rate]=i2.value; recompute(); saveL10(); });
+    c.querySelectorAll("[data-rate]").forEach(i2=>i2.oninput=()=>{ meeting.ratings[i2.dataset.rate]=i2.value; _touchedRate.add(i2.dataset.rate); recompute(); saveL10(); });
     recompute();
   }else{
     // WIFLS & Headlines: ONE BOX PER PERSON — team members come from the chart, plus any guests you add
@@ -10708,14 +10735,14 @@ function renderSegContent(i){
     const ph=key==="segue"?"What they feel like saying…":"Their customer / employee headline…";
     const rows=roster.length
       ? roster.map(p=>`<div class="wf-row"><span class="wf-name">${esc(p.name)}${p.guest?' <span class="wf-guest">guest</span>':''}</span>
-          <input class="wf-in" data-person="${esc(p.name)}" placeholder="${ph}" value="${esc(bp[p.name]||"")}">
+          <input class="wf-in" data-person="${esc(p.name)}" data-lock="by:${key}:${esc(p.name)}" placeholder="${ph}" value="${esc(bp[p.name]||"")}">
           ${p.guest?`<button class="wf-del" data-guest-del="${esc(p.id)}" title="Remove this guest from the meeting">✕</button>`:""}</div>`).join("")
       : '<div class="hint">No one on this team yet — add people to its seat on the Accountability Chart.</div>';
     c.innerHTML=`<div class="seg-panel"><h4>${seg.name}</h4>
       <div class="wf-list">${rows}</div>
       <div class="wf-addguest"><input id="wf-guest" placeholder="＋ Add someone attending who isn't on the team…"><button class="btn ghost sm" id="wf-guest-add">Add attendee</button></div>
-      <div class="wf-other"><label>Other notes</label><textarea id="seg-note" placeholder="Anything not tied to one person…">${esc(meeting.notes[key]||"")}</textarea></div></div>`;
-    c.querySelectorAll(".wf-in").forEach(inp=>inp.oninput=()=>{ meeting.byPerson[key][inp.dataset.person]=inp.value; saveL10(); });
+      <div class="wf-other"><label>Other notes</label><textarea id="seg-note" data-lock="note:${key}" placeholder="Anything not tied to one person…">${esc(meeting.notes[key]||"")}</textarea></div></div>`;
+    c.querySelectorAll(".wf-in").forEach(inp=>inp.oninput=()=>{ meeting.byPerson[key][inp.dataset.person]=inp.value; touchLock("by:"+key+":"+inp.dataset.person); saveL10(); });
     c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); saveL10(true); renderSegContent(i); });
     { const g=$("#wf-guest"), ga=$("#wf-guest-add");
       const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
@@ -10728,8 +10755,8 @@ function renderSegContent(i){
   // durable AND is what lets the rest of the team read along live.
   const note=$("#seg-note");
   if(note){ const key=SEGMENTS[i].key;
-    note.oninput=()=>{ meeting.notes[key]=note.value; saveL10(); }; }
-  const casc=$("#seg-cascade"); if(casc) casc.oninput=()=>{ meeting.notes.cascade=casc.value; saveL10(); };
+    note.oninput=()=>{ meeting.notes[key]=note.value; touchLock("note:"+key); saveL10(); }; }
+  const casc=$("#seg-cascade"); if(casc) casc.oninput=()=>{ meeting.notes.cascade=casc.value; touchLock("note:cascade"); saveL10(); };
   { const aib=$("#cc-ai"); if(aib) aib.onclick=()=>aiRun(aib, $("#cc-ai-status"), "Reviewing the meeting…", async ()=>{
       const digest=l10Digest();
       if(!digest.trim()) throw new Error("Nothing recorded yet — capture some notes first.");
@@ -10742,19 +10769,11 @@ function renderSegContent(i){
       saveL10(true);
       const st=$("#cc-ai-status"); if(st){ st.className="hint ai-status ok"; st.textContent="✓ Cascade filled in below · summary above — edit anything before you finish."; }
     }); }
-  lockForFollowers();
-}
-/* Followers see exactly what the facilitator sees, but can't drive. Rather than branch every
-   control in every segment, disable everything inside the runner in one pass. */
-function lockForFollowers(){
-  if(!meeting || isScribe()) return;   // ONLY the scribe edits the minutes — everyone else is read-only
-  const wrap=$("#l10Wrap"); if(!wrap) return;
-  wrap.querySelectorAll("#segContent input, #segContent textarea, #segContent select, #segContent button")
-    .forEach(el=>{ el.disabled=true; el.classList.add("locked"); });
+  applyMeetingPerms();
 }
 function startMeeting(){
   if(!canEditTeam()) return;   // only a team editor runs their team's L10 (others can follow along)
-  meeting={date:todayIso(),startedAt:Date.now(),capMin:L10_CAP_MIN,seg:0,segStart:Date.now(),segElapsed:0,totalElapsed:0,notes:{},ratings:{},createdTodos:[],activeIssue:null,solvedIssues:[],
+  meeting={date:todayIso(),startedAt:Date.now(),capMin:L10_CAP_MIN,seg:0,segStart:Date.now(),segElapsed:0,totalElapsed:0,notes:{},ratings:{},createdTodos:[],activeIssue:null,solvedIssues:[],locks:{},
     facilitatorEmail:myEmail(), facilitatorName:myName()||myEmail(),
     scribeEmail:myEmail(), scribeName:myName()||myEmail()};   // starter is the scribe by default; reassign in the meeting
   TEAM().liveMeeting=meeting; saveL10(true);       // publish it so the team can follow (merge — never refused)
@@ -10784,6 +10803,59 @@ function setScribe(name){ if(!meeting) return;
   meeting.scribeEmail=meeting.scribeName?emailForName(meeting.scribeName):"";   // "" if they've never logged in — name gate still applies
   saveL10(true); renderL10(); }
 function becomeScribe(){ if(!meeting) return; meeting.scribeEmail=myEmail(); meeting.scribeName=myName()||myEmail(); saveL10(true); renderL10(); }
+/* ===== Field-lock primitives (see the LOCK_TTL note up top) ===== */
+function lockMine(l){ if(!l) return false; const me=myEmail(); if(l.email&&me) return l.email===me; return sameName(l.name, myName()); }
+function lockActive(l){ return !!(l && (Date.now()-(l.at||0) < LOCK_TTL)); }
+function unionArr(a,b){ const out=(a||[]).slice(); (b||[]).forEach(x=>{ if(out.indexOf(x)<0) out.push(x); }); return out; }
+function mergeLocks(serverLocks, locLocks){ const out={}; const sv=serverLocks||{};
+  Object.keys(sv).forEach(k=>{ if(lockActive(sv[k]) && !lockMine(sv[k])) out[k]=sv[k]; });          // keep everyone ELSE's live locks
+  Object.keys(locLocks||{}).forEach(k=>{ const l=locLocks[k]; if(lockMine(l)&&lockActive(l)) out[k]=l; });  // plus MY live locks; released/stale ones drop
+  return out; }
+function meetLocks(){ if(meeting&&!meeting.locks) meeting.locks={}; return (meeting&&meeting.locks)||{}; }
+function lockHolder(key){ const l=meetLocks()[key]; return lockActive(l)?l:null; }
+function lockedByOther(key){ const l=lockHolder(key); return (l&&!lockMine(l))?l:null; }
+function claimLock(key){ if(lockedByOther(key)) return false;
+  if(_lockedKey && _lockedKey!==key) releaseLock(_lockedKey);
+  meetLocks()[key]={email:myEmail(), name:myName()||myEmail(), at:Date.now()}; _lockedKey=key;
+  startLockHb(); saveL10(true); return true; }
+function touchLock(key){ const l=meetLocks()[key]; if(l&&lockMine(l)) l.at=Date.now(); }
+function releaseLock(key){ if(!key) return; const l=meetLocks()[key];
+  if(l&&lockMine(l)){ delete meetLocks()[key]; saveL10(true); }
+  if(_lockedKey===key){ _lockedKey=null; stopLockHb(); } }
+function startLockHb(){ if(_lockHb) return; _lockHb=setInterval(()=>{ if(_lockedKey){ touchLock(_lockedKey); saveL10(true); } else stopLockHb(); }, 4000); }
+function stopLockHb(){ if(_lockHb){ clearInterval(_lockHb); _lockHb=null; } }
+function releaseMyLock(){ if(_lockedKey) releaseLock(_lockedKey); stopLockHb(); }
+// Decorate every lockable note/IDS box: if someone ELSE holds it, show "✎ Name is editing" and make it
+// read-only; otherwise wire focus→claim, blur→release. Non-facilitators also lose the action buttons.
+function applyMeetingPerms(){
+  const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
+  if(!isFacilitator()){
+    wrap.querySelectorAll("#segContent button, #segContent select").forEach(el=>{ el.disabled=true; el.classList.add("locked"); });
+    wrap.querySelectorAll("#segContent input, #segContent textarea").forEach(el=>{
+      if(el.hasAttribute("data-lock")||el.hasAttribute("data-rate")) return;   // note boxes + ratings stay open to everyone
+      el.disabled=true; el.classList.add("locked"); });
+  }
+  wireFieldLocks();
+}
+function wireFieldLocks(){
+  const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
+  wrap.querySelectorAll("#segContent [data-lock]").forEach(el=>{
+    const key=el.getAttribute("data-lock");
+    const prev=el.parentNode&&el.parentNode.querySelector(":scope > .lock-badge");
+    const other=lockedByOther(key);
+    if(other){
+      el.readOnly=true; el.classList.add("locked");
+      const b=prev||document.createElement("span");
+      if(!prev){ b.className="lock-badge"; if(el.parentNode) el.parentNode.insertBefore(b, el); }
+      b.textContent="✎ "+((other.name||"Someone").split(" ")[0])+" is editing";
+      el.onfocus=()=>el.blur();
+    } else {
+      el.readOnly=false; el.classList.remove("locked"); if(prev) prev.remove();
+      el.onfocus=()=>{ if(!claimLock(key)){ const o=lockedByOther(key); el.readOnly=true; el.blur(); setSync(((o&&o.name)?o.name.split(" ")[0]:"Someone")+" is editing that box",true); applyMeetingPerms(); } };
+      el.onblur=()=>{ saveL10(true); releaseLock(key); };   // flush my final value WHILE I still hold the lock, then free the box
+    }
+  });
+}
 function advanceSeg(to){ if(!isFacilitator()) return; commitSegTime();
   meeting.totalElapsed=(meeting.totalElapsed||0)+(meeting.segElapsed||0);   // roll the finished segment into the meeting total
   meeting.seg=to; meeting.segStart=Date.now(); meeting.segElapsed=0; saveL10(true); renderL10(); }
