@@ -4897,7 +4897,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=177;
+const BUILD=178;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -10269,7 +10269,7 @@ let _lockedKey=null, _lockHb=null, _touchedRate=new Set();
 // still write them or the AI draft is silently dropped on the next sync.
 let _progNotes=new Set();
 // Voice dictation (speak your notes) state.
-let _rec=null, _recTarget=null, _recBtn=null, _recKey="", _recBase="", _recFinal="", _recManual=false;
+let _rec=null, _recTarget=null, _recBtn=null, _recKey="", _recBase="", _recFinal="", _recManual=false, _recRestarts=0;
 /* ===== Meeting guests =====
    People who attend THIS L10 but aren't on the team roster (a cross-functional colleague who joins some
    weeks). A guest gets a WIFLS row, a Headlines row and a spot in the concluding rating — but is NOT added
@@ -10945,12 +10945,13 @@ function cleanupDictation(){ if(_recBtn){ _recBtn.classList.remove("rec"); _recB
   _rec=null; _recTarget=null; _recBtn=null; _recKey=""; _recBase=""; _recFinal=""; }
 function startDictation(ta, btn, key){
   if(!speechSupported()||!ta) return;
+  lastCommit=Date.now();   // engage the commit guard so claiming the lock doesn't rebuild the box out from under us
   if(_rec){ const same=(_recTarget===ta); stopDictation(); if(same) return; }   // tap the live mic to stop it
   if(key && !claimLock(key)){ const o=lockedByOther(key); setSync(((o&&o.name)?o.name.split(" ")[0]:"Someone")+" is editing that box",true); return; }
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition; let rec;
   try{ rec=new SR(); }catch(e){ return; }
   rec.continuous=true; rec.interimResults=true; rec.lang="en-US";
-  _rec=rec; _recTarget=ta; _recBtn=btn; _recKey=key||""; _recManual=false;
+  _rec=rec; _recTarget=ta; _recBtn=btn; _recKey=key||""; _recManual=false; _recRestarts=0;
   _recBase = ta.value ? (ta.value.replace(/\s*$/,"")+" ") : "";   // dictation appends after what's already there
   _recFinal="";
   rec.onresult=(e)=>{ lastCommit=Date.now();            // keep the segment from rebuilding mid-sentence
@@ -10961,9 +10962,22 @@ function startDictation(ta, btn, key){
     ta.value = _recBase + _recFinal + (interim ? ((_recFinal?" ":"")+interim) : "");
     ta.dispatchEvent(new Event("input"));               // the box's own handler updates the model + touches the lock + saves
   };
-  rec.onerror=(ev)=>{ if(ev.error==="not-allowed"||ev.error==="service-not-allowed") setSync("Allow microphone access to dictate",true);
-    else if(ev.error==="network") setSync("Dictation needs an internet connection",true); };
-  rec.onend=()=>{ try{ if(_recTarget){ saveL10(true); if(_recKey) releaseLock(_recKey); } }catch(e){} cleanupDictation(); };
+  rec.onerror=(ev)=>{ const er=ev.error;
+    if(er==="not-allowed"||er==="service-not-allowed"){ _recManual=true; setSync("Allow microphone access to dictate",true); if(_recBtn) _recBtn.innerHTML="⚠ Allow mic access"; }
+    else if(er==="network"){ _recManual=true; setSync("Dictation needs an internet connection",true); }
+    else if(er==="audio-capture"){ _recManual=true; setSync("No microphone found",true); } };
+  // The browser ends recognition on every pause in speech — auto-resume so it feels continuous until the
+  // user taps stop. Bank what's captured first; stop restarting if the box is gone or the user stopped.
+  rec.onend=()=>{
+    if(!_recManual && _recTarget && document.body.contains(_recTarget) && _recRestarts<500){
+      _recRestarts++;
+      _recBase = _recTarget.value ? (_recTarget.value.replace(/\s*$/,"")+" ") : "";
+      _recFinal="";
+      try{ rec.start(); return; }catch(e){}
+    }
+    try{ if(_recTarget){ saveL10(true); if(_recKey) releaseLock(_recKey); } }catch(e){}
+    cleanupDictation();
+  };
   try{ rec.start(); if(btn){ btn.classList.add("rec"); btn.innerHTML="● Listening… tap to stop"; } setSync("🎤 Listening…"); }
   catch(e){ cleanupDictation(); }
 }
@@ -10976,6 +10990,7 @@ function wireDictation(){
     const key=ta.getAttribute("data-lock");
     const btn=document.createElement("button");
     btn.type="button"; btn.className="mic-btn"; btn.innerHTML="🎤 Dictate";
+    btn.title="Tip: your device's own dictation (the mic key on your keyboard / Win+H / Fn-Fn) also types into any box — and it's more reliable than this button.";
     btn.onmousedown=(e)=>e.preventDefault();                     // don't blur the box when the mic is tapped
     btn.onclick=()=>startDictation(ta, btn, key);
     if(ta.parentNode) ta.parentNode.insertBefore(btn, ta.nextSibling);
