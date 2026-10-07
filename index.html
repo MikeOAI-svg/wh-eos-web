@@ -4893,7 +4893,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=175;
+const BUILD=176;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5122,6 +5122,9 @@ function saveL10(immediate){   // persist the current L10 team's meeting + to-do
         else if(k.indexOf("by:")===0){ const rest=k.slice(3), si=rest.indexOf(":"); const seg=rest.slice(0,si), person=rest.slice(si+1);
           const v=((loc.byPerson||{})[seg]||{})[person]; if(v!==undefined){ merged.byPerson[seg]=merged.byPerson[seg]||{}; merged.byPerson[seg][person]=v; } }
       });
+      // AI-drafted (lockless) note fields: write them too, unless someone else is actively holding that box.
+      _progNotes.forEach(f=>{ const sl=(st.liveMeeting.locks||{})["note:"+f]; if(lockActive(sl)&&!lockMine(sl)) return;
+        if(loc.notes && (f in loc.notes)) merged.notes[f]=loc.notes[f]; });
       // ratings: per-member, only the members this client actually entered
       merged.ratings=Object.assign({}, st.liveMeeting.ratings||{});
       _touchedRate.forEach(id=>{ if(loc.ratings && (id in loc.ratings)) merged.ratings[id]=loc.ratings[id]; });
@@ -5230,7 +5233,7 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); } }
+function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); } }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -5486,7 +5489,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     acDownloadPDF, acExportSVG, acChartPNG, teamMemberNames, teamSeatIds, teamZoneSeats,
     teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter,
     canSeeRatingsFor, canRatePerson, canSeeSelfAssessment, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
-    get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};} };
+    get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};},
+    saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;} };
 }
 
 /* ===== L10 presence — who's currently on the Level 10 =====
@@ -10256,6 +10260,10 @@ let meeting=null, tick=null;
    lock on, so your edits and a teammate's land side by side instead of overwriting each other. */
 const LOCK_TTL=9000;
 let _lockedKey=null, _lockHb=null, _touchedRate=new Set();
+// Note fields written PROGRAMMATICALLY (not by typing in a focused box) — e.g. the AI-drafted cascade &
+// summary. Typed fields are written only while you hold their lock; these have no lock, so the merge must
+// still write them or the AI draft is silently dropped on the next sync.
+let _progNotes=new Set();
 /* ===== Meeting guests =====
    People who attend THIS L10 but aren't on the team roster (a cross-functional colleague who joins some
    weeks). A guest gets a WIFLS row, a Headlines row and a spot in the concluding rating — but is NOT added
@@ -10824,8 +10832,8 @@ function renderSegContent(i){
       const rating=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):"";
       const text=await aiCall("l10_minutes",{ teamName:TEAM().name, transcript:digest, rating });
       const j=aiParseJSON(text);
-      if(j.cascade){ const ta=$("#seg-cascade"); if(ta) ta.value=j.cascade; meeting.notes.cascade=j.cascade; }
-      if(j.summary){ meeting.notes.aiSummary=j.summary; const box=$("#cc-ai-summary"); if(box){ box.hidden=false; box.innerHTML="<b>Meeting summary</b><br>"+esc(j.summary).replace(/\n/g,"<br>"); } }
+      if(j.cascade){ const ta=$("#seg-cascade"); if(ta) ta.value=j.cascade; meeting.notes.cascade=j.cascade; _progNotes.add("cascade"); }
+      if(j.summary){ meeting.notes.aiSummary=j.summary; _progNotes.add("aiSummary"); const box=$("#cc-ai-summary"); if(box){ box.hidden=false; box.innerHTML="<b>Meeting summary</b><br>"+esc(j.summary).replace(/\n/g,"<br>"); } }
       saveL10(true);
       const st=$("#cc-ai-status"); if(st){ st.className="hint ai-status ok"; st.textContent="✓ Cascade filled in below · summary above — edit anything before you finish."; }
     }); }
@@ -10882,7 +10890,10 @@ function touchLock(key){ const l=meetLocks()[key]; if(l&&lockMine(l)) l.at=Date.
 function releaseLock(key){ if(!key) return; const l=meetLocks()[key];
   if(l&&lockMine(l)){ delete meetLocks()[key]; saveL10(true); }
   if(_lockedKey===key){ _lockedKey=null; stopLockHb(); } }
-function startLockHb(){ if(_lockHb) return; _lockHb=setInterval(()=>{ if(_lockedKey){ touchLock(_lockedKey); saveL10(true); } else stopLockHb(); }, 4000); }
+// No periodic heartbeat write: typing already refreshes the lock, and an idle lock simply expires after
+// LOCK_TTL. (The old 4-second heartbeat hammered the server during a live meeting — every write rebuilt
+// everyone's screen, which made clicks drop and segment switches lag.)
+function startLockHb(){}
 function stopLockHb(){ if(_lockHb){ clearInterval(_lockHb); _lockHb=null; } }
 function releaseMyLock(){ if(_lockedKey) releaseLock(_lockedKey); stopLockHb(); }
 // Decorate every lockable note/IDS box: if someone ELSE holds it, show "✎ Name is editing" and make it
