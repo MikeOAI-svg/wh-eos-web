@@ -1268,6 +1268,8 @@
   #segContent .locked{opacity:.75; cursor:not-allowed}
   #segContent textarea.locked,#segContent input.locked{background:var(--bg); border-style:dashed}
   .lock-badge{display:block; font-size:11px; font-weight:700; color:var(--accent); margin:2px 0 3px}
+  .av-row{display:flex; justify-content:space-between; gap:18px; padding:9px 0; border-top:1px solid var(--border); font-size:14px}
+  .av-row>div{text-align:right; color:var(--text); max-width:62%}
   .mic-btn{display:inline-flex; align-items:center; gap:6px; margin-top:8px; font-size:13px; font-weight:700; color:var(--muted); background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 12px; cursor:pointer}
   .mic-btn:hover{border-color:var(--accent); color:var(--text)}
   .mic-btn.rec{color:#fff; background:var(--red); border-color:var(--red); animation:micpulse 1.2s infinite}
@@ -4897,7 +4899,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=178;
+const BUILD=180;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5101,7 +5103,7 @@ function mergeCompany(applyCompany){
   })).then(res=>{ _companyState=res.state; _companyAt=res.at; _baseCompany=res.at; _shadowCompany=JSON.stringify(companyOf(data)); setSync("Saved"); })
     .catch(e=>{ console.error("company merge tx failed — falling back",e); save(true); });
 }
-function saveL10(immediate){   // persist the current L10 team's meeting + to-dos/issues by merging into the latest server state
+function saveL10(immediate, ending){   // persist the current L10 team's meeting + to-dos/issues by merging into the latest server state
   const t=TEAM(); if(!t){ save(); return; } const teamId=t.id;
   const snapJson=JSON.stringify({ liveMeeting:(t.liveMeeting||null), todos:(t.todos||[]), issues:(t.issues||[]) });
   // Two people write the live meeting at once — the FACILITATOR drives navigation/timer, the SCRIBE owns the
@@ -5112,7 +5114,7 @@ function saveL10(immediate){   // persist the current L10 team's meeting + to-do
   const IDENT=["date","startedAt","facilitatorEmail","facilitatorName","scribeEmail","scribeName"];
   const FAC=["activeIssue","solvedIssues","guests","locks"];   // facilitator drives IDS focus, solving, attendee list (locks ride along too)
   const apply=(st)=>{ const lt=JSON.parse(snapJson), loc=lt.liveMeeting;
-    if(!loc){ st.liveMeeting=null; }                      // meeting ended → clear it for everyone
+    if(!loc){ if(ending) st.liveMeeting=null; }           // clear it for everyone ONLY on an explicit end — a stray/stale save must NEVER kick everyone out of a live meeting
     else if(!st.liveMeeting){ st.liveMeeting=loc; }       // server has no meeting yet (we just started it) → take ours whole
     else { const merged=Object.assign({}, st.liveMeeting);   // start from the SERVER's latest, overlay only what we own
       const fac=isFacilitator();
@@ -5318,7 +5320,10 @@ function flushAdopt(){
 ["pointerdown","keydown","wheel","mousemove","touchstart"].forEach(ev=>window.addEventListener(ev,()=>{lastActivity=Date.now();},{passive:true}));
 // Commit guard (see COMMIT_GUARD_MS): pointerdown/keydown only, capture phase so it fires before the input blurs.
 ["pointerdown","keydown"].forEach(ev=>window.addEventListener(ev,()=>{lastCommit=Date.now();},{capture:true,passive:true}));
-setInterval(()=>{ if(updateReady && !isBusy() && Date.now()-lastActivity>25000) location.reload(); },3000);
+// Auto-update ONLY a truly-abandoned tab (10+ minutes with zero activity) and never during a live meeting.
+// The 25-second version was yanking people out of the L10 AND the Sales Card mid-entry on every deploy —
+// losing their numbers. Anyone still working just sees the "new version" bar and reloads when they choose.
+setInterval(()=>{ if(updateReady && !meeting && !isBusy() && Date.now()-lastActivity>600000) location.reload(); },5000);
 
 /* ================= PER-TEAM DOCUMENTS (Phase 0 — GATED, off until migrated) =================
    The whole workspace is normally ONE doc (workspaces/main). That's the single lane where teams
@@ -5356,8 +5361,18 @@ function adoptMulti(){
   const pend=pendingMeetingTodos();
   data=migrate(merged); syncMeetingRef(); refreshShadows(); _baseAt=Object.assign({},_teamAt); _baseCompany=_companyAt;   // local data now reflects the received team + company versions
   if(reMergeMeetingTodos(pend)) saveL10(true);   // a To-Do you just added survived the per-team refresh
-  if(_multiBooted){ switchView(currentView); if($("main")) $("main").scrollTop=sc; }
+  if(_multiBooted){
+    // Preserve the caret: if the cursor is in a note/IDS box, put it back after the rebuild so a teammate's
+    // edit elsewhere never yanks you out of what you're typing.
+    const act=document.activeElement, fk=(act&&act.getAttribute)?act.getAttribute("data-lock"):null;
+    const ss=(fk&&act.selectionStart!=null)?act.selectionStart:null, se=(fk&&act.selectionEnd!=null)?act.selectionEnd:null;
+    switchView(currentView); if($("main")) $("main").scrollTop=sc;
+    if(fk){ const el=document.querySelector('#segContent [data-lock="'+fk.replace(/"/g,'\\"')+'"]');
+      if(el && !el.readOnly){ try{ el.focus(); if(ss!=null) el.setSelectionRange(ss,se); lastCommit=Date.now(); }catch(e){} } }
+  }
 }
+let _adoptMultiTimer=null;
+function scheduleAdoptMulti(){ clearTimeout(_adoptMultiTimer); _adoptMultiTimer=setTimeout(adoptMulti, 220); }   // coalesce a burst of teammate writes into ONE rebuild
 function maybeMultiBoot(){ if(!_gotCompany||!_gotTeams) return; adoptMulti(); if(!_multiBooted){ _multiBooted=true; if(!booted) boot(); } }
 function ensureTeamsSub(){
   if(_teamsUnsub) return;
@@ -5371,7 +5386,7 @@ function ensureTeamsSub(){
     if(MULTI && !_healed && Object.keys(_teamDocs).length===0 && _companyState && (_companyState.legacyTeams||[]).length){
       _healed=true; healFromLegacy(); return;
     }
-    if(MULTI){ if(!_multiBooted) maybeMultiBoot(); else adoptMulti(); }
+    if(MULTI){ if(!_multiBooted) maybeMultiBoot(); else scheduleAdoptMulti(); }
   }, err=>{ console.error("teams sync error",err); });
 }
 function healFromLegacy(){
@@ -5494,7 +5509,7 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter,
     canSeeRatingsFor, canRatePerson, canSeeSelfAssessment, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};},
-    saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;} };
+    saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;}, accessSummaryFor, get asOverride(){return {e:_asEmail,n:_asName};} };
 }
 
 /* ===== L10 presence — who's currently on the Level 10 =====
@@ -7291,9 +7306,14 @@ function allMemberNames(){ return knownPeople(); }   // members + chart-seat occ
    Rocks and To-Dos are owned by a NAME ("Aaron"), but a login is an EMAIL. To know which
    items are yours we need the link between the two. Each person claims their own name once;
    the claim lives in the shared doc (data.people) so it follows them to any device. */
-const myEmail=()=>(((firebase.auth().currentUser||{}).email)||"").trim().toLowerCase();
+/* ACCESS-PREVIEW override: the admin "Who can see what" tool briefly sets _asEmail/_asName so every
+   real permission/visibility rule (which all read myEmail()/myName()) computes AS that person. It is set
+   only inside a synchronous, READ-ONLY summary pass — never during a render or a save — then cleared. */
+let _asEmail=null, _asName=null;
+const myEmail=()=> _asEmail!=null ? _asEmail : (((firebase.auth().currentUser||{}).email)||"").trim().toLowerCase();
 const sameName=(a,b)=>!!a&&!!b&&String(a).trim().toLowerCase()===String(b).trim().toLowerCase();
 function myName(){
+  if(_asName!=null) return _asName;
   const e=myEmail(); if(!e) return "";
   const p=(data.people||[]).find(x=>x&&(x.email||"").trim().toLowerCase()===e);
   return (p&&p.name)||"";
@@ -7780,7 +7800,8 @@ function renderAdmin(){
   const peopleGroups=(data.teams||[]).map(t=>groupHtml(t.name, t.id, dedupSort(teamRoster(t)))).join("")
     + groupHtml("Not on a team","__none__", dedupSort(unassigned));
   wrap.innerHTML=`
-    <button class="btn wide" id="adm-add-member" style="margin-bottom:14px">＋ Add a team member</button>
+    <button class="btn wide" id="adm-add-member" style="margin-bottom:8px">＋ Add a team member</button>
+    <button class="btn ghost wide" id="adm-access" style="margin-bottom:14px">🔍 Who can see what — access viewer</button>
     <div class="adm-warn"><b>⚠ Deleting here does NOT stop someone signing in</b>
       <div>This removes a person from the boards — team membership, their name link, and their
       assignments. Their password still works until you delete the account in the Firebase Console:
@@ -7832,6 +7853,7 @@ function renderAdmin(){
     <input id="adm-psearch" class="adm-search" placeholder="🔍  Search for a name…" autocomplete="off" enterkeyhint="search">
     ${peopleGroups||`<div class="empty"><span class="emoji">👤</span>No people yet.</div>`}`;
   { const b=$("#adm-add-member"); if(b) b.onclick=addMemberWizard; }
+  { const b=$("#adm-access"); if(b) b.onclick=()=>accessViewer(); }
   wrap.querySelectorAll("#adm-facfilter [data-fac]").forEach(b=>b.onclick=()=>{ admTeamFac=b.dataset.fac; try{localStorage.setItem("eostracker.admfac",admTeamFac);}catch(e){} renderAdmin(); });
   { const b=$("#adm-teamlinks"); if(b) b.onclick=manageTeamLinks; }
   { const b=$("#adm-restore"); if(b) b.onclick=openRestore; }
@@ -8035,6 +8057,64 @@ function provisionError(e){ const c=(e&&e.code)||"";
   if(c.indexOf("operation-not-allowed")>=0) return "Email/password sign-in is turned off in Firebase.";
   if(c.indexOf("network")>=0) return "Couldn't reach the server — check your connection.";
   return (e&&e.message)||"Unknown error."; }
+/* ===== "Who can see what" — access viewer (admin) =====
+   For a chosen person, compute exactly what the app shows THEM by briefly running every real permission rule
+   as that person (see _asEmail/_asName). Read-only: no renders or saves happen inside the override window. */
+function accessSummaryFor(name){
+  const email=(emailForName(name)||"").toLowerCase();
+  const se=_asEmail, sn=_asName; _asEmail=email; _asName=name;
+  let s;
+  try{
+    const seats=seatsFor(name), seatRoles=seats.map(x=>x.role||"seat");
+    const pillar=seats.length?pillarSeatOf(seats[0].id):null;
+    const facility=(pillar&&pillar.role)||"Company-wide / shared";
+    const admin=isAdmin(), evalAdm=isEvalAdmin();
+    const editCo=canEditCompany(), editChart=canEditChart(), allTeams=seesAllTeams();
+    const teamsSee=(data.teams||[]).filter(canSeeTeam).map(t=>t.name);
+    const teamsEdit=(data.teams||[]).filter(t=>canSeeTeam(t)&&canEditTeam(t)).map(t=>t.name);
+    const below=peopleBelowMe(name), directs=directReportsOf(name);
+    const roleLabel=admin?"Admin":(editCo?"Leadership":(teamsEdit.length?"Team owner":"Member"));
+    s={ name, email, seatRoles, facility, admin, evalAdm, editCo, editChart, allTeams, teamsSee, teamsEdit, below, directs, roleLabel };
+  } finally { _asEmail=se; _asName=sn; }
+  return s;
+}
+function accessSummaryHtml(name){
+  const s=accessSummaryFor(name);
+  const chip=(t,c)=>`<span class="ev-pill ${c||'ok'}">${esc(t)}</span>`;
+  const yn=b=>b?`<b style="color:var(--green)">✓ Yes</b>`:`<span style="color:var(--muted)">— No</span>`;
+  const list=arr=>arr.length?arr.map(esc).join(", "):`<span style="color:var(--muted)">none</span>`;
+  const paReach=s.evalAdm?"Everyone (HR / admin)":(s.below.length?(s.below.length+" in their branch"):"just themselves");
+  return `<div class="card" style="margin-top:4px;display:flex;flex-direction:column;gap:12px">
+    <div>
+      <div style="font-size:19px;font-weight:800">${esc(s.name)} <span style="font-size:13px;font-weight:600;color:var(--muted)">${esc(s.email||"no sign-in")}</span></div>
+      <div style="margin:7px 0 6px;display:flex;gap:6px;flex-wrap:wrap">${chip(s.roleLabel,s.admin?"over":"ok")}${chip(s.facility)}${s.evalAdm?chip("HR / evals","due"):""}</div>
+      <div style="font-size:13px;color:var(--muted)">Seat: ${s.seatRoles.length?esc(s.seatRoles.join(", ")):"no seat on the chart"}</div>
+    </div>
+    <div>
+      <div class="av-row"><b>Teams they can open</b><div>${s.allTeams?"<b>Every team</b>":list(s.teamsSee)}</div></div>
+      <div class="av-row"><b>Teams they can edit</b><div>${list(s.teamsEdit)}</div></div>
+      <div class="av-row"><b>Edit company V/TO &amp; Chart</b><div>${yn(s.editCo||s.editChart)}</div></div>
+      <div class="av-row"><b>People Analyzer — can view</b><div>${esc(paReach)}</div></div>
+      <div class="av-row"><b>People Analyzer — can rate</b><div>${s.directs.length?esc(s.directs.join(", ")):`<span style="color:var(--muted)">no direct reports</span>`}</div></div>
+      <div class="av-row"><b>HR / evaluations admin</b><div>${yn(s.evalAdm)}</div></div>
+    </div>
+    <div class="hint" style="margin:0">⚠ These are the <b>view boundaries in the app's screens</b> — what this person sees. Under the hood the data still syncs to every signed-in browser, so treat it as "what they see," not a hard database lock.</div>
+  </div>`;
+}
+function accessViewer(preName){
+  if(!isAdmin()) return;
+  const names=knownPeople();
+  if(!names.length){ openSheet(`<h2>Who can see what</h2><div class="hint">No people yet.</div><div class="sheet-actions"><button class="btn" id="av-close">Close</button></div>`); $("#av-close").onclick=closeSheet; return; }
+  const opts=names.map(n=>`<option value="${esc(n)}" ${preName&&sameName(n,preName)?"selected":""}>${esc(n)}</option>`).join("");
+  openSheet(`<h2>Who can see what</h2>
+    <div class="hint" style="margin:-4px 2px 12px">Pick a person to see exactly what the app shows them — their teams, edit rights, People&nbsp;Analyzer reach and HR access.</div>
+    <div class="field"><label>Person</label><select id="av-who">${opts}</select></div>
+    <div id="av-out"></div>
+    <div class="sheet-actions"><button class="btn" id="av-close">Close</button></div>`);
+  $("#av-close").onclick=closeSheet;
+  const draw=()=>{ const o=$("#av-out"); if(o) o.innerHTML=accessSummaryHtml($("#av-who").value); };
+  $("#av-who").onchange=draw; draw();
+}
 function addMemberWizard(){
   if(!canEditChart()) return;
   const scoped=!canEditCompany();                       // pillar leader: only their own branch
@@ -10638,7 +10718,7 @@ function renderL10(){
     wrap.querySelector("#prevSeg").onclick=()=>{ if(meeting.seg>0) advanceSeg(meeting.seg-1); };
     wrap.querySelectorAll(".ag-item").forEach(a=>a.onclick=()=>advanceSeg(+a.dataset.seg));
     wrap.querySelector("#cancelMeeting").onclick=()=>{ if(confirm("Cancel this meeting without saving? This ends it for everyone following.")){
-      TEAM().liveMeeting=null; saveL10(true); stopTick(); meeting=null; renderL10(); } };
+      TEAM().liveMeeting=null; saveL10(true, true); stopTick(); meeting=null; renderL10(); } };   // ending=true: this is the one place a saveL10 is ALLOWED to clear the meeting
   } else {
     wrap.querySelector("#takeOver").onclick=takeOverMeeting;
   }
@@ -10743,18 +10823,20 @@ function renderSegContent(i){
       const back=()=>{ meeting.activeIssue=null; renderSegContent(i); };
       $("#ids-back").onclick=back; $("#ids-keep").onclick=back;
       { const bs=$("#ids-solved"); if(bs) bs.onclick=()=>{
-        active.solved=true; active.solvedDate=todayIso();
+        const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;   // re-fetch LIVE at click time — a rebuild must not make this act on a stale, detached issue
+        a.solved=true; a.solvedDate=todayIso();
         // Snapshot the worksheet into this meeting's minutes. UPSERT by issue id so re-solving a revisited
         // issue doesn't list it twice, and keep the raiser (owner) so the archived minutes show "raised by".
-        const snap={issueId:active.id, text:active.text, owner:active.owner||"", ids:Object.assign({},active.ids||{})};
+        const snap={issueId:a.id, text:a.text, owner:a.owner||"", ids:Object.assign({},a.ids||{})};
         meeting.solvedIssues=meeting.solvedIssues||[];
-        const six=meeting.solvedIssues.findIndex(x=>x&&x.issueId===active.id);
+        const six=meeting.solvedIssues.findIndex(x=>x&&x.issueId===a.id);
         if(six>=0) meeting.solvedIssues[six]=snap; else meeting.solvedIssues.push(snap);
         meeting.activeIssue=null; saveL10(true); renderSegContent(i);
       }; }
       { const br=$("#ids-reopen"); if(br) br.onclick=()=>{   // put a solved issue back on the open list (still worked on)
-        active.solved=false; active.solvedDate="";
-        meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===active.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
+        const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;
+        a.solved=false; a.solvedDate="";
+        meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===a.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
         saveL10(true); renderSegContent(i);
       }; }
       const addTodo=()=>{ const ti=$("#ids-todo"), oi=$("#ids-todo-owner"), di=$("#ids-todo-due"); const v=ti.value.trim(); if(!v) return;
@@ -10906,14 +10988,16 @@ function releaseMyLock(){ if(_lockedKey) releaseLock(_lockedKey); stopLockHb(); 
 // read-only; otherwise wire focus→claim, blur→release. Non-facilitators also lose the action buttons.
 function applyMeetingPerms(){
   const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
-  if(!isFacilitator()){
-    wrap.querySelectorAll("#segContent button, #segContent select").forEach(el=>{ el.disabled=true; el.classList.add("locked"); });
-    wrap.querySelectorAll("#segContent input, #segContent textarea").forEach(el=>{
-      if(el.hasAttribute("data-lock")||el.hasAttribute("data-rate")) return;   // note boxes + ratings stay open to everyone
-      el.disabled=true; el.classList.add("locked"); });
-  }
-  wireFieldLocks();
-  wireDictation();
+  try{
+    if(!isFacilitator()){
+      wrap.querySelectorAll("#segContent button, #segContent select").forEach(el=>{ el.disabled=true; el.classList.add("locked"); });
+      wrap.querySelectorAll("#segContent input, #segContent textarea").forEach(el=>{
+        if(el.hasAttribute("data-lock")||el.hasAttribute("data-rate")) return;   // note boxes + ratings stay open to everyone
+        el.disabled=true; el.classList.add("locked"); });
+    }
+    wireFieldLocks();
+    wireDictation();
+  }catch(e){ console.error("meeting perms/locks/dictation wiring error (meeting still works)",e); }   // never let a wiring glitch break the whole L10 view
 }
 function wireFieldLocks(){
   const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
@@ -12139,18 +12223,12 @@ function scheduleSalesSave(teamId, sectionId, rowId, colId, value){
   _salesTimers[k]=setTimeout(()=>saveSalesCell(teamId,sectionId,rowId,colId,value), 600);
 }
 function saveSalesCell(teamId, sectionId, rowId, colId, value){
-  let fs; try{ fs=firebase.firestore(); }catch(e){ save(); return; }
-  if(!wsRef || !fs.runTransaction){ save(); return; }
-  const email=((firebase.auth().currentUser||{}).email)||"";
-  fs.runTransaction(tx=>tx.get(wsRef).then(snap=>{
-    const state=(snap.exists&&snap.data()&&snap.data().state)?snap.data().state:JSON.parse(JSON.stringify(data));
-    const t=(state.teams||[]).find(x=>x&&x.id===teamId), card=t&&t.salesCard;
-    const sec=card&&(card.sections||[]).find(s=>s.id===sectionId);
-    if(sec){ sec.values=sec.values||{}; sec.values[rowId]=sec.values[rowId]||{};
-      if(value===""||value==null) delete sec.values[rowId][colId]; else sec.values[rowId][colId]=String(value); }
-    state.meta=state.meta||{}; state.meta.build=Math.max(BUILD,state.meta.build||0);
-    tx.set(wsRef,{ state:state, updatedAt:Date.now(), updatedBy:email });
-  })).then(()=>setSync("Saved")).catch(e=>{ console.error("sales cell tx failed — falling back",e); save(); });
+  // The Sales Card is TEAM data. In per-team (multi-doc) mode it lives in the team's OWN document, so the
+  // old single-doc write silently failed to find the team and lost the numbers. mergeTeam writes the right
+  // document in either mode, re-reads first (concurrency-safe), and never refuses or clobbers other cells.
+  mergeTeam(teamId, t=>{ const card=t&&t.salesCard; const sec=card&&(card.sections||[]).find(s=>s.id===sectionId); if(!sec) return;
+    sec.values=sec.values||{}; sec.values[rowId]=sec.values[rowId]||{};
+    if(value===""||value==null) delete sec.values[rowId][colId]; else sec.values[rowId][colId]=String(value); });
 }
 
 function closeSalesWeek(){
