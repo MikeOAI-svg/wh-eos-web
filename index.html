@@ -4871,8 +4871,16 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=170;
+const BUILD=171;
 let updateReady=false, lastActivity=Date.now();
+/* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
+   alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
+   and a queued teammate update can flush and swap in a fresh EMPTY input before the click handler reads it —
+   the "I had to click Add twice" TDL bug. pointerdown fires BEFORE that blur, so stamping lastCommit then
+   holds the rebuild off until the click has committed against the real field. Excludes mousemove on purpose
+   so it never starves teammate updates. */
+const COMMIT_GUARD_MS=900;
+let lastCommit=0;
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
 function setSync(msg,isErr){ const d=$("#syncDot"); if(!d) return;
@@ -5249,7 +5257,7 @@ let adoptTimer=null, lastAdopted="";
 function scheduleAdopt(incoming, at){ remoteQueued=incoming; if(typeof at==="number") remoteAt=at; clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,450); }
 function flushAdopt(){
   if(!remoteQueued) return;
-  if(isBusy()){ clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,600); return; }   // wait until they stop editing
+  if(isBusy() || (Date.now()-lastCommit)<COMMIT_GUARD_MS){ clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,400); return; }   // wait until they stop editing / just-committed clicks land
   const s=remoteQueued; remoteQueued=null;
   baseAt=Math.max(baseAt, remoteAt);        // our copy now reflects this server version (guards future writes)
   const json=JSON.stringify(s);
@@ -5259,6 +5267,8 @@ function flushAdopt(){
 }
 // Track presence so a pending update only reloads when the person has stepped away — never mid-edit.
 ["pointerdown","keydown","wheel","mousemove","touchstart"].forEach(ev=>window.addEventListener(ev,()=>{lastActivity=Date.now();},{passive:true}));
+// Commit guard (see COMMIT_GUARD_MS): pointerdown/keydown only, capture phase so it fires before the input blurs.
+["pointerdown","keydown"].forEach(ev=>window.addEventListener(ev,()=>{lastCommit=Date.now();},{capture:true,passive:true}));
 setInterval(()=>{ if(updateReady && !isBusy() && Date.now()-lastActivity>25000) location.reload(); },3000);
 
 /* ================= PER-TEAM DOCUMENTS (Phase 0 — GATED, off until migrated) =================
@@ -5291,7 +5301,7 @@ function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shad
 function adoptMulti(){
   const merged=assembleMulti(), json=JSON.stringify(merged);
   if(json===lastAdopted) return;                 // nothing changed on screen
-  if(_multiBooted && isBusy()){ setTimeout(adoptMulti,500); return; }   // never rebuild mid-edit
+  if(_multiBooted && (isBusy() || (Date.now()-lastCommit)<COMMIT_GUARD_MS)){ setTimeout(adoptMulti,400); return; }   // never rebuild mid-edit, nor in the split-second around a just-committed click
   lastAdopted=json;
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
