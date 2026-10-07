@@ -8,7 +8,8 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 const PROJECT_ID = "wh-operating-system";                       // your Firebase project
 const ISSUER = `https://securetoken.google.com/${PROJECT_ID}`;
 const JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
-const MODEL = "claude-sonnet-5";                                // cheap + plenty capable for drafting/summarizing; change to "claude-opus-5" for more power
+const MODEL = "claude-sonnet-5-5";                              // latest Sonnet — fast + sharp, the default for every task
+const MODEL_PRO = "claude-opus-5-5";                            // top model, used for the heavy synthesis tasks (L10 recap, Scorecard insight)
 
 function json(status, obj){ return { statusCode: status, headers: { "content-type": "application/json" }, body: JSON.stringify(obj) }; }
 
@@ -30,9 +31,10 @@ const TASKS = {
     const transcript = String(p.transcript || "").slice(0, 12000);
     const rating = String(p.rating || "").slice(0, 40);
     return {
-      maxTokens: 1500,
-      system: "You are an expert EOS implementer writing the recap of a weekly Level 10 Meeting for a leadership team. Be concise, concrete, and professional; name owners for to-dos. Reply with ONLY a JSON object — no prose, no markdown, no code fences.",
-      user: `Write the recap for ${team}'s Level 10 Meeting from these notes.\n\n${transcript || "(no notes were recorded)"}\n\nAverage rating: ${rating || "(n/a)"}\n\nReturn JSON shaped EXACTLY like:\n{"summary":"<5–8 sentence recap: what was decided, what got solved, and the key to-dos with owners>","cascade":"<a short 2–4 sentence Cascading Message the leaders can relay to their departments — only the few things everyone should hear>"}`
+      model: MODEL_PRO,
+      maxTokens: 1600,
+      system: "You are a seasoned EOS/Traction implementer writing the official recap of a weekly Level 10 Meeting for a leadership team. Write like a sharp chief of staff: lead with what was DECIDED and which issues got SOLVED (IDS), then the to-dos with their owners. Use the real names, numbers, and dates from the notes — never invent any. Be specific and concrete; cut every filler word, hedge, and generic line. If the notes are thin, keep it short rather than padding. Reply with ONLY a JSON object — no prose, no markdown, no code fences.",
+      user: `Write the recap for ${team}'s Level 10 Meeting from the raw notes below.\n\nNOTES:\n${transcript || "(no notes were recorded)"}\n\nAverage meeting rating: ${rating || "(n/a)"}\n\nReturn JSON shaped EXACTLY like:\n{"summary":"<a tight recap in 4–7 sentences: the decisions made, the issues solved, and the key to-dos WITH owners and any due dates. Lead with the most important outcome. No preamble like 'In this meeting'.>","cascade":"<the Cascading Message, ready to forward to departments as-is: 2–4 crisp sentences covering ONLY what everyone needs to hear — a decision, a change, a win, or an ask. Plain, direct, no fluff.>"}`
     };
   },
   ask_app(p){
@@ -60,9 +62,10 @@ const TASKS = {
     const quarter = String(p.quarter || "").slice(0, 40);
     const digest = String(p.digest || "").slice(0, 10000);
     return {
+      model: MODEL_PRO,
       maxTokens: 1200,
-      system: "You are an expert EOS implementer reviewing a leadership team's weekly Scorecard. Be concise, concrete, and practical, and never invent numbers you were not given. Reply in PLAIN TEXT — short paragraphs or bullet lines, not JSON.",
-      user: `Review ${team}'s Scorecard for ${quarter}. Each measurable lists its weekly actuals with an [on]/[off] status.\n\n${digest || "(no data)"}\n\nIn 6–10 tight lines: (1) which measurables are trending OFF track, and any pattern across them; (2) the most likely story behind the worst one or two; (3) 2–3 specific things to focus on or put on the Issues list. Be actionable — no filler.`
+      system: "You are a seasoned EOS implementer reviewing a leadership team's weekly Scorecard. Think like an operator: find the real patterns, name the likely root cause, and give specific, do-this-now actions. Use ONLY the numbers given — never invent any. Be blunt and concrete; no filler, no generic advice. Reply in PLAIN TEXT — short paragraphs or bullet lines, not JSON.",
+      user: `Review ${team}'s Scorecard for ${quarter}. Each measurable lists its weekly actuals with an [on]/[off] status.\n\n${digest || "(no data)"}\n\nIn 6–10 tight lines: (1) which measurables are OFF track or trending the wrong way, and any pattern connecting them; (2) the most likely root cause behind the worst one or two, stated plainly; (3) 2–3 specific things to do or put on the Issues list this week. Name the measurable in each point. Be actionable — no filler.`
     };
   }
 };
@@ -109,16 +112,23 @@ export async function handler(event){
   const key = process.env.ANTHROPIC_API_KEY;
   if(!key) return json(500, { error: "AI isn't configured yet (missing API key)." });
 
-  // 3) Call Claude.
-  try{
+  // 3) Call Claude. Heavy tasks ask for the Pro model; if that model isn't available on this account, fall
+  //    back to the default so the feature still works instead of erroring out.
+  async function callClaude(model){
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: built.maxTokens, system: built.system, messages: [{ role: "user", content: built.user }] })
+      body: JSON.stringify({ model, max_tokens: built.maxTokens, system: built.system, messages: [{ role: "user", content: built.user }] })
     });
-    const data = await r.json();
-    if(!r.ok){ console.error("anthropic error", r.status, data && data.error); return json(502, { error: "The AI request failed — try again." }); }   // log detail server-side; don't leak upstream text to the browser
-    const text = (data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("").trim();
+    const data = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, data };
+  }
+  try{
+    const primary = built.model || MODEL;
+    let res = await callClaude(primary);
+    if(!res.ok && primary !== MODEL){ console.error("primary model failed, falling back to default", primary, res.status, res.data && res.data.error); res = await callClaude(MODEL); }
+    if(!res.ok){ console.error("anthropic error", res.status, res.data && res.data.error); return json(502, { error: "The AI request failed — try again." }); }   // log detail server-side; don't leak upstream text to the browser
+    const text = (res.data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("").trim();
     return json(200, { text });
   }catch(e){
     return json(502, { error: "Couldn't reach the AI service — try again." });
