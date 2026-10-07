@@ -1031,6 +1031,26 @@
   .pa-line{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--border)}
   .pl-label{flex:1;font-size:13px;font-weight:700;min-width:0}
   .pl-label small{display:block;font-size:10.5px;font-weight:600;color:var(--muted);margin-top:1px}
+  .pl-label small.pl-tag{color:var(--accent);font-style:italic}
+  .pa-bar{font-size:9.5px;font-weight:700;letter-spacing:.2px;color:var(--muted);text-transform:none;margin-left:6px}
+  details.pa-behav{margin:-2px 0 2px;padding:0 0 4px}
+  details.pa-behav summary{font-size:11px;font-weight:700;color:var(--accent);cursor:pointer;list-style:none;padding:2px 0;user-select:none}
+  details.pa-behav summary::-webkit-details-marker{display:none}
+  details.pa-behav summary::before{content:"▸ ";font-size:9px}
+  details.pa-behav[open] summary::before{content:"▾ "}
+  details.pa-behav ul{margin:4px 0 2px;padding-left:18px}
+  details.pa-behav li{font-size:12px;line-height:1.5;color:var(--text);margin:3px 0}
+  /* Core Values card atop the L10 opening segment */
+  .cv-card{border:1px solid var(--accent);background:var(--accent-soft);border-radius:12px;padding:12px 14px;margin:0 0 14px}
+  .cv-head{font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+  .cv-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .cv-chip{font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--card);border:1px solid var(--border);color:var(--text)}
+  .cv-chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cv-spot{border-top:1px solid var(--border);padding-top:8px}
+  .cv-spot-h{font-size:13px;font-weight:700;margin-bottom:4px}
+  .cv-spot-tag{font-style:italic;color:var(--accent);font-weight:600}
+  .cv-spot ul{margin:4px 0 0;padding-left:18px}
+  .cv-spot li{font-size:12px;line-height:1.5;margin:3px 0;color:var(--text)}
   .pl-btns{display:flex;gap:4px;flex:none}
   .rt{min-width:42px;height:30px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);
     font-size:12px;font-weight:800;cursor:pointer;font-family:inherit}
@@ -4873,7 +4893,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=173;
+const BUILD=175;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -7401,13 +7421,37 @@ function askWhoAmI(){
    manual the LEADER OWNS THE FINAL RATING. */
 // Explicit column abbreviations — initials collide (Responsibility and Respect both "R")
 // and "We're a Little Goofy" auto-abbreviates to the unreadable "WALG".
+// label + abbr for the grid; tagline + observable behaviors from the WH People Analyzer (2025 template) so
+// raters AND self-assessors see exactly what each value looks like in action while they score.
 const CORE_VALUES=[
-  {k:"sustainability",      label:"Sustainability",       abbr:"Sust"},
-  {k:"responsibility",      label:"Responsibility",       abbr:"Resp"},
-  {k:"personalDevelopment", label:"Personal Development", abbr:"Dev"},
-  {k:"respect",             label:"Respect",              abbr:"Rspct"},
-  {k:"goofy",               label:"We're a Little Goofy", abbr:"Goofy"},
-  {k:"selflessService",     label:"Selfless Service",     abbr:"Service"}
+  {k:"sustainability", label:"Sustainability", abbr:"Sust", tagline:"Preparing for the Long War", behaviors:[
+    "I take time to understand the deeper problem at its root cause, avoiding temporary fixes that could cause bigger issues later.",
+    "I ensure consistent effort from myself and my team, balancing urgency with sustainability to keep the mission moving forward.",
+    "I support my team by recognizing when they need encouragement, rest, or assistance to continue giving their best.",
+    "I mentor and develop others, ensuring that the next generation of leaders is prepared to carry on the mission."]},
+  {k:"responsibility", label:"Responsibility", abbr:"Resp", tagline:"Using Business as a Force for Good", behaviors:[
+    "I operate above the line — owning my position, driving toward high standards, and treating mistakes as moments to learn and grow.",
+    "I follow through on commitments, whether it's showing up on time or ensuring the highest quality of care is delivered, knowing that my words and deeds have meaning.",
+    "I proactively identify potential problems and take action before they escalate, rather than waiting for someone else to fix them.",
+    "I seek opportunities to contribute beyond my defined role."]},
+  {k:"personalDevelopment", label:"Personal Development", abbr:"Dev", tagline:"Committed to Growth", behaviors:[
+    "I actively seek study, feedback, and training opportunities to improve my skills and knowledge.",
+    "I take ownership of my personal and professional growth, setting goals and tracking my progress.",
+    "I apply what I learn by turning knowledge into action — because without application, knowledge holds very little value."]},
+  {k:"respect", label:"Respect", abbr:"Rspct", tagline:"The Foundation of Teamwork", behaviors:[
+    "I actively listen and consider different perspectives before responding.",
+    "I avoid gossip, sarcasm, or back-channel communication, choosing direct, respectful adult conversations instead.",
+    "I treat everyone with dignity, courtesy and professionalism, even under pressure or disagreement — regardless of position, title, role, or background.",
+    "I take responsibility for how my words and actions affect others, making amends when necessary. True communication is the response that I get."]},
+  {k:"goofy", label:"We're a Little Goofy", abbr:"Goofy", tagline:"Healing Through Laughter", behaviors:[
+    "I help others feel safe to be themselves by not taking myself too seriously.",
+    "I use appropriate humor and look for opportunities to inject fun into everyday routines, knowing that healing can happen through joy and laughter.",
+    "I respect boundaries while encouraging a culture where humor and lightness are part of the recovery process, remembering that laughter can be a bridge to connection, especially during hard days."]},
+  {k:"selflessService", label:"Selfless Service", abbr:"Service", tagline:"Our Foundation", behaviors:[
+    "I serve others without expecting anything in return, focusing on the mission over personal gain.",
+    "I go beyond my role to support clients, coworkers, and the broader mission whenever I see an opportunity.",
+    "I offer assistance before it's asked for, creating a culture of care and presence.",
+    "I serve with humility and gratitude, knowing that what we do has a lasting impact on those we support — my team, our clients, and the community. Our work matters."]}
 ];
 // Two voices, straight from the SOP: the leader prep asks about "they", the direct
 // report's self-prep asks about "you". Same three tests, different chair.
@@ -7423,6 +7467,22 @@ const GWC_KEYS=[
    qSelf:"Do you have the time, mental bandwidth, physical ability and skill to do this seat well right now?"}];
 const RATE=["+","+/-","-"];
 const RATE_LABEL={"+":"All the Time","+/-":"Part of the Time","-":"Never"};
+/* ===== Core Values at the top of every L10 =====
+   The company's values should be seen every week, so the opening (Segue) segment leads with them: all six
+   are always on screen, and ONE is spotlighted each calendar week (rotating through all of them) with its
+   observable behaviors, so the team keeps living into every value over time. */
+function cvWeekSpotlight(){ const n=CORE_VALUES.length; const wk=Math.floor(Date.parse(todayIso()+"T00:00:00")/(7*864e5)); return CORE_VALUES[((wk%n)+n)%n]; }
+function coreValuesCardHtml(){
+  const sp=cvWeekSpotlight();
+  const chips=CORE_VALUES.map(c=>`<span class="cv-chip${c.k===sp.k?" on":""}">${esc(c.label)}</span>`).join("");
+  return `<div class="cv-card">
+    <div class="cv-head">★ Our Core Values</div>
+    <div class="cv-chips">${chips}</div>
+    <div class="cv-spot">
+      <div class="cv-spot-h">This week's focus — <b>${esc(sp.label)}</b>${sp.tagline?` <span class="cv-spot-tag">${esc(sp.tagline)}</span>`:""}</div>
+      <ul>${(sp.behaviors||[]).map(b=>`<li>${esc(b)}</li>`).join("")}</ul>
+    </div></div>`;
+}
 
 function curQuarter(){ const d=new Date(); return d.getFullYear()+"-Q"+(Math.floor(d.getMonth()/3)+1); }
 function qLabel(q){ const p=String(q||"").split("-Q"); return p.length===2?("Q"+p[1]+" "+p[0]):q; }
@@ -10738,7 +10798,7 @@ function renderSegContent(i){
           <input class="wf-in" data-person="${esc(p.name)}" data-lock="by:${key}:${esc(p.name)}" placeholder="${ph}" value="${esc(bp[p.name]||"")}">
           ${p.guest?`<button class="wf-del" data-guest-del="${esc(p.id)}" title="Remove this guest from the meeting">✕</button>`:""}</div>`).join("")
       : '<div class="hint">No one on this team yet — add people to its seat on the Accountability Chart.</div>';
-    c.innerHTML=`<div class="seg-panel"><h4>${seg.name}</h4>
+    c.innerHTML=`<div class="seg-panel">${key==="segue"?coreValuesCardHtml():""}<h4>${seg.name}</h4>
       <div class="wf-list">${rows}</div>
       <div class="wf-addguest"><input id="wf-guest" placeholder="＋ Add someone attending who isn't on the team…"><button class="btn ghost sm" id="wf-guest-add">Add attendee</button></div>
       <div class="wf-other"><label>Other notes</label><textarea id="seg-note" data-lock="note:${key}" placeholder="Anything not tied to one person…">${esc(meeting.notes[key]||"")}</textarea></div></div>`;
@@ -11746,13 +11806,14 @@ function paRow(person,q){
 
 function paGrid(rating, scope, readOnly){
   const cvs=CORE_VALUES.map(c=>`<div class="pa-line" data-cv="${c.k}">
-      <div class="pl-label">${esc(c.label)}</div>
-      <div class="pl-btns">${readOnly?`<span class="ro-val ${rating.v[c.k]==="-"?"bad":rating.v[c.k]==="+/-"?"mid":"good"}">${rating.v[c.k]||"—"}</span>`:rateBtns(rating.v[c.k])}</div></div>`).join("");
+      <div class="pl-label">${esc(c.label)}${c.tagline?`<small class="pl-tag">${esc(c.tagline)}</small>`:""}</div>
+      <div class="pl-btns">${readOnly?`<span class="ro-val ${rating.v[c.k]==="-"?"bad":rating.v[c.k]==="+/-"?"mid":"good"}">${rating.v[c.k]||"—"}</span>`:rateBtns(rating.v[c.k])}</div></div>
+    ${(c.behaviors&&c.behaviors.length)?`<details class="pa-behav"><summary>Observable behaviors</summary><ul>${c.behaviors.map(b=>`<li>${esc(b)}</li>`).join("")}</ul></details>`:""}`).join("");
   const gs=GWC_KEYS.map(g=>`<div class="pa-line" data-gwc="${g.k}">
       <div class="pl-label">${esc(g.label)}<small>${esc(scope==="self"?g.qSelf:g.q)}</small></div>
       <div class="pl-btns">${readOnly?`<span class="ro-val ${rating[g.k]==="N"?"bad":"good"}">${rating[g.k]||"—"}</span>`:ynBtns(rating[g.k])}</div></div>`).join("");
   return `<div class="pa-grid" data-scope="${scope}">
-    <div class="pa-sub">Core Values</div>${cvs}
+    <div class="pa-sub">Core Values <small class="pa-bar">+ all the time · +/− part of the time · − never</small></div>${cvs}
     <div class="pa-sub">GWC · right seat</div>${gs}</div>`;
 }
 
