@@ -55,8 +55,10 @@
   header{padding:calc(var(--safe-top) + 10px) 18px 12px; background:var(--header); border-bottom:1px solid var(--border);
     position:relative; z-index:10; box-shadow:0 4px 18px -14px rgba(0,0,0,.5)}
   .brandbar{display:flex; align-items:center; gap:9px; margin-bottom:12px}
-  .brand-mark{height:26px; width:auto; display:block}
-  .brand-word{font-size:15px; font-weight:800; letter-spacing:1.5px; color:var(--text)}
+  .brand-mark{height:32px; width:auto; display:block}
+  .brand-word{font-size:19px; font-weight:800; letter-spacing:1px; color:var(--text)}
+  .wh-mark{height:30px; width:auto; margin-left:auto; opacity:.92; display:block}
+  .brandbar .bell{margin-left:0}   /* the WH mark now owns the right-push; keep bell right beside it */
   .brand-word .dot{color:var(--accent); margin:0 1px}
   .brand-word .hl{color:var(--accent)}
   .brand-tag{margin-left:auto; font-size:10px; font-weight:800; letter-spacing:1px; text-transform:uppercase;
@@ -1722,8 +1724,9 @@
   <header>
     <div class="brandbar">
       <button class="nav-toggle" id="navToggle" aria-label="Menu" title="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-      <svg class="brand-mark" role="img" aria-label="HEART.OS" viewBox="0 0 120 60" style="height:26px;width:auto;display:block;overflow:visible"><polyline points="6,34 46,34 58,34 68,13 82,51 94,34 114,34" fill="none" style="stroke:var(--accent)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="brand-mark" role="img" aria-label="HEART.OS" viewBox="0 0 120 60" style="height:32px;width:auto;display:block;overflow:visible"><polyline points="6,34 46,34 58,34 68,13 82,51 94,34 114,34" fill="none" style="stroke:var(--accent)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="brand-word">HEART<span class="hl">.OS</span></span>
+      <img class="wh-mark" id="whMark" alt="Warriors Heart" title="Warriors Heart">
       <button class="bell" id="bell" title="Notifications" aria-label="Notifications"><span class="bi">🔔</span><span class="bell-ct" id="bellCt">0</span></button>
     </div>
     <div class="titlerow">
@@ -5004,7 +5007,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=184;
+const BUILD=185;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -12865,6 +12868,7 @@ function applyBrandImages(){
   const src=markSrc();
   const bm=$("#brandMark"); if(bm) bm.src=src;
   const sm=$("#splashMark"); if(sm) sm.src=src;
+  const wm=$("#whMark"); if(wm) wm.src=src;          // Warriors Heart mark, right side of the header (theme-aware)
   const lm=$("#loginMark"); if(lm) lm.src=MARK_DARK; // login screen is always dark
   try{ document.documentElement.style.setProperty("--ac-logo", 'url("'+src+'")'); }catch(e){}   // faint logo watermark behind the accountability chart (theme-aware)
 }
