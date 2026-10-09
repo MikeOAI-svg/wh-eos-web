@@ -4900,7 +4900,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=182;
+const BUILD=183;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -10637,10 +10637,8 @@ function showMinutes(id){
       <button class="btn danger" id="min-del">Delete</button>
       <button class="btn ghost" id="min-pdf">⬇ PDF</button>
       <button class="btn ghost" id="min-copy">Copy</button>
-      <button class="btn" id="min-email">Email</button>
     </div>`);
   { const b=$("#min-pdf"); if(b) b.onclick=()=>printMinutes(m); }
-  $("#min-email").onclick=()=>emailMinutes(m, TEAM());
   $("#min-copy").onclick=()=>{
     const txt=minutesText(m);
     const done=()=>{ const b=$("#min-copy"); if(b){ b.textContent="Copied ✓"; setTimeout(()=>{ if($("#min-copy")) $("#min-copy").textContent="Copy"; },1500); } };
@@ -11177,7 +11175,7 @@ function concludeMeeting(auto){
   const cb=$("#l10CapBar"); if(cb) cb.remove();
   renderL10();
   setSync(auto?"90-minute cap reached — L10 concluded ⏱":"Minutes saved to history 🎉");
-  if(!auto) emailMinutes(rec, t);   // manual conclude prompts the email; an auto-conclude just files the minutes silently
+  if(!auto) showMinutes(rec.id);   // manual conclude opens the saved minutes so staff can download the PDF and send it the usual way; an auto-conclude just files them silently
 }
 
 /* ================= COMPANY HEALTH (Cabana Boy) =================
