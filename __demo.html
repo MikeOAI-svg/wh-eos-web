@@ -1885,20 +1885,124 @@
   <div id="printDoc" aria-hidden="true"></div>
 
 <!-- ===== Firebase (auth + shared database) ===== -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
-  firebase.initializeApp({
-    apiKey: "AIzaSyBQVBCFvTc4g8qlgJRDPrjlX1pweZmolCk",
-    authDomain: "wh-operating-system.firebaseapp.com",
-    projectId: "wh-operating-system",
-    storageBucket: "wh-operating-system.firebasestorage.app",
-    messagingSenderId: "139951248065",
-    appId: "1:139951248065:web:80c0c7c5ca940c4854ba40"
-  });
-  // keep working through brief connection drops
-  firebase.firestore().enablePersistence({synchronizeTabs:true}).catch(function(){});
+window.__EXPOSE_MULTI__=true;
+(function(){
+  var USER={email:"odellmike76@gmail.com"};
+  var TEAMS="workspaces/main/teams";
+  var now=Date.now();
+  function V(v,s){ return {v:String(v),s:s}; }
+  // 6 measurables, weeks 0..5 filled (week1Start 2026-08-31 => current week index ~5 on 2026-10-07)
+  function wk(arr){ var o={}; arr.forEach(function(x,k){ o[String(k)]=V(x[0],x[1]); }); return o; }
+  var measurables=[
+    {id:"m1",name:"Calls answered < 30s",owner:"Aaron K.",goal:"≥ 90%",values:wk([["94","on"],["91","on"],["88","off"],["93","on"],["90","on"],["95","on"]])},
+    {id:"m2",name:"Opportunities",owner:"Admissions",goal:"≥ 25",values:wk([["27","on"],["24","off"],["29","on"],["31","on"],["23","off"],["28","on"]])},
+    {id:"m3",name:"Enrollments",owner:"Admissions",goal:"≥ 12",values:wk([["13","on"],["11","off"],["14","on"],["12","on"],["10","off"],["13","on"]])},
+    {id:"m4",name:"Census %",owner:"Marcus H.",goal:"≥ 85%",values:wk([["86","on"],["88","on"],["84","off"],["87","on"],["89","on"],["85","on"]])},
+    {id:"m5",name:"Documentation 100%",owner:"Compliance",goal:"100%",values:wk([["100","on"],["98","off"],["100","on"],["100","on"],["99","off"],["100","on"]])},
+    {id:"m6",name:"Collections ($K)",owner:"Finance",goal:"≥ 450",values:wk([["471","on"],["512","on"],["438","off"],["489","on"],["503","on"],["520","on"]])}
+  ];
+  var rocks=[
+    {id:"r1",title:"Virginia PHP program stood up",owner:"Elena R.",status:"on",due:"2026-12-31",milestones:[{id:"a",text:"Hire PHP clinician",done:true},{id:"b",text:"Curriculum approved",done:true},{id:"c",text:"First cohort enrolled",done:false}]},
+    {id:"r2",title:"Clean & accurate monthly financials",owner:"Sam T.",status:"on",due:"2026-12-31",milestones:[{id:"a",text:"Close Oct by the 10th",done:true},{id:"b",text:"Dashboard live",done:false}]},
+    {id:"r3",title:"Admissions hitting 12 enrollments / week",owner:"Aaron K.",status:"off",due:"2026-12-31",milestones:[{id:"a",text:"Objection training weekly",done:true},{id:"b",text:"Speed-to-lead < 30s",done:false}]},
+    {id:"r4",title:"Payer-mix stabilized",owner:"Michael O'Dell",status:"done",due:"2026-12-31",milestones:[{id:"a",text:"Contracts renegotiated",done:true}]}
+  ];
+  var meeting={ date:"2026-10-07", startedAt:now-22*60000, capMin:90, seg:5, segStart:now-4*60000, segElapsed:0,
+    totalElapsed:0, notes:{segue:"", headlines:""}, byPerson:{segue:{"Michael O'Dell":"Glad VA PHP is moving","Dana P.":"Shared Services fully staffed this week"}}, ratings:{}, createdTodos:[],
+    activeIssue:"iss1", solvedIssues:[], locks:{},
+    facilitatorEmail:USER.email, facilitatorName:"Michael O'Dell", scribeEmail:USER.email, scribeName:"Michael O'Dell", guests:[] };
+  var issues=[
+    {id:"iss1",text:"Speed-to-lead slipping past 30 seconds at peak hours",owner:"Aaron K.",solved:false,ids:{what:"Calls at 11a-1p are rolling to voicemail; conversion drops on those leads.",clarify:"Is it staffing coverage or the routing rules?",discuss:"Lunch coverage gap + the overflow rule points to a full queue. Options: stagger lunches, add an overflow advocate, or change routing.",solve:""}},
+    {id:"iss2",text:"Relias training completion lagging in Virginia",owner:"Elena R.",solved:false,ids:{what:"",clarify:"",discuss:"",solve:""}},
+    {id:"iss3",text:"Payer mix drifting toward lower-reimbursement plans",owner:"Sam T.",solved:false,ids:{what:"",clarify:"",discuss:"",solve:""}}
+  ];
+  var todos=[
+    {id:"td1",text:"Send VA PHP staffing plan to Elena",owner:"Michael O'Dell",due:"2026-10-14",done:false,created:"2026-10-07"},
+    {id:"td2",text:"Publish updated objection-handling scorecard",owner:"Aaron K.",due:"2026-10-14",done:false,created:"2026-10-07"}
+  ];
+  // People Analyzer: supervisor reads for the facility heads (demo values)
+  function rating(sv,g,w,c){ return {v:sv,g:g,w:w,c:c,at:"2026-10-02",by:"owner"}; }
+  var pa=[
+    {id:"pa1",person:"Marcus H.",quarter:"2026-Q4",
+      self:rating({sustainability:"+",responsibility:"+",personalDevelopment:"+/-",respect:"+",goofy:"+",selflessService:"+"},"Y","Y","Y"),
+      sup:rating({sustainability:"+",responsibility:"+",personalDevelopment:"+/-",respect:"+",goofy:"+",selflessService:"+"},"Y","Y","Y"),
+      final:{v:{},g:"",w:"",c:"",at:"",by:""},notes:{},qc:{},status:""},
+    {id:"pa2",person:"Elena R.",quarter:"2026-Q4",
+      self:rating({sustainability:"+",responsibility:"+/-",personalDevelopment:"+",respect:"+",goofy:"+/-",selflessService:"+"},"Y","Y","Y"),
+      sup:rating({sustainability:"+",responsibility:"+/-",personalDevelopment:"+",respect:"+",goofy:"+",selflessService:"+"},"Y","Y","Y"),
+      final:{v:{},g:"",w:"",c:"",at:"",by:""},notes:{},qc:{},status:""},
+    {id:"pa3",person:"Dana P.",quarter:"2026-Q4",
+      sup:rating({sustainability:"+",responsibility:"+",personalDevelopment:"+",respect:"+",goofy:"+",selflessService:"+"},"Y","Y","Y"),
+      self:{v:{},g:"",w:"",c:"",at:"",by:""},final:{v:{},g:"",w:"",c:"",at:"",by:""},notes:{},qc:{},status:""}
+  ];
+  var VTO={
+    coreValues:["Sustainability","Responsibility","Personal Development","Respect","We're A Little Goofy","Selfless Service"],
+    coreFocus:{ mission:"Warriors Healing Warriors", purpose:"Empowering the Human Spirit Through Personal Development", niche:"The BEST in Substance Abuse and Trauma Care for Our Nation's Warriors." },
+    tenYear:"Bring 1 Million Warriors Home. 5 Healing Centers, 250 Beds, 1,782 Intakes Per Year",
+    marketing:{ targetMarket:"The Warriors", uniques:["Built by Warriors, for Warriors","Environment Empowers the Human Spirit","Conventional and Unconventional Quality of Care"], provenProcess:"The Warriors Journey", guarantee:"You Will Be Provided the Opportunity to Heal with Your Peers" },
+    threeYear:{ date:"12/31/28", measurables:"1,184 Intakes", bullets:["All WH Way Core Processes documented & simplified","3rd Healing Center open at 80% beds filled","National In-Network Insurance Contracts complete","Training Center fully functioning","Recognized SME for Warriors (US Congress / VA level)"] },
+    oneYear:{ date:"12/31/26", measurables:"870 Intakes", goals:["Fully Staffed, Trained & Retained clinical team to match bed count","Operational Excellence throughout the client journey","Shared Services fully integrated & operational","Financials accurate + timely for leadership insight"] },
+    quarterRocks:{ date:"12/31/26", measurables:"230 Intakes", rocks:["Virginia PHP program stood up","Clean & accurate monthly financials","Admissions hitting targets","Payer-mix stabilized"] },
+    issues:["Turnover / Retention / Hiring","Relias completion","Peak-hour speed-to-lead"],
+    collectiveGoals:["80% occupancy across all programs","Shared Services supporting without interruption","870+ intakes combined Texas & Virginia","Accurate books driving decisions"]
+  };
+  var seats=[
+    {id:"vis",role:"Visionary",names:["Josh Lannon / Tom Spooner"],parent:null,l10:true,responsibilities:["Long-Term Vision & Strategy","Culture & Core Values Champions","Big Relationships (GOV, MIL, YPO)"]},
+    {id:"int",role:"Integrator",names:["Michael O'Dell"],parent:"vis",l10:true,responsibilities:["Lead, Manage & Hold the Leadership Team Accountable","Drive EOS Execution","Remove Obstacles & Deliver Results"]},
+    {id:"ss",role:"Shared Services",names:["Dana P."],parent:"int",l10:true,responsibilities:["Runs day-to-day Command Center operations"]},
+    {id:"tx",role:"Texas Facility",names:["Marcus H."],parent:"int",l10:true,responsibilities:["Clinical & operational leadership, Texas campus"]},
+    {id:"va",role:"Virginia Facility",names:["Elena R."],parent:"int",l10:true,responsibilities:["Clinical & operational leadership, Virginia campus"]},
+    {id:"hr",role:"HR Director",names:["Jordan L."],parent:"ss",responsibilities:[]},
+    {id:"fin",role:"Controller",names:["Sam T."],parent:"ss",responsibilities:[]},
+    {id:"mkt",role:"Marketing Director",names:["Lia B."],parent:"ss",responsibilities:[]},
+    {id:"txc",role:"Clinical Director",names:["Grace W."],parent:"tx",responsibilities:[]},
+    {id:"txa",role:"Admissions Lead",names:["Aaron K."],parent:"tx",responsibilities:[]},
+    {id:"vac",role:"Clinical Director",names:["Owen M."],parent:"va",responsibilities:[]},
+    {id:"vaa",role:"Admissions Lead",names:["Priya N."],parent:"va",responsibilities:[]}
+  ];
+  window.__DB__={
+    "workspaces/main":{ state:{ version:2, meta:{multiDoc:true, build:0}, funcSeed:1,
+      accountability:{ funcSeed:1, title:"Warriors Heart Accountability Chart", seats:seats },
+      vto:VTO, pa:pa,
+      people:[{email:"odellmike76@gmail.com",name:"Michael O'Dell"},{email:"dana@demo.wh",name:"Dana P."},{email:"marcus@demo.wh",name:"Marcus H."},{email:"elena@demo.wh",name:"Elena R."},{email:"aaron@demo.wh",name:"Aaron K."},{email:"sam@demo.wh",name:"Sam T."}],
+      admins:["odellmike76@gmail.com"], teamOrder:["t1"] }, updatedAt:1 },
+    "workspaces/main/teams/t1":{ team:{ id:"t1", name:"Leadership Team", week1Start:"2026-08-31",
+      leader:"Michael O'Dell", parent:"", departments:[], members:[{name:"Michael O'Dell"},{name:"Dana P."},{name:"Marcus H."},{name:"Elena R."}],
+      measurables:measurables, rocks:rocks, issues:issues, todos:todos, meetings:[], planning:[], scorecardArchive:[], rockArchive:[], minutesCc:[], seatId:"int",
+      salesCard:{ weekStart:"2026-10-05", archive:[], sections:[{ id:"sec_adv", name:"Advocate",
+        columns:[{id:"c_calls",name:"Calls"},{id:"c_vob",name:"VOBs"},{id:"c_adm",name:"Admits"}],
+        rows:[{id:"r_aaron",name:"Aaron K."},{id:"r_sam",name:"Sam T."}],
+        values:{ r_aaron:{c_calls:"42",c_vob:"9",c_adm:"3"}, r_sam:{c_calls:"38",c_vob:"7",c_adm:"2"} } }] },
+      liveMeeting:meeting }, updatedAt:1000 }
+  };
+  window.__SNAP__={}; window.__COLL__=null;
+  function seg(p){ return p.split("/").pop(); }
+  function clone(o){ return o==null?o:JSON.parse(JSON.stringify(o)); }
+  function snapOf(p){ var d=window.__DB__[p]; return {exists:!!d, metadata:{hasPendingWrites:false}, id:seg(p), data:function(){return clone(d);}}; }
+  function docChangeList(){ return Object.keys(window.__DB__).filter(function(p){return p.indexOf(TEAMS+"/")===0;}).map(function(p){return {type:"modified", doc:snapOf(p)};}); }
+  function collSnap(){ return { forEach:function(cb){ Object.keys(window.__DB__).forEach(function(p){ if(p.indexOf(TEAMS+"/")===0) cb(snapOf(p)); }); }, size:1, docChanges:function(){ return docChangeList(); } }; }
+  window.__notify__=function(p){ if(window.__SNAP__[p]) window.__SNAP__[p](snapOf(p)); if(p.indexOf(TEAMS+"/")===0 && window.__COLL__) window.__COLL__(collSnap()); };
+  function makeDoc(path){ return {
+    _path:path,
+    onSnapshot:function(cb){ window.__SNAP__[path]=cb; setTimeout(function(){ cb(snapOf(path)); },30); return function(){}; },
+    get:function(){ return Promise.resolve(snapOf(path)); },
+    set:function(o){ window.__DB__[path]=clone(o); setTimeout(function(){window.__notify__(path);},0); return Promise.resolve(); },
+    update:function(o){ window.__DB__[path]=Object.assign({},window.__DB__[path],clone(o)); setTimeout(function(){window.__notify__(path);},0); return Promise.resolve(); },
+    delete:function(){ delete window.__DB__[path]; return Promise.resolve(); } }; }
+  function makeFs(){ return {
+    doc:function(p){return makeDoc(p);},
+    collection:function(p){ function genSnap(prefix){ return { forEach:function(cb){ Object.keys(window.__DB__).forEach(function(pp){ if(pp.indexOf(prefix+"/")===0) cb(snapOf(pp)); }); } }; }
+      return { get:function(){ return Promise.resolve(p===TEAMS?collSnap():genSnap(p)); }, onSnapshot:function(cb){ if(p===TEAMS){ window.__COLL__=cb; } setTimeout(function(){cb(p===TEAMS?collSnap():genSnap(p));},40); return function(){}; } }; },
+    enablePersistence:function(){return {catch:function(){}};},
+    runTransaction:function(fn){ var writes=[]; var tx={ get:function(ref){ return Promise.resolve(snapOf(ref._path)); }, set:function(ref,o){ writes.push([ref._path,clone(o)]); }, update:function(ref,o){ writes.push([ref._path,Object.assign({},window.__DB__[ref._path],clone(o))]); }, delete:function(ref){ writes.push([ref._path,null]); } };
+      return Promise.resolve().then(function(){ return fn(tx); }).then(function(r){ writes.forEach(function(w){ if(w[1]===null) delete window.__DB__[w[0]]; else window.__DB__[w[0]]=w[1]; setTimeout(function(){window.__notify__(w[0]);},0); }); return r; }); } }; }
+  window.firebase={
+    initializeApp:function(){}, app:function(n){ if(n) throw new Error('no'); return {options:{}}; },
+    firestore:makeFs,
+    auth:function(){ return { currentUser:USER, onAuthStateChanged:function(cb){ setTimeout(function(){cb(USER);},10); }, signInWithEmailAndPassword:function(){return Promise.resolve();}, signOut:function(){return Promise.resolve();}, sendPasswordResetEmail:function(){return Promise.resolve();} }; }
+  };
+})();
 </script>
 
 <!-- ===== ORG-CHART ENGINE (inlined: d3 v7 + d3-flextree + d3-org-chart, MIT) ===== -->
@@ -12793,3 +12897,14 @@ firebase.auth().onAuthStateChanged(u=>{
 </script>
 </body>
 </html>
+<script>(function(){
+  try{
+    var v=(new URLSearchParams(location.search)).get("view"); if(!v) return;
+    var tries=0, iv=setInterval(function(){
+      tries++;
+      var b=document.querySelector('[data-view="'+v+'"]');
+      if(b){ b.click(); clearInterval(iv); }
+      else if(tries>60){ clearInterval(iv); }
+    }, 120);
+  }catch(e){}
+})();</script>
