@@ -5004,7 +5004,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=183;
+const BUILD=184;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5014,6 +5014,16 @@ let updateReady=false, lastActivity=Date.now();
    so it never starves teammate updates. */
 const COMMIT_GUARD_MS=900;
 let lastCommit=0;
+// Gesture guard: a rebuild that lands BETWEEN your pointerdown and pointerup deletes the button you pressed,
+// so the browser never fires the click and you have to click again. These track whether a click/tap is
+// physically in progress so adopts can hold off until it has landed. gestureActive() is read by the adopt
+// guards below; a safety cap means a missed pointerup can never wedge rebuilds forever.
+let _pointerDown=false, _pointerDownAt=0, _pointerUpAt=0;
+const GESTURE_TAIL_MS=350, GESTURE_MAX_MS=1500;
+function gestureActive(){
+  if(_pointerDown && (Date.now()-_pointerDownAt)>GESTURE_MAX_MS) _pointerDown=false;
+  return _pointerDown || (Date.now()-_pointerUpAt)<GESTURE_TAIL_MS;
+}
 function markUpdate(){ if(updateReady) return; updateReady=true; const b=$("#updateBar"); if(b) b.classList.remove("hide"); }
 
 function setSync(msg,isErr){ const d=$("#syncDot"); if(!d) return;
@@ -5413,7 +5423,7 @@ let adoptTimer=null, lastAdopted="";
 function scheduleAdopt(incoming, at){ remoteQueued=incoming; if(typeof at==="number") remoteAt=at; clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,450); }
 function flushAdopt(){
   if(!remoteQueued) return;
-  if(isBusy() || (Date.now()-lastCommit)<COMMIT_GUARD_MS){ clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,400); return; }   // wait until they stop editing / just-committed clicks land
+  if(isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS){ clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,400); return; }   // wait until they stop editing / a click in progress lands
   const s=remoteQueued; remoteQueued=null;
   baseAt=Math.max(baseAt, remoteAt);        // our copy now reflects this server version (guards future writes)
   const json=JSON.stringify(s);
@@ -5425,6 +5435,10 @@ function flushAdopt(){
 ["pointerdown","keydown","wheel","mousemove","touchstart"].forEach(ev=>window.addEventListener(ev,()=>{lastActivity=Date.now();},{passive:true}));
 // Commit guard (see COMMIT_GUARD_MS): pointerdown/keydown only, capture phase so it fires before the input blurs.
 ["pointerdown","keydown"].forEach(ev=>window.addEventListener(ev,()=>{lastCommit=Date.now();},{capture:true,passive:true}));
+// Gesture guard (see gestureActive): hold off any rebuild while a click/tap is physically in progress, and for
+// a short tail after release so the click has landed. Capture + passive so it can't interfere with the click.
+window.addEventListener("pointerdown",()=>{ _pointerDown=true; _pointerDownAt=Date.now(); },{capture:true,passive:true});
+["pointerup","pointercancel"].forEach(ev=>window.addEventListener(ev,()=>{ _pointerDown=false; _pointerUpAt=Date.now(); lastCommit=Date.now(); },{capture:true,passive:true}));
 // Auto-update ONLY a truly-abandoned tab (10+ minutes with zero activity) and never during a live meeting.
 // The 25-second version was yanking people out of the L10 AND the Sales Card mid-entry on every deploy —
 // losing their numbers. Anyone still working just sees the "new version" bar and reloads when they choose.
@@ -5459,14 +5473,20 @@ function assembleMulti(){
 function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shadowTeams={}; (data.teams||[]).forEach(t=>{ _shadowTeams[t.id]=JSON.stringify(t); }); }
 function adoptMulti(){
   const merged=assembleMulti(), json=JSON.stringify(merged);
-  if(json===lastAdopted) return;                 // nothing changed on screen
-  if(_multiBooted && (isBusy() || (Date.now()-lastCommit)<COMMIT_GUARD_MS)){ setTimeout(adoptMulti,400); return; }   // never rebuild mid-edit, nor in the split-second around a just-committed click
+  if(json===lastAdopted) return;                 // nothing changed since our last adopt
+  if(_multiBooted && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS)){ setTimeout(adoptMulti,400); return; }   // never rebuild mid-edit, during a click in progress, nor in the split-second around a just-committed click
   lastAdopted=json;
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
-  data=migrate(merged); syncMeetingRef(); refreshShadows(); _baseAt=Object.assign({},_teamAt); _baseCompany=_companyAt;   // local data now reflects the received team + company versions
-  if(reMergeMeetingTodos(pend)) saveL10(true);   // a To-Do you just added survived the per-team refresh
-  if(_multiBooted){
+  const nextData=migrate(merged);
+  // Our OWN write echoes back from the server as a fresh snapshot. If the incoming state is byte-identical to
+  // what's already on screen, DON'T rebuild the view — a wholesale switchView here is exactly what made buttons
+  // need a second click right after you acted. We still rebind data + refresh the merge baselines; we only skip
+  // the DOM rebuild. This can never hide a real change: if anything differs, sameAsScreen is false → rebuild.
+  const sameAsScreen = _multiBooted && JSON.stringify(nextData)===JSON.stringify(data);
+  data=nextData; syncMeetingRef(); refreshShadows(); _baseAt=Object.assign({},_teamAt); _baseCompany=_companyAt;   // local data now reflects the received team + company versions
+  const recovered = reMergeMeetingTodos(pend); if(recovered) saveL10(true);   // a To-Do you just added survived the per-team refresh
+  if(_multiBooted && (!sameAsScreen || recovered)){
     // Preserve the caret: if the cursor is in a note/IDS box, put it back after the rebuild so a teammate's
     // edit elsewhere never yanks you out of what you're typing.
     const act=document.activeElement, fk=(act&&act.getAttribute)?act.getAttribute("data-lock"):null;
