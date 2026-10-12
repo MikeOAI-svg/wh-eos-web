@@ -4907,7 +4907,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=192;
+const BUILD=194;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5159,12 +5159,17 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
     st.todos=upsertById(st.todos, lt.todos);              // adds/edits merge by id, so a to-do added elsewhere at the same time survives
     // IDS discussion text: upsert issues by id, then restore any ids sub-field we DON'T hold a live lock on to
     // the server's value — so two people typing different IDS fields of the SAME issue don't clobber each other.
-    const serverIds={}; (st.issues||[]).forEach(x=>{ if(x&&x.ids) serverIds[x.id]=Object.assign({}, x.ids); });
+    const serverIds={}, serverSolved={}; (st.issues||[]).forEach(x=>{ if(!x) return; if(x.ids) serverIds[x.id]=Object.assign({}, x.ids); serverSolved[x.id]={solved:x.solved, solvedDate:x.solvedDate}; });
     st.issues=upsertById(st.issues, lt.issues);
     const mineIds={}; Object.keys((loc&&loc.locks)||{}).forEach(k=>{ if(k.indexOf("ids:")!==0) return; const l=loc.locks[k]; if(!lockMine(l)||!lockActive(l)) return;
       const rest=k.slice(4), si=rest.indexOf(":"); const iid=rest.slice(0,si), f=rest.slice(si+1); (mineIds[iid]=mineIds[iid]||{})[f]=1; });
-    (st.issues||[]).forEach(x=>{ if(!x||!x.ids) return; const sv=serverIds[x.id]; if(!sv) return; const mine=mineIds[x.id]||{};
-      Object.keys(sv).forEach(f=>{ if(!mine[f]) x.ids[f]=sv[f]; }); });
+    (st.issues||[]).forEach(x=>{ if(!x) return;
+      // The `solved` flag is owned by whoever just toggled it: keep the SERVER's value for any issue THIS client
+      // didn't just solve/reopen, so a teammate's stale save can't un-solve (or re-solve) it. That write-war was
+      // the "Mark Solved kept glitching and popping back up over and over" bug in a busy multi-person L10.
+      if(!_solvedTouched.has(x.id)){ const ss=serverSolved[x.id]; if(ss){ x.solved=ss.solved; x.solvedDate=ss.solvedDate; } }
+      if(x.ids){ const sv=serverIds[x.id]; if(sv){ const mine=mineIds[x.id]||{}; Object.keys(sv).forEach(f=>{ if(!mine[f]) x.ids[f]=sv[f]; }); } }
+    });
   };
   const fire=()=> MULTI ? mergeTeamMulti(teamId, apply)
                         : mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) apply(st); });
@@ -5257,7 +5262,7 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); } }
+function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _solvedTouched=new Set(); } }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -6137,7 +6142,12 @@ function renderCompanyRocks(){
     const rocks=t.rocks||[]; if(!rocks.length) return;
     const tOff=rocks.filter(r=>r.status==="off").length;
     html+=`<div class="co-team">${esc(t.name)} <span>· ${rocks.length} rock${rocks.length===1?"":"s"}${tOff?` · ${tOff} off track`:""}</span></div>`;
-    rocks.forEach(r=>{
+    const _sorted=rocks.slice().sort((a,b)=>{ const ea=!(a.owner||"").trim(), eb=!(b.owner||"").trim(); if(ea!==eb) return ea?1:-1;
+      return String(a.owner||"").toLowerCase().localeCompare(String(b.owner||"").toLowerCase()) || String(a.title||"").localeCompare(String(b.title||"")); });
+    let _coPrevOwner=null;
+    _sorted.forEach(r=>{
+      { const _own=(r.owner||"").trim(); if(_coPrevOwner===null || _own.toLowerCase()!==_coPrevOwner.toLowerCase()){ _coPrevOwner=_own;
+        html+=`<div style="font-weight:700;font-size:11.5px;letter-spacing:.04em;color:var(--muted);margin:10px 2px 2px">${_own?esc(_own):'Unassigned'}</div>`; } }
       const pct=rockPct(r), ms=r.milestones||[];
       const pill=r.status==="done"?'<span class="pill green">Done</span>'
                 : r.status==="notdone"?'<span class="pill notdone">Not Done</span>'
@@ -6336,8 +6346,16 @@ function renderRocks(){
        <button class="btn sm" id="rkGoLive">▶ Activate ${esc(quarterLabel(_nextW1))} Rocks</button></div>` : "";
   const board=rocksOnBoard(TEAM());   // own Rocks + any owned by this team's leader that live on another team
   if(!board.length){ wrap.innerHTML=banner+qbar+`<div class="empty"><span class="emoji">🎯</span>No Rocks yet.<br>Add a quarterly Rock as a SMART goal, then break it into milestones.<br><small>Planning ahead? Switch the dropdown to <b>Next · ${esc(quarterLabel(_nextW1))}</b> to draft next quarter's Rocks without touching this board.</small></div>`; wireQ(); return; }
-  wrap.innerHTML=banner+qbar+board.map(({r,home,mirror})=>{
+  // Group Rocks by OWNER (alphabetical), so everyone's Rocks sit together instead of in creation order.
+  const grouped=board.slice().sort((a,b)=>{ const ea=!(a.r.owner||"").trim(), eb=!(b.r.owner||"").trim(); if(ea!==eb) return ea?1:-1;   // no-owner Rocks last
+    return String(a.r.owner||"").toLowerCase().localeCompare(String(b.r.owner||"").toLowerCase()) || String(a.r.title||"").localeCompare(String(b.r.title||"")); });
+  let _prevOwner=null;
+  wrap.innerHTML=banner+qbar+grouped.map(({r,home,mirror})=>{
     r.milestones=r.milestones||[];               // normalize legacy/imported Rocks so a missing list can't blank the whole board
+    const _own=(r.owner||"").trim();
+    let _ownerHead="";
+    if(_prevOwner===null || _own.toLowerCase()!==_prevOwner.toLowerCase()){ _prevOwner=_own;
+      _ownerHead=`<div style="font-weight:800;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:16px 2px 6px">${_own?esc(_own):'<span style="opacity:.7">Unassigned</span>'}</div>`; }
     const pct=rockPct(r);
     const stPill=r.status==="done"?'<span class="pill green">Done</span>':r.status==="notdone"?'<span class="pill notdone">Not Done</span>':(r.status==="off"?'<span class="pill red">Off Track</span>':'<span class="pill green">On Track</span>');
     const sm=r.smart||{};
@@ -6360,7 +6378,7 @@ function renderRocks(){
     const open=rkOpen.has(r.id);
     const openQ=(r.questions||[]).filter(q=>!q.answer).length;
     // Compact summary is always shown; a click drops down the SMART goal + milestones + the rest.
-    return `<div class="card ${open?"":"collapsed"}" data-rid="${r.id}">
+    return _ownerHead+`<div class="card ${open?"":"collapsed"}" data-rid="${r.id}">
       <div class="rk-summary" data-rk-toggle>
         <div class="top">
           <div><h3>${esc(r.title)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</h3>${rkAttr(r.owner, home.name, r.due)}</div>
@@ -10408,9 +10426,9 @@ function renderLists(){
       if(listMode==="issues"){
         if(act==="notes"){ if(expandedIssueNotes.has(id)) expandedIssueNotes.delete(id); else expandedIssueNotes.add(id); renderLists(); return; }   // anyone can open notes to read
         const it=TEAM().issues.find(x=>x.id===id); if(!canEd || !it) return;   // issue changes = team editors
-        if(act==="toggle"){ it.solved=!it.solved; const s=it.solved; mergeTeam(tid, t=>{ const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=s; }); }
+        if(act==="toggle"){ it.solved=!it.solved; const s=it.solved; _solvedTouched.add(id); mergeTeam(tid, t=>{ const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=s; }); }
         if(act==="del"){ if(!confirm(`Delete this issue?\n\n"${(it&&it.text)||""}"`)) return; TEAM().issues=TEAM().issues.filter(x=>x.id!==id); mergeTeam(tid, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); }
-        if(act==="drop"){ const nt={id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); it.solved=true; mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[nt]); const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=true; }); }
+        if(act==="drop"){ const nt={id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); it.solved=true; _solvedTouched.add(id); mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[nt]); const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=true; }); }
       }else{
         const it=TEAM().todos.find(x=>x.id===id); if(!it) return;
         if(act==="toggle"){ if(!canEd && !canEditOwn(it.owner)) return; it.done=!it.done; const d=it.done; mergeTeam(tid, t=>{ const x=(t.todos||[]).find(y=>y&&y.id===id); if(x) x.done=d; }); }   // tick your own
@@ -10446,7 +10464,7 @@ let meeting=null, tick=null;
    crashed/closed tab never freezes a box. saveL10's per-field merge writes ONLY the boxes you hold a live
    lock on, so your edits and a teammate's land side by side instead of overwriting each other. */
 const LOCK_TTL=9000;
-let _lockedKey=null, _lockHb=null, _touchedRate=new Set();
+let _lockedKey=null, _lockHb=null, _touchedRate=new Set(), _solvedTouched=new Set();   // _solvedTouched = issue ids THIS client just solved/reopened, so saveL10 only writes the `solved` flag for those
 // Note fields written PROGRAMMATICALLY (not by typing in a focused box) — e.g. the AI-drafted cascade &
 // summary. Typed fields are written only while you hold their lock; these have no lock, so the merge must
 // still write them or the AI draft is silently dropped on the next sync.
@@ -10925,7 +10943,7 @@ function renderSegContent(i){
       $("#ids-back").onclick=back; $("#ids-keep").onclick=back;
       { const bs=$("#ids-solved"); if(bs) bs.onclick=()=>{
         const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;   // re-fetch LIVE at click time — a rebuild must not make this act on a stale, detached issue
-        a.solved=true; a.solvedDate=todayIso();
+        a.solved=true; a.solvedDate=todayIso(); _solvedTouched.add(a.id);   // claim the solved flag so a teammate's stale save can't un-solve it
         // Snapshot the worksheet into this meeting's minutes. UPSERT by issue id so re-solving a revisited
         // issue doesn't list it twice, and keep the raiser (owner) so the archived minutes show "raised by".
         const snap={issueId:a.id, text:a.text, owner:a.owner||"", ids:Object.assign({},a.ids||{})};
@@ -10936,7 +10954,7 @@ function renderSegContent(i){
       }; }
       { const br=$("#ids-reopen"); if(br) br.onclick=()=>{   // put a solved issue back on the open list (still worked on)
         const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;
-        a.solved=false; a.solvedDate="";
+        a.solved=false; a.solvedDate=""; _solvedTouched.add(a.id);   // claim the flag for the reopen too
         meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===a.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
         saveL10(true); renderSegContent(i);
       }; }

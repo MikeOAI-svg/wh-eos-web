@@ -6,3 +6,5 @@ __tg.html
 # Dependencies / build output
 node_modules/
 .netlify/
+
+__demo.html
