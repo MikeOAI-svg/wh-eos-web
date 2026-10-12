@@ -4907,7 +4907,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=190;
+const BUILD=192;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5539,7 +5539,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};},
     saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;}, accessSummaryFor, get asOverride(){return {e:_asEmail,n:_asName};},
     ensureAutoIssues, currentWeekIndexFor, measuresOnBoard, rocksOnBoard,
-    canSeeTeam, teamsForUser, seatsFor, seatsAtOrBelowId, seatHasName };
+    canSeeTeam, teamsForUser, seatsFor, seatsAtOrBelowId, seatHasName,
+    showOnboard, finishOnboard, needsOnboarding, claimName, renderAdmin };
 }
 
 /* ===== L10 presence — who's currently on the Level 10 =====
@@ -7409,13 +7410,14 @@ function myName(){
   const p=(data.people||[]).find(x=>x&&(x.email||"").trim().toLowerCase()===e);
   return (p&&p.name)||"";
 }
-function claimName(name, alsoApply){   // alsoApply(comp): an extra company change to land in the SAME merge (e.g. joining a seat)
+function claimName(name, alsoApply, hint){   // alsoApply(comp): an extra company change to land in the SAME merge (e.g. joining a seat). hint: optional self-reported role/team for the admin's waiting room.
   const e=myEmail(), n=(name||"").trim(); if(!e||!n) return;
+  const wr=(hint||"").trim();
   data.people=data.people||[];
   const p=data.people.find(x=>x&&(x.email||"").trim().toLowerCase()===e);
-  if(p) p.name=n; else data.people.push({email:e,name:n});
+  if(p){ p.name=n; if(wr) p.wantRole=wr; } else data.people.push(wr?{email:e,name:n,wantRole:wr}:{email:e,name:n});
   // merge just MY people entry onto the latest company doc (was plain save → could revert your name claim)
-  mergeCompany(comp=>{ comp.people=comp.people||[]; const cp=comp.people.find(x=>x&&(x.email||"").trim().toLowerCase()===e); if(cp) cp.name=n; else comp.people.push({email:e,name:n}); if(alsoApply) alsoApply(comp); });
+  mergeCompany(comp=>{ comp.people=comp.people||[]; const cp=comp.people.find(x=>x&&(x.email||"").trim().toLowerCase()===e); if(cp){ cp.name=n; if(wr) cp.wantRole=wr; } else comp.people.push(wr?{email:e,name:n,wantRole:wr}:{email:e,name:n}); if(alsoApply) alsoApply(comp); });
   if(booted) switchView(currentView);   // re-render: ownership (and so notifications) just changed
 }
 // Every name the app knows about — members, Rock/To-Do owners, and seats on the chart.
@@ -7445,7 +7447,7 @@ function maybeAskWhoAmI(){
    themselves on the Accountability Chart: full name → seat.name, seat title → seat.role,
    who they report to → seat.parent, LMA → seat.responsibilities. Required (no dismiss),
    but "reports to" defaults to top-level so nobody is truly locked out on day one. */
-let onbSeat=null, onbName="", onbFac=null;   // survive re-render when picking a facility / seat
+let onbSeat=null, onbName="", onbFac=null, onbRole="", onbPickMode=false;   // survive re-render; onbPickMode=true only when the person opts to self-pick a seat (default is the waiting room)
 const ONB_COMPANY="__company";   // seats above/beside the facilities (Visionary, Integrator, their staff)
 function needsOnboarding(){ return !!myEmail() && !myName(); }
 function maybeOnboard(){ if(needsOnboarding()) showOnboard(); else hideOnboard(); }
@@ -7473,34 +7475,47 @@ function showOnboard(){
         <span class="op-occ">${occ.length?esc(occ.join(", ")):"open seat"}</span></button>`; }).join("");
   const facBtn=(id,label)=>`<button type="button" class="onb-seat ${onbFac===id?"on":""}" data-fac="${id}">${esc(label)}</button>`;
   const facName=onbFac===ONB_COMPANY?"Company leadership":((facs.find(f=>f.id===onbFac)||{}).role||"");
-  ov.innerHTML=`<div class="onb-card">
-    <img class="onb-mark" id="onbMark" alt="Warriors Heart">
-    <div class="onb-word">WARRIORS<span class="dot">·</span><span class="hl">HEART</span></div>
-    <h2 class="onb-h">Welcome — find your seat</h2>
-    <p class="onb-sub">Signed in as <b>${esc(myEmail())}</b>. ${useFac?"Choose your facility, then pick your seat and enter your name.":"Enter your name and pick your seat on the chart."} Several people can share the same seat — e.g. all Admissions Advocates pick the Advocate seat.</p>
-    ${useFac?`<div class="field"><label>1 · Your facility</label>
+  // The seat picker (facility → seat) is now OPT-IN — by default a new person just enters their name and
+  // lands in the admin's waiting room, so nobody picks the wrong seat. "I know my seat" reveals the picker.
+  const pickerHtml=`
+    ${useFac?`<div class="field"><label>Your facility</label>
       <div class="onb-seats">${facs.map(f=>facBtn(f.id,f.role||"Facility")).join("")}${hasCompany?facBtn(ONB_COMPANY,"Company leadership"):""}</div></div>`:""}
-    <div class="field"><label>${useFac?"2 · ":""}Your seat${useFac&&onbFac?" · "+esc(facName):""}</label>
-      ${!seats.length?`<div class="hint">No seats on the chart yet — ask your admin to build it out, then sign in again.</div>`
+    <div class="field"><label>Your seat${useFac&&onbFac?" · "+esc(facName):""}</label>
+      ${!seats.length?`<div class="hint">No seats on the chart yet — your admin will place you.</div>`
         :(useFac&&!onbFac)?`<div class="hint">Choose your facility above to see its seats.</div>`
         :shown.length?`<div class="onb-picklist">${list}</div>`
-        :`<div class="hint">No seats under this facility yet — use the link below and your admin will place you.</div>`}</div>
-    <div class="field"><label>${useFac?"3 · ":""}Your full name</label><input id="onb-name" placeholder="e.g. Aaron Whitfield" value="${esc(onbName)}"></div>
-    <button class="btn wide" id="onb-done">Join this seat</button>
-    <button type="button" class="onb-skip" id="onb-skip">Can't find your seat? Continue — your admin will place you.</button>
+        :`<div class="hint">No seats under this facility yet — your admin will place you.</div>`}</div>`;
+  ov.innerHTML=`<div class="onb-card">
+    <svg class="onb-pulse" role="img" aria-label="HEART.OS" viewBox="0 0 120 60" style="width:150px;height:auto;display:block;margin:0 auto 6px;overflow:visible;filter:drop-shadow(0 8px 24px rgba(216,94,22,.28))"><polyline points="6,34 46,34 58,34 68,13 82,51 94,34 114,34" fill="none" style="stroke:var(--accent)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="onb-word">HEART<span class="hl">.OS</span></div>
+    <div style="font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-top:4px">Warriors Heart</div>
+    <h2 class="onb-h">Welcome — let's get you set up</h2>
+    <p class="onb-sub">Signed in as <b>${esc(myEmail())}</b>. ${onbPickMode
+      ? "Choose your facility and seat, then enter your name. Several people can share one seat."
+      : "Just enter your name — an admin will add you to the right team. (You no longer pick your own seat, so no one lands in the wrong one.)"}</p>
+    <div class="field"><label>Your full name</label><input id="onb-name" placeholder="e.g. Aaron Whitfield" value="${esc(onbName)}"></div>
+    <div class="field"><label>Your role or team <span style="color:var(--muted);font-weight:600">· optional — helps your admin place you faster</span></label><input id="onb-role" placeholder="e.g. Admissions Advocate · Texas" value="${esc(onbRole)}"></div>
+    ${onbPickMode?pickerHtml:""}
+    <button class="btn wide" id="onb-done">${onbPickMode?"Join this seat":"Enter →"}</button>
+    ${onbPickMode
+      ? `<button type="button" class="onb-skip" id="onb-waitroom">Not sure which seat? Let my admin place me instead</button>`
+      : `<button type="button" class="onb-skip" id="onb-pickseat">I know exactly which seat is mine — let me pick it</button>`}
     <div class="onb-msg" id="onb-msg"></div>
   </div>`;
   ov.classList.remove("hide");
-  const mk=$("#onbMark"); if(mk) mk.src=markSrc();
+  const grabFields=()=>{ onbName=($("#onb-name").value||"").trim(); onbRole=($("#onb-role")?($("#onb-role").value||""):onbRole).trim(); };
   const nm=$("#onb-name"); if(nm) nm.oninput=()=>{ onbName=nm.value; };
-  // Picking a facility or seat re-renders to highlight it — keep the typed name.
-  ov.querySelectorAll("[data-fac]").forEach(b=>b.onclick=()=>{ onbName=($("#onb-name").value||"").trim(); onbFac=b.dataset.fac; showOnboard(); });
-  ov.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{ onbName=($("#onb-name").value||"").trim(); onbSeat=b.dataset.pick; showOnboard(); });
-  $("#onb-done").onclick=finishOnboard;
-  $("#onb-skip").onclick=()=>finishOnboard(true);
+  const rl=$("#onb-role"); if(rl) rl.oninput=()=>{ onbRole=rl.value; };
+  // Picking a facility or seat re-renders to highlight it — keep the typed name + role.
+  ov.querySelectorAll("[data-fac]").forEach(b=>b.onclick=()=>{ grabFields(); onbFac=b.dataset.fac; showOnboard(); });
+  ov.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{ grabFields(); onbSeat=b.dataset.pick; showOnboard(); });
+  { const pb=$("#onb-pickseat"); if(pb) pb.onclick=()=>{ grabFields(); onbPickMode=true; showOnboard(); }; }
+  { const wb=$("#onb-waitroom"); if(wb) wb.onclick=()=>{ grabFields(); onbSeat=null; onbPickMode=false; showOnboard(); }; }
+  $("#onb-done").onclick=()=>finishOnboard(!onbPickMode);   // default (waiting room) = skip the seat
 }
 function finishOnboard(skipSeat){
   const name=($("#onb-name").value||"").trim();
+  const hint=($("#onb-role")?($("#onb-role").value||"").trim():(onbRole||"").trim());
   if(!name){ $("#onb-msg").textContent="Please enter your full name."; $("#onb-name").focus(); return; }
   let joinSeat=null;
   if(skipSeat!==true){
@@ -7516,9 +7531,10 @@ function finishOnboard(skipSeat){
     joinSeat=comp=>{ const s=(((comp.accountability||{}).seats)||[]).find(x=>x&&x.id===sid); if(!s) return;
       s.names=seatNames(s); if(!s.names.some(n=>sameName(n,name))) s.names.push(name); delete s.name; };
   }
-  onbSeat=null; onbName=""; onbFac=null;
+  onbSeat=null; onbName=""; onbFac=null; onbRole=""; onbPickMode=false;
   hideOnboard();
-  claimName(name, joinSeat);   // links email→name (+ joins the seat), saves, re-renders the app behind the (now hidden) gate
+  claimName(name, joinSeat, joinSeat?"":hint);   // links email→name (+ joins the seat); waiting-room joins carry the role hint for the admin
+  if(!joinSeat) setSync("You're in — an admin will add you to your team shortly. ⏳");
 }
 function askWhoAmI(){
   const names=knownPeople();
@@ -7870,7 +7886,7 @@ function renderAdmin(){
     const me=sameName(n,myName());
     return `<div class="adm-row" data-pname="${esc(String(n).toLowerCase())}">
       <div><div class="nm">${esc(n)}${badge}${me?' <span style="color:var(--muted);font-weight:600">· you</span>':""}</div>
-        <div class="em">${claim?esc(claim.email):"no login linked"}</div></div>
+        <div class="em">${claim?esc(claim.email):"no login linked"}${claim&&claim.wantRole?` · <span style="color:var(--accent);font-weight:600">says: “${esc(claim.wantRole)}”</span>`:""}</div></div>
       <div class="adm-actions">
         <button class="btn ghost sm" data-assign-teams="${esc(n)}">Assign teams</button>
         ${isAdm&&!isOwn?`<button class="btn ghost sm" data-revoke-admin="${esc(cem)}">Remove admin</button>`:""}
@@ -7888,8 +7904,8 @@ function renderAdmin(){
   const groupHtml=(title,id,people)=> people.length?`<div class="adm-group" data-group="${esc(id)}">
       <button class="adm-group-head" type="button"><span>${esc(title)}</span><span class="agc">${people.length}<span class="caret">▾</span></span></button>
       <div class="adm-group-body">${people.map(personRow).join("")}</div></div>`:"";
-  const peopleGroups=(data.teams||[]).map(t=>groupHtml(t.name, t.id, dedupSort(teamRoster(t)))).join("")
-    + groupHtml("Not on a team","__none__", dedupSort(unassigned));
+  const peopleGroups=groupHtml("⏳ Waiting room — new sign-ins to place","__none__", dedupSort(unassigned))
+    + (data.teams||[]).map(t=>groupHtml(t.name, t.id, dedupSort(teamRoster(t)))).join("");
   wrap.innerHTML=`
     <button class="btn wide" id="adm-add-member" style="margin-bottom:8px">＋ Add a team member</button>
     <button class="btn ghost wide" id="adm-access" style="margin-bottom:14px">🔍 Who can see what — access viewer</button>
@@ -7940,7 +7956,7 @@ function renderAdmin(){
          <button class="btn wide" id="adm-enable-multi" style="background:var(--accent)">🧱 Enable per-team storage</button>`}
 
     <div class="sec-title" style="margin-top:22px">People (${names.length})</div>
-    <div class="hint" style="margin:0 2px 8px">Grouped by team — tap a team to open its people. Search to jump straight to a name.</div>
+    <div class="hint" style="margin:0 2px 8px">New sign-ins land in the <b>⏳ Waiting room</b> at the top — open it and hit <b>Assign teams</b> to place each person (their self-reported role is shown to help). Everyone else is grouped by team.</div>
     <input id="adm-psearch" class="adm-search" placeholder="🔍  Search for a name…" autocomplete="off" enterkeyhint="search">
     ${peopleGroups||`<div class="empty"><span class="emoji">👤</span>No people yet.</div>`}`;
   { const b=$("#adm-add-member"); if(b) b.onclick=addMemberWizard; }
