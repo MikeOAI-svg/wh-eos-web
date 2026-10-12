@@ -4790,6 +4790,7 @@ function migrateTeam(t){
     .forEach(k=>{ if(!Array.isArray(t[k])) t[k]=[]; });   // nextRocks = drafted Rocks for next quarter; minutesCc = extra L10 minute recipients
   t.rocks.forEach(r=>{ if(!Array.isArray(r.questions)) r.questions=[]; });   // progress Q&A
   if(!Array.isArray(t.editors)) t.editors=[];   // names allowed to edit this team's boards (besides leadership)
+  if(!t.autoIssued || typeof t.autoIssued!=="object" || Array.isArray(t.autoIssued)) t.autoIssued={};   // dedupe keys for auto-raised IDS issues (Scorecard/Rock off 2+ weeks)
   if(t.leader===undefined) t.leader="";         // this team's leader — drives auto-mirror of their Rocks/measurables
   if(t.parent===undefined) t.parent="";         // the meeting this team reports up to (for the mirror hierarchy)
   if(t.facility===undefined) t.facility="";           // (legacy) function-seat id — superseded by chart-driven teams
@@ -5007,7 +5008,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=185;
+const BUILD=186;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5637,7 +5638,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     teamsForUser, myTeamSeatIds, nearestL10Ancestor, myName, callTangent, showTangent, hideTangent, startNewQuarter,
     canSeeRatingsFor, canRatePerson, canSeeSelfAssessment, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};},
-    saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;}, accessSummaryFor, get asOverride(){return {e:_asEmail,n:_asName};} };
+    saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;}, accessSummaryFor, get asOverride(){return {e:_asEmail,n:_asName};},
+    ensureAutoIssues, currentWeekIndexFor, measuresOnBoard, rocksOnBoard };
 }
 
 /* ===== L10 presence — who's currently on the Level 10 =====
@@ -6076,6 +6078,7 @@ function startNewQuarter(){
     t.nextRocks=[];
     t.week1Start=nextW1;
     (t.measurables||[]).forEach(m=>{ m.values={}; });
+    t.autoIssued={};   // fresh off-streak tracking for the new quarter
     scQuarter=null; rkQuarter=null; save(true); closeSheet();   // immediate write beats the sync-adopt race for this one-shot close
     switchView(currentView);
     setSync(`${quarterLabel(curW1)} closed · ${st.n?st.pct+"% of Rocks done":"no Rocks"}`);
@@ -11048,8 +11051,55 @@ function renderSegContent(i){
     }); }
   applyMeetingPerms();
 }
+// Auto-raise IDS issues for anything off track a SECOND week: a Scorecard measurable off 2+ consecutive weeks,
+// or a Rock that's off now AND was off at the last concluded L10. Idempotent — each off-streak raises exactly
+// ONE issue (tracked in team.autoIssued), so re-running never spams and deleting one won't bring it back until
+// the item recovers and slips again. Runs when an L10 starts, so the off-2-weeks items are already in IDS.
+function ensureAutoIssues(teamId){
+  const t=(data.teams||[]).find(x=>x&&x.id===teamId); if(!t) return;
+  t.autoIssued=t.autoIssued||{}; t.issues=t.issues||[];
+  const cwi=currentWeekIndexFor(t);
+  const toAdd=[], addKeys=[], delKeys=[];
+
+  // SCORECARD — a trailing run of consecutive "off" weeks (ending at the latest entered week) of length >= 2.
+  (measuresOnBoard(t)||[]).forEach(({m,mirror})=>{
+    if(mirror||!m) return;                                  // raise only on the OWNING team's board, not mirrored copies
+    const vals=m.values||{};
+    let latest=-1; for(let i=0;i<=cwi;i++){ if(vals[i]&&vals[i].s) latest=i; }   // most recent week with a status
+    if(latest<0 || vals[latest].s!=="off") return;
+    let start=latest; while(start-1>=0 && vals[start-1] && vals[start-1].s==="off") start--;
+    const runLen=latest-start+1; if(runLen<2) return;       // need a SECOND consecutive off week
+    const key="sc:"+m.id+":"+start;                         // pinned to this off-run's start week → fires once per run
+    if(t.autoIssued[key]) return;
+    t.autoIssued[key]=true; addKeys.push(key);
+    toAdd.push({ id:"auto-"+key.replace(/[:]/g,"-"), text:"📉 Scorecard off track "+runLen+" weeks — "+(m.name||"a measurable")+(m.goal?" (goal "+m.goal+")":""),
+      owner:m.owner||"", solved:false, created:todayIso(), auto:"scorecard" });
+  });
+
+  // ROCKS — off now AND off at the last concluded L10 (= second consecutive week). Last status comes from the
+  // most recent meeting's stored Rock snapshot (matched by title), so no new per-week tracking is needed.
+  const meetings=t.meetings||[]; const lastSnap=meetings.length?(meetings[meetings.length-1].rocksSnap||null):null;
+  const wasOffLast=(r)=>{ if(!lastSnap||!lastSnap.rows) return false; const row=lastSnap.rows.find(x=>x&&(x.title||"")===(r.title||"")); return !!(row&&row.status==="off"); };
+  (rocksOnBoard(t)||[]).forEach(({r,mirror})=>{
+    if(mirror||!r) return;
+    const flag="rk:"+r.id;                                  // one open auto-issue per Rock's current off-streak
+    if(r.status!=="off"){ if(t.autoIssued[flag]){ delete t.autoIssued[flag]; delKeys.push(flag); } return; }   // recovered → allow a future streak to re-raise
+    if(!wasOffLast(r)) return;                              // off only this week → not yet a second week
+    if(t.autoIssued[flag]) return;
+    t.autoIssued[flag]=true; addKeys.push(flag);
+    toAdd.push({ id:"auto-rk-"+r.id, text:"🎯 Rock off track a 2nd week — "+(r.title||"a Rock"),
+      owner:r.owner||"", solved:false, created:todayIso(), auto:"rock" });
+  });
+
+  if(!toAdd.length && !addKeys.length && !delKeys.length) return;
+  toAdd.forEach(it=>{ if(!t.issues.some(x=>x&&x.id===it.id)) t.issues.unshift(it); });   // local: the running L10 sees them now
+  mergeTeam(teamId, tt=>{ tt.autoIssued=tt.autoIssued||{};                               // persist precise deltas onto the latest server copy
+    if(toAdd.length) tt.issues=upsertById(tt.issues||[], toAdd);
+    addKeys.forEach(k=>tt.autoIssued[k]=true); delKeys.forEach(k=>delete tt.autoIssued[k]); });
+}
 function startMeeting(){
   if(!canEditTeam()) return;   // only a team editor runs their team's L10 (others can follow along)
+  try{ ensureAutoIssues(TEAM().id); }catch(e){ console.error("auto-issues failed",e); }   // off-2-weeks Scorecard/Rock → IDS (never blocks starting the meeting)
   meeting={date:todayIso(),startedAt:Date.now(),capMin:L10_CAP_MIN,seg:0,segStart:Date.now(),segElapsed:0,totalElapsed:0,notes:{},ratings:{},createdTodos:[],activeIssue:null,solvedIssues:[],locks:{},
     facilitatorEmail:myEmail(), facilitatorName:myName()||myEmail(),
     scribeEmail:myEmail(), scribeName:myName()||myEmail()};   // starter is the scribe by default; reassign in the meeting
