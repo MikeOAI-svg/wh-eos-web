@@ -66,7 +66,7 @@ const TASKS = {
     ).join("\n").slice(0, 10000);
     return {
       model: MODEL_PRO,
-      maxTokens: 1200,
+      maxTokens: 1500,
       system: "You are a seasoned EOS/Traction implementer reviewing a company's quarterly Rocks against its V/TO (Vision/Traction Organizer). Judge two things: (1) OVERLAP — Rocks across different teams that duplicate, depend on, or significantly overlap one another, so effort is redundant or needs coordinating; (2) ALIGNMENT — whether each Rock clearly ladders up to the company's Core Focus, 1-Year goals, Company Rocks, or 3-Year picture. Use the Rocks' real titles and team names. Never invent Rocks or V/TO items. If something is genuinely fine, say little about it. Reply with ONLY a JSON object — no prose, no markdown, no code fences.",
       user: `COMPANY V/TO:\n${vto || "(no V/TO on file)"}\n\nALL QUARTERLY ROCKS${quarter ? ` (${quarter})` : ""} — numbered, with [team], owner, and status:\n${rocksText || "(no Rocks)"}\n\nReturn JSON shaped EXACTLY like:\n{"summary":"<1–2 sentence overall read of how well this quarter's Rocks line up with the V/TO>","overlaps":[{"rocks":["<team: title>","<team: title>"],"why":"<what overlaps and the risk — one sentence>"}],"misaligned":[{"rock":"<team: title>","why":"<why it doesn't clearly support the V/TO — one sentence>"}],"gaps":["<a V/TO goal or priority that has NO Rock driving it>"],"alignedNote":"<one sentence naming the Rocks that clearly ladder up well>"}\nInclude an entry only when it's real; use empty arrays when there's nothing to report. Keep every \"why\" to a single sentence.`
     };
@@ -142,7 +142,12 @@ export async function handler(event){
     let res = await callClaude(primary);
     if(!res.ok && primary !== MODEL){ console.error("primary model failed, falling back to default", primary, res.status, res.data && res.data.error); res = await callClaude(MODEL); }
     if(!res.ok){ console.error("anthropic error", res.status, res.data && res.data.error); return json(502, { error: "The AI request failed — try again." }); }   // log detail server-side; don't leak upstream text to the browser
-    const text = (res.data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("").trim();
+    const textOf = (r) => (r.data.content || []).filter(b => b && b.type === "text").map(b => b.text).join("").trim();
+    let text = textOf(res);
+    // A model can occasionally return 200 with no usable text. Retry once on the default (fast) model, then fail
+    // loudly — never hand the browser a silent empty success (that showed as "(empty response)" with no cause).
+    if(!text && primary !== MODEL){ console.error("empty text from", primary, "— retrying on default model"); const r2 = await callClaude(MODEL); if(r2.ok){ const t2 = textOf(r2); if(t2) text = t2; } }
+    if(!text){ console.error("empty text from AI", primary); return json(502, { error: "The AI returned an empty response — please try again." }); }
     return json(200, { text });
   }catch(e){
     return json(502, { error: "Couldn't reach the AI service — try again." });
