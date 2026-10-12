@@ -5011,7 +5011,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=187;
+const BUILD=189;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -6226,6 +6226,14 @@ function renderCompanyRocks(){
       ${notdone?`<div class="co-stat red"><b>${notdone}</b><span>Not Done</span></div>`:""}
     </div>
     <div class="hint" style="margin:0 2px 4px">Every Rock across all ${teams.length} team${teams.length>1?"s":""} — read-only. Switch to “My Team” to edit yours.</div>`;
+  if(canSeeAllPillars()){
+    html+=`<div class="rk-align" style="margin:10px 2px 4px">
+      <button class="btn ghost sm" id="rk-align-btn">✨ Analyze alignment &amp; overlap</button>
+      <span class="hint" style="margin-left:8px">Which Rocks overlap across teams, and which are in or out of alignment with the V/TO.</span>
+      <div class="hint ai-status" id="rk-align-status" hidden style="margin-top:6px"></div>
+      <div id="rk-align-out" style="margin-top:8px"></div>
+    </div>`;
+  }
   teams.forEach(t=>{
     const rocks=t.rocks||[]; if(!rocks.length) return;
     const tOff=rocks.filter(r=>r.status==="off").length;
@@ -6260,6 +6268,7 @@ function renderCompanyRocks(){
     });
   });
   wrap.innerHTML=html;
+  { const ab=$("#rk-align-btn"); if(ab) ab.onclick=()=>runRockAlignment(teams); }
   // The roll-up is read-only for Rock content, but asking the owner a question is allowed —
   // this is the page where you'd notice someone else's Rock and want to ask about it.
   wrap.querySelectorAll(".card[data-rid]").forEach(card=>{
@@ -6272,6 +6281,50 @@ function renderCompanyRocks(){
       if(e.target.dataset.act==="rock-ask") askRockQuestion(rid);
     });
   });
+}
+/* ===== Company Rocks ⨉ V/TO alignment (AI) =====
+   Sends every team's Rocks + a summary of the company V/TO to Claude, which flags Rocks that OVERLAP
+   across teams and Rocks that are IN/OUT of alignment with the Vision. Read-only analysis — a prompt for
+   IDS, never a save. Leadership-only (the button only renders on the full-company Rocks view). */
+function vtoAlignmentDigest(){
+  const v=data.vto||{}, L=[], cf=v.coreFocus||{};
+  if(cf.mission||cf.purpose||cf.niche) L.push("CORE FOCUS — Mission: "+(cf.mission||"—")+" | Purpose/Cause/Passion: "+(cf.purpose||"—")+" | Niche: "+(cf.niche||"—"));
+  if(v.tenYear) L.push("10-YEAR TARGET: "+v.tenYear);
+  const sec=(key,label)=>{ const arr=(getVtoList(data.vto,key)||[]).map(itemText).filter(Boolean); if(arr.length) L.push(label+":\n"+arr.map(x=>"  • "+x).join("\n")); };
+  sec("threeYear","3-YEAR PICTURE");
+  sec("oneYear","1-YEAR GOALS");
+  sec("quarterRocks","COMPANY ROCKS (this quarter)");
+  sec("collectiveGoals","COLLECTIVE COMPANY GOALS");
+  const rpm=(v.rpm&&v.rpm.current)||null;
+  if(rpm&&(rpm.revenue||rpm.profit)) L.push("TARGETS: Revenue "+(rpm.revenue||"—")+" · Profit "+(rpm.profit||"—")+(rpm.measurables?(" · "+rpm.measurables):""));
+  return L.join("\n").slice(0,8000);
+}
+function runRockAlignment(teams){
+  const btn=$("#rk-align-btn"), status=$("#rk-align-status"), outEl=$("#rk-align-out");
+  const rocks=[]; (teams||[]).forEach(t=>(t.rocks||[]).forEach(r=>rocks.push({team:t.name, title:r.title||"(untitled)", owner:r.owner||"", status:r.status||"on"})));
+  if(!rocks.length){ if(status){ status.hidden=false; status.textContent="No Rocks to analyze yet."; } return; }
+  const vto=vtoAlignmentDigest(), quarter=quarterLabel((TEAM()&&TEAM().week1Start)||firstMondayOfQuarter());
+  aiRun(btn, status, "✨ Reading your V/TO and every team's Rocks…", async ()=>{
+    const text=await aiCall("rock_alignment",{ vto, rocks, quarter });
+    let res=null; try{ res=aiParseJSON(text); }catch(e){}
+    if(outEl) outEl.innerHTML = res ? rockAlignmentHtml(res) : `<div class="card"><div style="white-space:pre-wrap">${esc(text)}</div></div>`;
+    if(status) status.hidden=true;
+  });
+}
+function rockAlignmentHtml(res){
+  const ov=res.overlaps||[], mis=res.misaligned||[], gaps=res.gaps||[];
+  const sec=(title,inner,empty)=>`<div style="margin-top:10px"><div class="sec-title" style="margin:0 2px 4px">${title}</div>${inner||`<div class="hint" style="margin:0 2px">${empty}</div>`}</div>`;
+  const ovHtml=ov.map(o=>`<div class="card" style="margin:6px 0"><div><b>${(o.rocks||[]).map(esc).join('</b>  ↔  <b>')}</b></div><div class="hint" style="margin:4px 0 0">${esc(o.why||"")}</div></div>`).join("");
+  const misHtml=mis.map(m=>`<div class="card is-off" style="margin:6px 0"><div><b>${esc(m.rock||"")}</b></div><div class="hint" style="margin:4px 0 0">${esc(m.why||"")}</div></div>`).join("");
+  const gapsHtml=gaps.length?`<ul style="margin:4px 0 0 18px">${gaps.map(g=>`<li>${esc(g)}</li>`).join("")}</ul>`:"";
+  return `<div class="card" style="border-color:var(--accent)">
+      ${res.summary?`<div style="font-weight:600">${esc(res.summary)}</div>`:""}
+      ${sec("🔁 Overlapping Rocks", ovHtml, "No significant overlaps found.")}
+      ${sec("⚠️ Out of alignment with the V/TO", misHtml, "Every Rock ladders up to the V/TO.")}
+      ${sec("🕳️ V/TO priorities with no Rock behind them", gapsHtml, "No obvious gaps.")}
+      ${res.alignedNote?`<div class="hint" style="margin-top:10px">✅ ${esc(res.alignedNote)}</div>`:""}
+      <div class="hint" style="margin-top:10px">AI analysis — a prompt to discuss in IDS, not a verdict.</div>
+    </div>`;
 }
 let rocksMode="team"; // "team" = this team's rocks (editable) | "company" = every team's rocks (read-only)
 let rkQuarter=null;   // null = current quarter; number = index into TEAM().rockArchive (read-only)
@@ -11016,7 +11069,8 @@ function renderSegContent(i){
     // for this meeting (a colleague who isn't on the team but is attending today).
     const key=seg.key;
     meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[key]=meeting.byPerson[key]||{};
-    const bp=meeting.byPerson[key], roster=meetingRoster();
+    // WIFLS / Headlines listed alphabetically (team members first, then guests) — display only; answers are keyed by name, not position.
+    const bp=meeting.byPerson[key], roster=meetingRoster().slice().sort((a,b)=>((a.guest?1:0)-(b.guest?1:0)) || String(a.name||"").localeCompare(String(b.name||"")));
     const ph=key==="segue"?"What they feel like saying…":"Their customer / employee headline…";
     const rows=roster.length
       ? roster.map(p=>`<div class="wf-row"><span class="wf-name">${esc(p.name)}${p.guest?' <span class="wf-guest">guest</span>':''}</span>
