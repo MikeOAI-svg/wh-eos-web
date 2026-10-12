@@ -4907,7 +4907,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=189;
+const BUILD=190;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -6123,11 +6123,13 @@ function renderCompanyRocks(){
     </div>
     <div class="hint" style="margin:0 2px 4px">Every Rock across all ${teams.length} team${teams.length>1?"s":""} — read-only. Switch to “My Team” to edit yours.</div>`;
   if(canSeeAllPillars()){
+    const a=_rkAlign||{};
     html+=`<div class="rk-align" style="margin:10px 2px 4px">
-      <button class="btn ghost sm" id="rk-align-btn">✨ Analyze alignment &amp; overlap</button>
+      <button class="btn ghost sm" id="rk-align-btn"${a.loading?" disabled":""}>${a.loading?"✨ Thinking…":"✨ Analyze alignment &amp; overlap"}</button>
       <span class="hint" style="margin-left:8px">Which Rocks overlap across teams, and which are in or out of alignment with the V/TO.</span>
-      <div class="hint ai-status" id="rk-align-status" hidden style="margin-top:6px"></div>
-      <div id="rk-align-out" style="margin-top:8px"></div>
+      ${a.loading?`<div class="hint ai-status" style="margin-top:6px">✨ Reading your V/TO and every team's Rocks…</div>`:""}
+      ${a.err?`<div class="hint ai-status err" style="margin-top:6px">⚠ ${esc(a.err)}</div>`:""}
+      <div id="rk-align-out" style="margin-top:8px">${a.html||""}</div>
     </div>`;
   }
   teams.forEach(t=>{
@@ -6195,17 +6197,22 @@ function vtoAlignmentDigest(){
   if(rpm&&(rpm.revenue||rpm.profit)) L.push("TARGETS: Revenue "+(rpm.revenue||"—")+" · Profit "+(rpm.profit||"—")+(rpm.measurables?(" · "+rpm.measurables):""));
   return L.join("\n").slice(0,8000);
 }
+// State lives in a module var — NOT in captured DOM nodes — so a background sync that re-renders the Rocks
+// view mid-request can't drop the spinner or the result on the floor (that was the "Thinking… then nothing"
+// bug). renderCompanyRocks reads _rkAlign every time it paints, so the panel restores itself on any rebuild.
+let _rkAlign=null;   // { loading, html, err }
+function rerenderRkAlign(){ if(currentView==="rocks" && rocksMode==="company") renderCompanyRocks(); }
 function runRockAlignment(teams){
-  const btn=$("#rk-align-btn"), status=$("#rk-align-status"), outEl=$("#rk-align-out");
+  if(_rkAlign && _rkAlign.loading) return;                       // already running — ignore repeat clicks
   const rocks=[]; (teams||[]).forEach(t=>(t.rocks||[]).forEach(r=>rocks.push({team:t.name, title:r.title||"(untitled)", owner:r.owner||"", status:r.status||"on"})));
-  if(!rocks.length){ if(status){ status.hidden=false; status.textContent="No Rocks to analyze yet."; } return; }
+  if(!rocks.length){ _rkAlign={loading:false, html:null, err:"No Rocks to analyze yet."}; rerenderRkAlign(); return; }
   const vto=vtoAlignmentDigest(), quarter=quarterLabel((TEAM()&&TEAM().week1Start)||firstMondayOfQuarter());
-  aiRun(btn, status, "✨ Reading your V/TO and every team's Rocks…", async ()=>{
-    const text=await aiCall("rock_alignment",{ vto, rocks, quarter });
-    let res=null; try{ res=aiParseJSON(text); }catch(e){}
-    if(outEl) outEl.innerHTML = res ? rockAlignmentHtml(res) : `<div class="card"><div style="white-space:pre-wrap">${esc(text)}</div></div>`;
-    if(status) status.hidden=true;
-  });
+  _rkAlign={loading:true, html:null, err:null}; rerenderRkAlign();
+  aiCall("rock_alignment",{ vto, rocks, quarter })
+    .then(text=>{ let res=null; try{ res=aiParseJSON(text); }catch(e){}
+      _rkAlign={loading:false, err:null, html: res ? rockAlignmentHtml(res) : `<div class="card"><div style="white-space:pre-wrap">${esc(text||"(the AI returned an empty response — try again)")}</div></div>`}; })
+    .catch(e=>{ _rkAlign={loading:false, html:null, err:(e&&e.message)||"AI unavailable"}; })
+    .finally(rerenderRkAlign);
 }
 function rockAlignmentHtml(res){
   const ov=res.overlaps||[], mis=res.misaligned||[], gaps=res.gaps||[];
