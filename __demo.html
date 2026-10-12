@@ -4945,11 +4945,14 @@ function setTeam(id){
    NB: like all permissions here this is a UI boundary; the data still syncs to every signed-in browser. */
 function canSeeTeam(t){
   if(!t || !t.restricted) return true;
-  if(isLeadership()) return true;
+  if(isLeadership()) return true;                                         // Visionary / Integrator / admin
   const me=myName(); if(!me) return false;
-  const pillar=t.seatId?pillarSeatOf(t.seatId):null;
+  if(sameName(t.leader,me) || teamRoster(t).some(n=>sameName(n,me))) return true;   // the team's own leader + members
+  // the team's LEADERS' LEADERS — anyone whose seat is at or above this team's seat on the Accountability Chart
+  if(t.seatId && seatsFor(me).some(s=>s && seatsAtOrBelowId(s.id).has(t.seatId))) return true;
+  const pillar=t.seatId?pillarSeatOf(t.seatId):null;                      // facility / pillar leader (also covers teams not linked to a seat)
   if(pillar ? seatHasName(pillar,me) : leadsFacilityOf(t,me)) return true;
-  return sameName(t.leader,me) || teamRoster(t).some(n=>sameName(n,me));
+  return false;
 }
 // Seats a new login may NOT self-select at onboarding, because sitting there would open a restricted team:
 // the team's own seats, its facility leader's seat, and the Visionary / Integrator seats. An admin places them.
@@ -5008,7 +5011,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=186;
+const BUILD=187;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5639,7 +5642,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
     canSeeRatingsFor, canRatePerson, canSeeSelfAssessment, peopleBelowMe, directReportsOf, get BUILD(){return BUILD;},
     get data(){return data;}, get shadows(){return {company:_shadowCompany, teams:_shadowTeams};},
     saveL10, get progNotes(){return _progNotes;}, get lockHbActive(){return !!_lockHb;}, accessSummaryFor, get asOverride(){return {e:_asEmail,n:_asName};},
-    ensureAutoIssues, currentWeekIndexFor, measuresOnBoard, rocksOnBoard };
+    ensureAutoIssues, currentWeekIndexFor, measuresOnBoard, rocksOnBoard,
+    canSeeTeam, teamsForUser, seatsFor, seatsAtOrBelowId, seatHasName };
 }
 
 /* ===== L10 presence — who's currently on the Level 10 =====
@@ -7957,7 +7961,7 @@ function renderAdmin(){
         // their members from the chart, so t.members is empty for them — counting it showed a false "0".
         const memCount=(teamHasCustomMembers(t)||teamIsChartDriven(t)) ? teamMemberNames(t).length : (t.members||[]).length;
         return `<div class="adm-row">
-        <div><div class="nm">${esc(t.name)}${t.restricted?' <span title="Restricted team — hidden from everyone outside its allow-list">🔒</span>':""}</div>
+        <div><div class="nm">${esc(t.name)}${t.restricted?' <span title="Locked team — visible only to leadership, this team\'s members, and the managers above it">🔒</span>':""}</div>
           <div class="em">${t.leader?`Leader: <b>${esc(t.leader)}</b> · `:""}${memCount} member${memCount===1?"":"s"}${(t.editors||[]).length?" · Editors: "+t.editors.map(esc).join(", "):""}${ls?" · 🔗 <b>"+esc(ls.role||"seat")+"</b>":' · <span style="color:var(--amber)">not linked to a seat</span>'}</div></div>
         <button class="btn ghost sm" data-team-editors="${t.id}">Manage</button>
       </div>`; }).join("");
@@ -8201,8 +8205,9 @@ function accessSummaryFor(name){
     const facility=(pillar&&pillar.role)||"Company-wide / shared";
     const admin=isAdmin(), evalAdm=isEvalAdmin();
     const editCo=canEditCompany(), editChart=canEditChart(), allTeams=seesAllTeams();
-    const teamsSee=(data.teams||[]).filter(canSeeTeam).map(t=>t.name);
-    const teamsEdit=(data.teams||[]).filter(t=>canSeeTeam(t)&&canEditTeam(t)).map(t=>t.name);
+    const visible=teamsForUser();                                   // the REAL effective scope — exactly what appears in this person's team switcher
+    const teamsSee=visible.map(t=>t.name);
+    const teamsEdit=visible.filter(t=>canEditTeam(t)).map(t=>t.name);
     const below=peopleBelowMe(name), directs=directReportsOf(name);
     const roleLabel=admin?"Admin":(editCo?"Leadership":(teamsEdit.length?"Team owner":"Member"));
     s={ name, email, seatRoles, facility, admin, evalAdm, editCo, editChart, allTeams, teamsSee, teamsEdit, below, directs, roleLabel };
@@ -8408,7 +8413,7 @@ function manageTeamEditors(teamId){
   }
   openSheet(`<h2>Team · ${esc(t.name)}</h2>${body}
     <div style="margin-top:16px"><div class="sec-title" style="margin:0 2px 4px">Restricted team</div>
-      <label class="ck-lbl" style="margin:2px 2px 6px"><input type="checkbox" id="te-restricted" ${t.restricted?"checked":""}> 🔒 Only leadership, this facility's leader and this team's own members can see it</label>
+      <label class="ck-lbl" style="margin:2px 2px 6px"><input type="checkbox" id="te-restricted" ${t.restricted?"checked":""}> 🔒 Lock this team — only leadership, this team's own members, and the managers above it (its leader's leaders) can see it</label>
       <div class="hint" style="margin:0 2px">When on, this team's Rocks, Scorecard, L10 and Lists are hidden from everyone except the Visionary, the Integrator, full admins, the leader of ${esc((t.seatId&&pillarSeatOf(t.seatId)&&pillarSeatOf(t.seatId).role)||"its facility")}, and the people on the team. It also drops out of Cabana Boy, Company Rocks and every other roll-up for everyone else — a "See every team" grant does not open it.</div></div>
     <div class="field" style="margin-top:16px"><label>Sales Card <small>(custom weekly grid — e.g. Admissions)</small></label>
       <div class="hint" style="margin:0 2px 8px">${t.salesCard?"✓ This team has a Sales Card. Its members &amp; supervisors see the <b>Sales Card</b> tab.":"Give this team a weekly people×metrics grid. Only this team's members &amp; supervisors will see it."}</div>
