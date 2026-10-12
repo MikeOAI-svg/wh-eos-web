@@ -4907,7 +4907,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=187;
+const BUILD=188;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -10912,7 +10912,8 @@ function renderSegContent(i){
     // for this meeting (a colleague who isn't on the team but is attending today).
     const key=seg.key;
     meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[key]=meeting.byPerson[key]||{};
-    const bp=meeting.byPerson[key], roster=meetingRoster();
+    // WIFLS / Headlines listed alphabetically (team members first, then guests) — display only; answers are keyed by name, not position.
+    const bp=meeting.byPerson[key], roster=meetingRoster().slice().sort((a,b)=>((a.guest?1:0)-(b.guest?1:0)) || String(a.name||"").localeCompare(String(b.name||"")));
     const ph=key==="segue"?"What they feel like saying…":"Their customer / employee headline…";
     const rows=roster.length
       ? roster.map(p=>`<div class="wf-row"><span class="wf-name">${esc(p.name)}${p.guest?' <span class="wf-guest">guest</span>':''}</span>
