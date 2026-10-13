@@ -4957,7 +4957,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=197;
+const BUILD=198;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -10522,24 +10522,27 @@ function removeHeadlineImage(teamId, id, url){
 // One shared renderer for the Lists-tab Headlines sub-tab and the L10 Headlines segment.
 // container = element to fill; after any change we re-call renderFn so both surfaces stay live.
 function renderHeadlines(container, renderFn){
-  const canEd=canEditTeam(), tid=TEAM().id, list=teamHeadlines();
+  // ANYONE on the team can post a headline + photos (like raising an issue — good news comes from everyone).
+  // Deleting a headline or removing a photo stays with a team editor OR the person who posted it.
+  const canEd=canEditTeam(), me=myName(), tid=TEAM().id, list=teamHeadlines();
+  const mine=h=>!!me && sameName(h.owner,me);
   const card=h=>{
-    const imgs=(h.images||[]).map(im=>`<div class="hl-thumb"><img src="${esc(im.url)}" alt="${esc(im.name||"")}" data-hl-img="${esc(im.url)}">${canEd?`<button class="hl-img-x" data-hl-imgdel="${esc(im.url)}" title="Remove photo">✕</button>`:""}</div>`).join("");
+    const manage=canEd||mine(h);
+    const imgs=(h.images||[]).map(im=>`<div class="hl-thumb"><img src="${esc(im.url)}" alt="${esc(im.name||"")}" data-hl-img="${esc(im.url)}">${manage?`<button class="hl-img-x" data-hl-imgdel="${esc(im.url)}" title="Remove photo">✕</button>`:""}</div>`).join("");
     return `<div class="hl-card" data-id="${h.id}">
       <div class="hl-main">
         <div class="hl-body">${h.text?`<div class="hl-text">${nl2br(esc(h.text))}</div>`:'<div class="hl-text muted">(photo)</div>'}
           <div class="hl-sub">${h.owner?esc(h.owner):""}${h.owner&&h.date?" · ":""}${h.date?fmtShort(h.date):""}</div></div>
-        ${canEd?`<div class="hl-acts"><button class="hl-add-photo" data-hl-addimg="${h.id}">📷 Photo</button><button class="x" data-hl-del="${h.id}" title="Delete headline">✕</button><span class="img-status" data-hl-status="${h.id}"></span></div>`:""}
+        ${manage?`<div class="hl-acts"><button class="hl-add-photo" data-hl-addimg="${h.id}">📷 Photo</button><button class="x" data-hl-del="${h.id}" title="Delete headline">✕</button><span class="img-status" data-hl-status="${h.id}"></span></div>`:""}
       </div>
       ${imgs?`<div class="hl-thumbs">${imgs}</div>`:""}
     </div>`;
   };
   container.innerHTML=`
-    ${canEd?`<div class="hl-add"><input id="hl-input" placeholder="Share a headline — a customer win, a staff shout-out, good news…">
+    <div class="hl-add"><input id="hl-input" placeholder="Share a headline — a customer win, a staff shout-out, good news…">
       <button class="btn ghost" id="hl-photo" title="Attach a photo">📷</button><button class="btn" id="hl-add">Add</button>
-      <span class="img-status" id="hl-add-status"></span></div>`:""}
+      <span class="img-status" id="hl-add-status"></span></div>
     <div class="hl-list">${list.length?list.map(card).join(""):`<div class="empty"><span class="emoji">📣</span>No headlines yet. Celebrate customer wins and staff shout-outs here — add a photo of the moment.</div>`}</div>`;
-  if(!canEd){ wireHeadlineThumbs(container); return; }
   const inp=container.querySelector("#hl-input"), addBtn=container.querySelector("#hl-add"), photoBtn=container.querySelector("#hl-photo"), addStatus=container.querySelector("#hl-add-status");
   let pending=[];   // photos attached before the headline text is submitted
   const refreshAddStatus=()=>{ if(addStatus && !addStatus.classList.contains("busy") && !addStatus.classList.contains("err")) addStatus.textContent=pending.length?`${pending.length} photo${pending.length>1?"s":""} attached`:""; };
