@@ -852,6 +852,54 @@
   .min-issue{background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:14px}
   .min-row{margin-top:5px;font-size:13px;line-height:1.5}
   .min-row span{display:block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  /* ===== Headlines (shared list) ===== */
+  .hl-add{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .hl-add input{flex:1;min-width:180px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:11px;padding:11px 13px;font-size:14px}
+  .hl-add .btn.ghost{flex:0 0 auto;padding:10px 12px}
+  .hl-list{display:flex;flex-direction:column;gap:10px}
+  .hl-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:12px 13px}
+  .hl-main{display:flex;align-items:flex-start;gap:10px}
+  .hl-body{flex:1;min-width:0}
+  .hl-text{font-size:14.5px;line-height:1.5}
+  .hl-text.muted{color:var(--muted);font-style:italic}
+  .hl-sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .hl-acts{display:flex;align-items:center;gap:6px;flex-shrink:0}
+  .hl-add-photo{background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:5px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
+  .hl-add-photo:hover{border-color:var(--accent);color:var(--text)}
+  .hl-acts .x{background:none;border:none;color:var(--faint);font-size:15px;cursor:pointer;padding:2px 5px;line-height:1}
+  .hl-acts .x:hover{color:var(--red)}
+  .hl-thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .hl-thumb{position:relative}
+  .hl-thumb img{width:92px;height:92px;object-fit:cover;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block}
+  .hl-img-x{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(20,22,27,.85);color:#fff;font-size:11px;cursor:pointer;line-height:20px;padding:0}
+  .img-status{font-size:11.5px;color:var(--muted)}
+  .img-status.busy{color:var(--accent)}
+  .img-status.err{color:var(--red)}
+  .img-lightbox{display:none;position:fixed;inset:0;z-index:9999;background:rgba(10,11,14,.92);align-items:center;justify-content:center;padding:28px;cursor:zoom-out}
+  .img-lightbox img{max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+  /* Headlines inside the minutes */
+  .min-hl{margin-top:8px}
+  .min-hl-txt{font-size:14px;line-height:1.5}
+  .min-hl .min-by{color:var(--muted);font-size:12px}
+  .min-hl-imgs{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}
+  .min-hl-imgs img{width:84px;height:84px;object-fit:cover;border-radius:9px;border:1px solid var(--border);cursor:zoom-in}
+  /* ===== Minutes: draft/final badge + editor ===== */
+  .min-badge{display:inline-block;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:999px;vertical-align:middle;margin-left:6px}
+  .min-badge.final{background:rgba(70,160,90,.16);color:#3f9d57}
+  .min-badge.draft{background:rgba(224,150,40,.16);color:#d1860a}
+  .me-form{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+  .me-form>label{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-top:12px}
+  .me-in{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 11px;font-size:14px;width:100%}
+  .me-ta{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 11px;font-size:13.5px;line-height:1.5;width:100%;min-height:52px;resize:vertical}
+  .me-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .me-row .me-in{flex:1;min-width:140px}
+  .me-block{background:var(--bg);border-radius:11px;padding:10px;margin-bottom:9px;display:flex;flex-direction:column;gap:5px}
+  .me-del{background:none;border:none;color:var(--faint);font-size:15px;cursor:pointer;padding:2px 5px}
+  .me-del:hover{color:var(--red)}
+  .me-photos{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%}
+  .me-photo{position:relative}
+  .me-photo img{width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid var(--border)}
+  .me-img-x{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(20,22,27,.85);color:#fff;font-size:10px;cursor:pointer;line-height:18px;padding:0}
   /* Scorecard + Rocks snapshots inside the minutes view */
   .min-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .min-sc{border-collapse:collapse;font-size:11px;width:100%;min-width:640px}
@@ -1775,6 +1823,7 @@
       <div class="subtabs">
         <button class="active" data-list="issues">Issues (IDS)</button>
         <button data-list="todos">To-Dos</button>
+        <button data-list="headlines">Headlines</button>
       </div>
       <div class="row-add" id="listAddRow"></div>
       <div id="listsWrap"></div>
@@ -1891,6 +1940,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script>
   firebase.initializeApp({
     apiKey: "AIzaSyBQVBCFvTc4g8qlgJRDPrjlX1pweZmolCk",
@@ -4682,8 +4732,8 @@ function migrateTeam(t){
   if(!t.id) t.id=uid();
   if(!t.name) t.name="Team";
   if(!t.week1Start){ t.week1Start=firstMondayOfQuarter(); delete t.week1End; }
-  ["departments","members","measurables","rocks","nextRocks","issues","todos","meetings","planning","scorecardArchive","rockArchive","minutesCc"]
-    .forEach(k=>{ if(!Array.isArray(t[k])) t[k]=[]; });   // nextRocks = drafted Rocks for next quarter; minutesCc = extra L10 minute recipients
+  ["departments","members","measurables","rocks","nextRocks","issues","todos","headlines","meetings","planning","scorecardArchive","rockArchive","minutesCc"]
+    .forEach(k=>{ if(!Array.isArray(t[k])) t[k]=[]; });   // nextRocks = drafted Rocks for next quarter; headlines = shared good-news list (customer/employee wins, with photos); minutesCc = extra L10 minute recipients
   t.rocks.forEach(r=>{ if(!Array.isArray(r.questions)) r.questions=[]; });   // progress Q&A
   if(!Array.isArray(t.editors)) t.editors=[];   // names allowed to edit this team's boards (besides leadership)
   if(!t.autoIssued || typeof t.autoIssued!=="object" || Array.isArray(t.autoIssued)) t.autoIssued={};   // dedupe keys for auto-raised IDS issues (Scorecard/Rock off 2+ weeks)
@@ -4907,7 +4957,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=195;
+const BUILD=197;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -7775,6 +7825,7 @@ const ADMIN_EMAILS=["odellmike76@gmail.com"];
 const isOwnerAdmin=e=>{ e=(e||"").trim().toLowerCase(); return !!e && ADMIN_EMAILS.indexOf(e)>=0; };
 const isAdminEmail=e=>{ e=(e||"").trim().toLowerCase(); return isOwnerAdmin(e) || (data.admins||[]).some(a=>(a||"").trim().toLowerCase()===e); };
 function isAdmin(){ return isAdminEmail(myEmail()) || iHavePerm("admin"); }
+function canManagePeople(){ return isAdmin() || iHavePerm("people"); }   // add / place / onboard people without full admin (HR, Executive Directors)
 
 /* ===== Permissions =====
    Company-wide framework (V/TO, Accountability Chart, Tools, Proven Process) → LEADERSHIP only.
@@ -7816,7 +7867,7 @@ function canEditTeam(t){ t=t||TEAM(); if(isLeadership()) return true; const me=m
   return leadsFacilityOf(t,me) || sameName(t.leader,me) || (t.editors||[]).some(n=>sameName(n,me)); }
 const canEditOwn=name=>{ const me=myName(); return !!me && sameName(name,me); };
 function refreshAdminNav(){
-  const b=$("#navAdmin"); if(b) b.style.display=isAdmin()?"":"none";
+  const b=$("#navAdmin"); if(b) b.style.display=canManagePeople()?"":"none";
   const h=$("#navHealth"); if(h) h.style.display=canSeeHealth()?"":"none";
   const e=$("#navEvals"); if(e) e.style.display=canDoEvals()?"":"none";
   const p=$("#navPlanning"); if(p) p.style.display=canSeePlanning()?"":"none";
@@ -7900,7 +7951,7 @@ function openRename(kind, id){
 let admTeamFac="all"; try{ admTeamFac=localStorage.getItem("eostracker.admfac")||"all"; }catch(e){}
 function renderAdmin(){
   const wrap=$("#adminWrap");
-  if(!isAdmin()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🛡️</span>Admin only.</div>`; return; }
+  if(!canManagePeople()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🛡️</span>Admin only.</div>`; return; }
   const names=knownPeople();
   (data.people||[]).forEach(p=>{ if(p&&p.name && !names.some(n=>sameName(n,p.name))) names.push(p.name); });
   names.sort((a,b)=>a.localeCompare(b));
@@ -7940,7 +7991,7 @@ function renderAdmin(){
       assignments. Their password still works until you delete the account in the Firebase Console:
       <b>console.firebase.google.com → wh-operating-system → Authentication → Users → hover the row → ⋮ → Delete account</b>.
       Do that first if someone has left the company.</div></div>
-    <div class="sec-title">Teams &amp; meetings</div>
+    ${isAdmin()?`<div class="sec-title">Teams &amp; meetings</div>
     <div class="hint" style="margin:0 2px 8px">Each team runs its own L10 (Scorecard, Rocks, Issues, To-Dos). <b>New:</b> link each team to its seat on the Accountability Chart so the chart drives who's on it.</div>
     ${(()=>{ const facs=acFunctionSeats(); if(!facs.length) return "";
       const hasUnassigned=(data.teams||[]).some(t=>!facilityOfTeam(t));
@@ -7980,6 +8031,7 @@ function renderAdmin(){
          <button class="btn ghost wide" id="adm-revert-multi">↩ Revert to a single document</button>`
       : `<div class="hint" style="margin:0 2px 8px">Right now the whole workspace is <b>one shared document</b>. Before hundreds of people start building scorecards &amp; rocks, switch to <b>per-team storage</b> so teams can't collide and you never hit the single-document size limit. A restore point is saved first, and it's reversible.</div>
          <button class="btn wide" id="adm-enable-multi" style="background:var(--accent)">🧱 Enable per-team storage</button>`}
+    `:`<div class="hint" style="margin:0 2px 14px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px">You can <b>add &amp; place people</b> here. Team setup, storage and backups are managed by an owner-admin.</div>`}
 
     <div class="sec-title" style="margin-top:22px">People (${names.length})</div>
     <div class="hint" style="margin:0 2px 8px">New sign-ins land in the <b>⏳ Waiting room</b> at the top — open it and hit <b>Assign teams</b> to place each person (their self-reported role is shown to help). Everyone else is grouped by team.</div>
@@ -8236,7 +8288,7 @@ function accessSummaryHtml(name){
   </div>`;
 }
 function accessViewer(preName){
-  if(!isAdmin()) return;
+  if(!canManagePeople()) return;
   const names=knownPeople();
   if(!names.length){ openSheet(`<h2>Who can see what</h2><div class="hint">No people yet.</div><div class="sheet-actions"><button class="btn" id="av-close">Close</button></div>`); $("#av-close").onclick=closeSheet; return; }
   const opts=names.map(n=>`<option value="${esc(n)}" ${preName&&sameName(n,preName)?"selected":""}>${esc(n)}</option>`).join("");
@@ -8250,7 +8302,7 @@ function accessViewer(preName){
   $("#av-who").onchange=draw; draw();
 }
 function addMemberWizard(){
-  if(!canEditChart()) return;
+  if(!canManagePeople()) return;   // full admins + the "Add & onboard people" permission (HR / Exec Directors)
   const scoped=!canEditCompany();                       // pillar leader: only their own branch
   const inScope = scoped? seatsAtOrBelow(myName()) : null;
   const seats=((data.accountability||{}).seats||[]).slice()
@@ -9239,6 +9291,7 @@ const PERM_DEFS=[
   {key:"work",   label:"Edit Rocks &amp; Scorecards",  hint:"Full edit of Rocks, Scorecard, To-Dos &amp; Issues for their team and every team below them — not just items they own."},
   {key:"chart",  label:"Edit the org chart",           hint:"Add, edit, move &amp; remove seats and people at their seat and below."},
   {key:"evals",  label:"Run evaluations (LMA)",        hint:"Opens the Evaluations tab so they can complete LMA performance reviews for their people."},
+  {key:"people", label:"Add &amp; onboard people",      hint:"Opens a trimmed Admin tab to add team members, place new sign-ins from the Waiting room, assign teams &amp; seats, and view access — <b>without</b> full admin (no V/TO, chart, storage or backups). For HR &amp; Executive Directors."},
   {key:"viewAll",label:"See every team",               hint:"View all teams' boards and the company Health dashboard, not just their own branch."},
   {key:"admin",  label:"Full admin",                   hint:"Complete access to everything, including Setup &amp; Admin. App-wide — use sparingly."}
 ];
@@ -10384,10 +10437,134 @@ Success Metrics
 let listMode="issues";
 let expandedIssueNotes=new Set();   // which issues have their discussion/notes box open on the Lists tab
 let _liNoteTimer=null;   // debounce the issue-discussion-note merge write (fires on each keystroke)
+
+/* ======================= IMAGES (Firebase Storage) =======================
+   Headlines (and later IDS) can carry photos — a shout-out for a staff member, a viral post, etc.
+   We compress the picture in the browser (long edge ~1600px, JPEG) and upload the small result to
+   Storage, then store ONLY the download URL on the record. Nothing heavy ever touches Firestore.
+   Needs Storage turned on in the Firebase console (Build → Storage → Get started) with signed-in
+   rules. Everything degrades gracefully: headline TEXT works even when Storage is off. */
+function compressImage(file, maxDim, quality){
+  return new Promise((resolve,reject)=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{ try{
+        let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        const scale=Math.min(1, (maxDim||1600)/Math.max(w,h||1));
+        w=Math.max(1,Math.round(w*scale)); h=Math.max(1,Math.round(h*scale));
+        const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+        cv.getContext("2d").drawImage(img,0,0,w,h);
+        cv.toBlob(b=>{ URL.revokeObjectURL(url); b?resolve(b):reject(new Error("Could not process that image.")); }, "image/jpeg", quality||0.82);
+      }catch(e){ URL.revokeObjectURL(url); reject(e); } };
+    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error("That file isn't a readable image.")); };
+    img.src=url;
+  });
+}
+function storageReady(){ return !!(window.firebase && firebase.apps && firebase.apps.length && firebase.storage); }
+async function uploadImage(file){
+  if(!file) throw new Error("No file chosen.");
+  if(!/^image\//.test(file.type||"")) throw new Error("Please choose an image file (JPG, PNG, HEIC…).");
+  if(file.size>25*1024*1024) throw new Error("That image is over 25 MB — please pick a smaller one.");
+  if(!storageReady()) throw new Error("Photo storage isn't switched on yet. Ask an owner to enable Firebase Storage.");
+  let blob; try{ blob=await compressImage(file,1600,0.82); }catch(e){ blob=file; }   // fall back to the original if the canvas can't read it
+  const u=(firebase.auth().currentUser||{}), uidPart=(u.uid||"anon").slice(0,28);
+  const path="images/"+uidPart+"/"+Date.now()+"-"+Math.random().toString(36).slice(2,8)+".jpg";
+  const ref=firebase.storage().ref().child(path);
+  const snap=await ref.put(blob,{contentType:blob.type||"image/jpeg"});
+  const url=await snap.ref.getDownloadURL();
+  return { url, path, name:(file.name||"photo") };
+}
+// Open a file picker, upload, then call back with the image record. statusEl (optional) shows progress inline.
+function pickAndUpload(onDone, statusEl){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept="image/*";
+  inp.onchange=async()=>{ const f=inp.files&&inp.files[0]; if(!f) return;
+    if(statusEl){ statusEl.textContent="Uploading…"; statusEl.className="img-status busy"; }
+    try{ const img=await uploadImage(f); if(statusEl){ statusEl.textContent=""; statusEl.className="img-status"; } onDone(img); }
+    catch(e){ const msg=(e&&e.message)||"Upload failed."; if(statusEl){ statusEl.textContent=msg; statusEl.className="img-status err"; } else alert(msg); } };
+  inp.click();
+}
+// Lightbox — tap any thumbnail to see it full-size.
+function showImageLightbox(url){
+  let ov=$("#imgLightbox");
+  if(!ov){ ov=document.createElement("div"); ov.id="imgLightbox"; ov.className="img-lightbox";
+    ov.onclick=()=>{ ov.style.display="none"; ov.innerHTML=""; }; document.body.appendChild(ov); }
+  ov.innerHTML=`<img src="${esc(url)}" alt="">`; ov.style.display="flex";
+}
+
+/* ======================= HEADLINES (shared team list) =======================
+   Customer & employee headlines — the good news a team shares, kept as a persistent list so it can
+   be added from the Lists tab AND reviewed in the L10, each with optional photos. All mutations MERGE
+   the specific delta onto the latest team copy (never a blind save a sync could revert), matching the
+   issues/to-dos ownership pattern. */
+function teamHeadlines(t){ t=t||TEAM(); return (t&&t.headlines)||[]; }
+function addHeadline(teamId, text, images){
+  const txt=(text||"").trim(); const imgs=(images||[]).filter(Boolean);
+  if(!txt && !imgs.length) return null;
+  const h={ id:uid(), text:txt, owner:myName()||"", date:todayIso(), images:imgs };
+  const tt=(data.teams||[]).find(x=>x&&x.id===teamId); if(tt){ tt.headlines=tt.headlines||[]; tt.headlines.unshift(h); }
+  mergeTeam(teamId, t=>{ t.headlines=t.headlines||[]; if(!t.headlines.some(x=>x&&x.id===h.id)) t.headlines.unshift(h); });
+  return h;
+}
+function deleteHeadline(teamId, id){
+  const tt=(data.teams||[]).find(x=>x&&x.id===teamId); if(tt) tt.headlines=(tt.headlines||[]).filter(x=>x&&x.id!==id);
+  mergeTeam(teamId, t=>{ t.headlines=(t.headlines||[]).filter(x=>x&&x.id!==id); });
+}
+function addHeadlineImage(teamId, id, img){
+  if(!img) return;
+  const apply=t=>{ const h=(t.headlines||[]).find(x=>x&&x.id===id); if(h){ h.images=h.images||[]; h.images.push(img); } };
+  const tt=(data.teams||[]).find(x=>x&&x.id===teamId); if(tt) apply(tt);
+  mergeTeam(teamId, apply);
+}
+function removeHeadlineImage(teamId, id, url){
+  const apply=t=>{ const h=(t.headlines||[]).find(x=>x&&x.id===id); if(h&&h.images) h.images=h.images.filter(im=>im&&im.url!==url); };
+  const tt=(data.teams||[]).find(x=>x&&x.id===teamId); if(tt) apply(tt);
+  mergeTeam(teamId, apply);
+}
+// One shared renderer for the Lists-tab Headlines sub-tab and the L10 Headlines segment.
+// container = element to fill; after any change we re-call renderFn so both surfaces stay live.
+function renderHeadlines(container, renderFn){
+  const canEd=canEditTeam(), tid=TEAM().id, list=teamHeadlines();
+  const card=h=>{
+    const imgs=(h.images||[]).map(im=>`<div class="hl-thumb"><img src="${esc(im.url)}" alt="${esc(im.name||"")}" data-hl-img="${esc(im.url)}">${canEd?`<button class="hl-img-x" data-hl-imgdel="${esc(im.url)}" title="Remove photo">✕</button>`:""}</div>`).join("");
+    return `<div class="hl-card" data-id="${h.id}">
+      <div class="hl-main">
+        <div class="hl-body">${h.text?`<div class="hl-text">${nl2br(esc(h.text))}</div>`:'<div class="hl-text muted">(photo)</div>'}
+          <div class="hl-sub">${h.owner?esc(h.owner):""}${h.owner&&h.date?" · ":""}${h.date?fmtShort(h.date):""}</div></div>
+        ${canEd?`<div class="hl-acts"><button class="hl-add-photo" data-hl-addimg="${h.id}">📷 Photo</button><button class="x" data-hl-del="${h.id}" title="Delete headline">✕</button><span class="img-status" data-hl-status="${h.id}"></span></div>`:""}
+      </div>
+      ${imgs?`<div class="hl-thumbs">${imgs}</div>`:""}
+    </div>`;
+  };
+  container.innerHTML=`
+    ${canEd?`<div class="hl-add"><input id="hl-input" placeholder="Share a headline — a customer win, a staff shout-out, good news…">
+      <button class="btn ghost" id="hl-photo" title="Attach a photo">📷</button><button class="btn" id="hl-add">Add</button>
+      <span class="img-status" id="hl-add-status"></span></div>`:""}
+    <div class="hl-list">${list.length?list.map(card).join(""):`<div class="empty"><span class="emoji">📣</span>No headlines yet. Celebrate customer wins and staff shout-outs here — add a photo of the moment.</div>`}</div>`;
+  if(!canEd){ wireHeadlineThumbs(container); return; }
+  const inp=container.querySelector("#hl-input"), addBtn=container.querySelector("#hl-add"), photoBtn=container.querySelector("#hl-photo"), addStatus=container.querySelector("#hl-add-status");
+  let pending=[];   // photos attached before the headline text is submitted
+  const refreshAddStatus=()=>{ if(addStatus && !addStatus.classList.contains("busy") && !addStatus.classList.contains("err")) addStatus.textContent=pending.length?`${pending.length} photo${pending.length>1?"s":""} attached`:""; };
+  const submit=()=>{ const v=(inp&&inp.value||"").trim(); if(!v && !pending.length) return; addHeadline(tid, v, pending); pending=[]; if(inp) inp.value=""; renderFn(); };
+  if(addBtn) addBtn.onclick=submit;
+  if(inp) inp.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } };
+  if(photoBtn) photoBtn.onclick=()=>pickAndUpload(img=>{ pending.push(img); refreshAddStatus(); }, addStatus);
+  container.querySelectorAll("[data-hl-del]").forEach(b=>b.onclick=()=>{ const h=list.find(x=>x.id===b.dataset.hlDel); if(!confirm(`Delete this headline?${h&&h.text?`\n\n"${h.text}"`:""}`)) return; deleteHeadline(tid,b.dataset.hlDel); renderFn(); });
+  container.querySelectorAll("[data-hl-addimg]").forEach(b=>{ const id=b.dataset.hlAddimg, st=container.querySelector(`[data-hl-status="${id}"]`);
+    b.onclick=()=>pickAndUpload(img=>{ addHeadlineImage(tid,id,img); renderFn(); }, st); });
+  container.querySelectorAll("[data-hl-imgdel]").forEach(b=>b.onclick=()=>{ const card=b.closest(".hl-card"); if(card) removeHeadlineImage(tid, card.dataset.id, b.dataset.hlImgdel); renderFn(); });
+  wireHeadlineThumbs(container);
+}
+function wireHeadlineThumbs(container){ container.querySelectorAll("[data-hl-img]").forEach(im=>im.onclick=()=>showImageLightbox(im.dataset.hlImg)); }
+
 function renderLists(){
   const addRow=$("#listAddRow"), wrap=$("#listsWrap");
   if(noTeamAccess()){ if(addRow) addRow.style.display="none"; wrap.innerHTML=NO_TEAM_HTML; return; }
   const canEd=canEditTeam();   // team editors manage the lists; members can tick their own to-do
+  if(listMode==="headlines"){
+    addRow.innerHTML=""; addRow.style.display="none";
+    renderHeadlines(wrap, renderLists);
+    return;
+  }
+  addRow.style.display="";
   if(listMode==="issues"){
     // ANYONE on the team can RAISE an issue (EOS: issues come from everyone) — it's stamped with who
     // raised it. Solving / deleting / dropping-to-a-to-do still stays with team editors below.
@@ -10439,7 +10616,7 @@ function renderLists(){
         if(act==="drop"){ const nt={id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); it.solved=true; _touchedIssues.add(id); _touchedTodos.add(nt.id); mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[nt]); const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=true; }); }
       }else{
         const it=TEAM().todos.find(x=>x.id===id); if(!it) return;
-        if(act==="toggle"){ if(!canEd && !canEditOwn(it.owner)) return; it.done=!it.done; const d=it.done; _touchedTodos.add(id); mergeTeam(tid, t=>{ const x=(t.todos||[]).find(y=>y&&y.id===id); if(x) x.done=d; }); }   // tick your own
+        if(act==="toggle"){ if(!canEd && !canEditOwn(it.owner)) return; it.done=!it.done; it.doneAt=it.done?new Date().toISOString():""; const d=it.done, da=it.doneAt; _touchedTodos.add(id); mergeTeam(tid, t=>{ const x=(t.todos||[]).find(y=>y&&y.id===id); if(x){ x.done=d; x.doneAt=da; } }); }   // tick your own — stamp doneAt so the L10's "recently done" review still shows it as ✓ Done
         if(act==="del"){ if(!canEd) return; if(!confirm(`Delete this to-do?\n\n"${(it&&it.text)||""}"`)) return; TEAM().todos=TEAM().todos.filter(x=>x.id!==id); _deletedTodos.add(id); mergeTeam(tid, t=>{ t.todos=(t.todos||[]).filter(y=>y&&y.id!==id); }); }
       }
       renderLists();
@@ -10635,7 +10812,12 @@ function minutesText(m){
   if(n.scorecard) L.push(`\nSCORECARD NOTES\n${n.scorecard}`);
   scorecardSnapTextLines(m.scorecardSnap).forEach(x=>L.push(x));   // the numbers reviewed this meeting
   rocksSnapTextLines(m.rocksSnap).forEach(x=>L.push(x));           // Rock status reviewed this meeting
-  personSec("headlines","HEADLINES");
+  personSec("headlines","HEADLINES");   // legacy per-person headlines (older meetings)
+  if((m.headlinesSnap||[]).length){
+    L.push(`\nHEADLINES`);
+    m.headlinesSnap.forEach(h=>{ const ph=(h.images||[]).length?`  [${h.images.length} photo${h.images.length>1?"s":""}]`:"";
+      L.push(`  • ${String(h.text||"(photo)").trim()}${h.owner?` — ${h.owner}`:""}${ph}`); });
+  }
   if((m.issues||[]).length){
     L.push(`\nISSUES SOLVED (IDS)`);
     m.issues.forEach((is,i)=>{ const d=is.ids||{};
@@ -10729,18 +10911,22 @@ function minutesInnerHtml(m){
   const reviewed=(m.reviewedTodos||[]).map(t=>`<li>${t.done?"✓":"○"} <span class="${t.done?"tdl-txt done":""}">${esc(t.text)}</span> — <b>${esc(t.owner||"unassigned")}</b>${t.due?` · due ${fmtShort(t.due)}`:""}</li>`).join("");
   const reviewedHdr=(m.reviewedTodos||[]).length?`Last Week's To-Dos <small style="font-weight:600;color:var(--muted)">· ${m.reviewedTodos.filter(t=>t.done).length} done, ${m.reviewedTodos.filter(t=>!t.done).length} not done</small>`:"";
   const rl=(m.ratingList||[]).map(r=>`<div class="rate-row"><div>${esc(r.name)}</div><b>${esc(String(r.score))}/10</b></div>`).join("");
+  const hlSnap=(m.headlinesSnap||[]).map(h=>`<div class="min-hl">
+      <div class="min-hl-txt">${h.text?nl2br(esc(h.text)):'<span class="muted">(photo)</span>'}${h.owner?` <span class="min-by">— ${esc(h.owner)}</span>`:""}</div>
+      ${(h.images||[]).length?`<div class="min-hl-imgs">${h.images.map(im=>`<img src="${esc(im.url)}" alt="${esc(im.name||"")}" data-hl-img="${esc(im.url)}">`).join("")}</div>`:""}
+    </div>`).join("");
   return `${blufHtml(m.summary)}
     ${sec("WIFLS", pBlock("segue")+(n.segue?`<p>${nl2br(n.segue)}</p>`:""))}
     ${sec("Scorecard", n.scorecard?`<p>${nl2br(n.scorecard)}</p>`:"")}
     ${sec(m.scorecardSnap?`Scorecard — ${esc(m.scorecardSnap.quarter)}`:"", scorecardSnapHtml(m.scorecardSnap))}
     ${sec(m.rocksSnap?`Rocks — ${esc(m.rocksSnap.quarter)}${m.rocksSnap.n?` · ${m.rocksSnap.done}/${m.rocksSnap.n} done`:""}`:"", rocksSnapHtml(m.rocksSnap))}
-    ${sec("Headlines", pBlock("headlines")+(n.headlines?`<p>${nl2br(n.headlines)}</p>`:""))}
+    ${sec("Headlines", pBlock("headlines")+(n.headlines?`<p>${nl2br(n.headlines)}</p>`:"")+hlSnap)}
     ${sec("Issues Solved (IDS)", issues)}
     ${sec(reviewedHdr, reviewed?`<ul class="min-list">${reviewed}</ul>`:"")}
     ${sec("New To-Dos", todos?`<ul class="min-list">${todos}</ul>`:"")}
     ${sec("Cascading Messages", n.cascade?`<p>${nl2br(n.cascade)}</p>`:"")}
     ${sec("Ratings", rl)}
-    ${(!n.segue&&!n.scorecard&&!n.headlines&&!issues&&!todos&&!reviewed&&!n.cascade&&!rl)?'<div class="hint">This meeting was finished without any notes recorded.</div>':""}`;
+    ${(!n.segue&&!n.scorecard&&!n.headlines&&!hlSnap&&!issues&&!todos&&!reviewed&&!n.cascade&&!rl)?'<div class="hint">This meeting was finished without any notes recorded.</div>':""}`;
 }
 // Render the minutes into the print layer and open the browser's print dialog — the user picks
 // "Save as PDF" (or a printer). Same offline, no-library path as the V/TO packet.
@@ -10759,29 +10945,106 @@ function printMinutes(m){
   window.addEventListener("afterprint",cleanup);
   setTimeout(()=>{ window.print(); setTimeout(cleanup,1500); }, 30);   // fallback if afterprint never fires
 }
+// A meeting is "final" unless explicitly flagged draft — so older records (no flag) always read as final.
+function meetingIsFinal(m){ return !m || m.finalized!==false; }
+function setMinutesFinal(id, val){
+  const apply=t=>{ const mm=(t.meetings||[]).find(x=>x&&x.id===id); if(mm) mm.finalized=val; };
+  apply(TEAM()); mergeTeam(TEAM().id, apply);
+}
 function showMinutes(id){
   const m=(TEAM().meetings||[]).find(x=>x.id===id); if(!m) return;
-  const n=m.notes||{};
+  const canEd=canEditTeam(), fin=meetingIsFinal(m);
   openSheet(`
-    <h2>L10 Minutes</h2>
+    <h2>L10 Minutes ${fin?'<span class="min-badge final">Final</span>':'<span class="min-badge draft">Draft — editable</span>'}</h2>
     <div class="min-head">${fmtLong(m.date)} · ${m.durationMin} min · ${esc(m.team||TEAM().name)}${m.avg?` · Avg ${m.avg}/10`:""}</div>
     ${minutesInnerHtml(m)}
     <div class="sheet-actions">
-      <button class="btn danger" id="min-del">Delete</button>
+      ${canEd?`<button class="btn danger" id="min-del">Delete</button>`:""}
+      ${canEd?`<button class="btn ghost" id="min-edit">✎ Edit</button>`:""}
+      ${canEd?(fin?`<button class="btn ghost" id="min-reopen">↺ Reopen</button>`:`<button class="btn" id="min-final">✓ Mark complete</button>`):""}
       <button class="btn ghost" id="min-pdf">⬇ PDF</button>
       <button class="btn ghost" id="min-copy">Copy</button>
     </div>`);
+  $("#sheet").querySelectorAll("[data-hl-img]").forEach(im=>im.onclick=()=>showImageLightbox(im.dataset.hlImg));
   { const b=$("#min-pdf"); if(b) b.onclick=()=>printMinutes(m); }
+  { const b=$("#min-edit"); if(b) b.onclick=()=>editMinutes(id); }
+  { const b=$("#min-final"); if(b) b.onclick=()=>{ setMinutesFinal(id,true); showMinutes(id); renderArchive(); }; }
+  { const b=$("#min-reopen"); if(b) b.onclick=()=>{ setMinutesFinal(id,false); showMinutes(id); renderArchive(); }; }
   $("#min-copy").onclick=()=>{
     const txt=minutesText(m);
     const done=()=>{ const b=$("#min-copy"); if(b){ b.textContent="Copied ✓"; setTimeout(()=>{ if($("#min-copy")) $("#min-copy").textContent="Copy"; },1500); } };
     if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(()=>alert(txt)); }
     else alert(txt);
   };
-  $("#min-del").onclick=()=>{
+  { const b=$("#min-del"); if(b) b.onclick=()=>{
     if(!confirm("Delete these minutes permanently?\n\nThe to-dos and issues themselves aren't affected — only this meeting record.")) return;
-    TEAM().meetings=(TEAM().meetings||[]).filter(x=>x.id!==id);
-    save(); closeSheet(); renderArchive();
+    const apply=t=>{ t.meetings=(t.meetings||[]).filter(x=>x&&x.id!==id); };
+    apply(TEAM()); mergeTeam(TEAM().id, apply); closeSheet(); renderArchive();
+  }; }
+}
+// ===== Edit archived minutes =====
+// All edits happen on a deep CLONE (_meDraft) so photo add/remove can re-render the form without
+// losing unsaved text, and Cancel simply discards the clone. Save merges the clone's narrative
+// fields back onto the stored record (team-doc merge — never touches the live-meeting path).
+let _meDraft=null, _meId=null;
+function editMinutes(id){
+  if(!canEditTeam()) return;
+  const m=(TEAM().meetings||[]).find(x=>x.id===id); if(!m) return;
+  _meId=id; _meDraft=JSON.parse(JSON.stringify(m)); _meDraft.notes=_meDraft.notes||{};
+  renderMinutesEditor();
+}
+function renderMinutesEditor(){
+  const d=_meDraft, id=_meId; if(!d) return;
+  const n=d.notes||{};
+  const hls=(d.headlinesSnap||[]).map((h,i)=>`<div class="me-row" data-hi="${i}">
+      <input class="me-in me-hl-text" data-hi="${i}" value="${esc(h.text||"")}" placeholder="Headline…">
+      <div class="me-photos">${(h.images||[]).map(im=>`<span class="me-photo"><img src="${esc(im.url)}" alt=""><button class="me-img-x" data-rmimg="${i}" data-url="${esc(im.url)}" title="Remove photo">✕</button></span>`).join("")}
+        <button class="btn ghost sm" data-addimg="${i}">📷 Add</button><span class="img-status" data-hlstat="${i}"></span></div>
+      <button class="me-del" data-delhl="${i}" title="Remove headline">✕</button></div>`).join("");
+  const iss=(d.issues||[]).map((is,i)=>{ const o=is.ids||{};
+    return `<div class="me-block" data-ii="${i}"><input class="me-in me-iss-text" data-ii="${i}" value="${esc(is.text||"")}" placeholder="Issue…">
+      <textarea class="me-ta me-iss-f" data-ii="${i}" data-f="what" placeholder="What's the issue?">${esc(o.what||"")}</textarea>
+      <textarea class="me-ta me-iss-f" data-ii="${i}" data-f="clarify" placeholder="Clarifying">${esc(o.clarify||"")}</textarea>
+      <textarea class="me-ta me-iss-f" data-ii="${i}" data-f="discuss" placeholder="Discussion">${esc(o.discuss||"")}</textarea>
+      <textarea class="me-ta me-iss-f" data-ii="${i}" data-f="solve" placeholder="Solve / decision">${esc(o.solve||"")}</textarea></div>`; }).join("");
+  const tds=(d.todos||[]).map((t,i)=>`<div class="me-row" data-ti="${i}">
+      <input class="me-in me-td-text" data-ti="${i}" value="${esc(t.text||"")}" placeholder="To-do…">
+      <input class="me-in me-td-owner" data-ti="${i}" value="${esc(t.owner||"")}" placeholder="Owner" style="max-width:130px">
+      <input class="me-in me-td-due" data-ti="${i}" type="date" value="${esc(t.due||"")}" style="max-width:150px"></div>`).join("");
+  openSheet(`
+    <h2>Edit minutes</h2>
+    <div class="min-head">${fmtLong(d.date)} · ${esc(d.team||TEAM().name)}</div>
+    <div class="me-form">
+      <label>WIFLS notes</label><textarea class="me-ta" id="me-segue" placeholder="Any shared notes…">${esc(n.segue||"")}</textarea>
+      <label>Scorecard notes</label><textarea class="me-ta" id="me-scorecard">${esc(n.scorecard||"")}</textarea>
+      <label>Headlines</label><div id="me-hls">${hls||'<div class="hint">No headlines recorded.</div>'}</div>
+      <label>Issues solved (IDS)</label><div id="me-isss">${iss||'<div class="hint">No issues recorded.</div>'}</div>
+      <label>New to-dos</label><div id="me-tds">${tds||'<div class="hint">No to-dos recorded.</div>'}</div>
+      <label>Cascading messages</label><textarea class="me-ta" id="me-cascade">${esc(n.cascade||"")}</textarea>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn ghost" id="me-cancel">Cancel</button>
+      <button class="btn" id="me-save">Save changes</button>
+    </div>`);
+  // Live-bind every field straight into the draft so a re-render (e.g. after a photo change) keeps edits.
+  const bindN=(sel,key)=>{ const el=$(sel); if(el) el.oninput=()=>{ d.notes=d.notes||{}; d.notes[key]=el.value; }; };
+  bindN("#me-segue","segue"); bindN("#me-scorecard","scorecard"); bindN("#me-cascade","cascade");
+  $("#sheet").querySelectorAll(".me-hl-text").forEach(el=>el.oninput=()=>{ d.headlinesSnap[+el.dataset.hi].text=el.value; });
+  $("#sheet").querySelectorAll(".me-iss-text").forEach(el=>el.oninput=()=>{ d.issues[+el.dataset.ii].text=el.value; });
+  $("#sheet").querySelectorAll(".me-iss-f").forEach(el=>el.oninput=()=>{ const is=d.issues[+el.dataset.ii]; is.ids=is.ids||{}; is.ids[el.dataset.f]=el.value; });
+  $("#sheet").querySelectorAll(".me-td-text").forEach(el=>el.oninput=()=>{ d.todos[+el.dataset.ti].text=el.value; });
+  $("#sheet").querySelectorAll(".me-td-owner").forEach(el=>el.oninput=()=>{ d.todos[+el.dataset.ti].owner=el.value; });
+  $("#sheet").querySelectorAll(".me-td-due").forEach(el=>el.oninput=()=>{ d.todos[+el.dataset.ti].due=el.value; });
+  $("#sheet").querySelectorAll("[data-delhl]").forEach(b=>b.onclick=()=>{ d.headlinesSnap.splice(+b.dataset.delhl,1); renderMinutesEditor(); });
+  $("#sheet").querySelectorAll("[data-rmimg]").forEach(b=>b.onclick=()=>{ const h=d.headlinesSnap[+b.dataset.rmimg]; if(h&&h.images) h.images=h.images.filter(im=>im&&im.url!==b.dataset.url); renderMinutesEditor(); });
+  $("#sheet").querySelectorAll("[data-addimg]").forEach(b=>{ const i=+b.dataset.addimg, st=$("#sheet").querySelector(`[data-hlstat="${i}"]`);
+    b.onclick=()=>pickAndUpload(img=>{ const h=d.headlinesSnap[i]; if(h){ h.images=h.images||[]; h.images.push(img); } renderMinutesEditor(); }, st); });
+  $("#me-cancel").onclick=()=>{ _meDraft=null; _meId=null; showMinutes(id); };
+  $("#me-save").onclick=()=>{
+    const patch=JSON.parse(JSON.stringify({ notes:d.notes||{}, headlinesSnap:d.headlinesSnap||[], issues:d.issues||[], todos:d.todos||[] }));
+    const apply=t=>{ const mm=(t.meetings||[]).find(x=>x&&x.id===id); if(mm){ mm.notes=patch.notes; mm.headlinesSnap=patch.headlinesSnap; mm.issues=patch.issues; mm.todos=patch.todos; } };
+    apply(TEAM()); mergeTeam(TEAM().id, apply);
+    _meDraft=null; _meId=null; showMinutes(id); renderArchive();
   };
 }
 function renderL10(){
@@ -11009,8 +11272,15 @@ function renderSegContent(i){
       $("#rateAvg").textContent="Average: "+(vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):"—"); };
     c.querySelectorAll("[data-rate]").forEach(i2=>i2.oninput=()=>{ meeting.ratings[i2.dataset.rate]=i2.value; _touchedRate.add(i2.dataset.rate); recompute(); saveL10(); });
     recompute();
+  }else if(seg.key==="headlines"){
+    // Headlines are a shared team list (persisted to the team doc), reviewed here and also editable
+    // from the Lists tab. Add customer wins / staff shout-outs, each with optional photos.
+    c.innerHTML=`<div class="seg-panel"><h4>${seg.name}</h4>
+      <p class="seg-sub">Customer &amp; employee headlines — the good news to share. Attach a photo to celebrate the moment.</p>
+      <div id="hl-seg"></div></div>`;
+    renderHeadlines(c.querySelector("#hl-seg"), ()=>renderSegContent(i));
   }else{
-    // WIFLS & Headlines: ONE BOX PER PERSON — team members come from the chart, plus any guests you add
+    // WIFLS: ONE BOX PER PERSON — team members come from the chart, plus any guests you add
     // for this meeting (a colleague who isn't on the team but is attending today).
     const key=seg.key;
     meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[key]=meeting.byPerson[key]||{};
@@ -11343,6 +11613,7 @@ function concludeMeeting(auto){
     ratings:{...meeting.ratings}, ratingList,
     notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
     issues:(meeting.solvedIssues||[]), team:t.name, summary:meetingSummary(t),
+    headlinesSnap:JSON.parse(JSON.stringify(teamHeadlines(t))),   // freeze the headlines shared this meeting (text + photos)
     scorecardSnap:meetingScorecardSnap(t), rocksSnap:meetingRocksSnap(t)};   // freeze the numbers + Rock status reviewed today
   t.meetings.push(rec);
   t.liveMeeting=null;
@@ -12592,7 +12863,7 @@ function refreshHeader(){ /* team name in sub of scorecard */ }
 let currentView="scorecard";
 function switchView(v){
   if(v!=="vision") acDraftMode=false;              // draft chart is confined to the chart view — exit it on navigate-away
-  if(v==="admin" && !isAdmin()) v="setup";        // never route a non-admin here, even via a stale link
+  if(v==="admin" && !canManagePeople()) v="setup";   // the onboarding permission opens a TRIMMED Admin tab; full admins see everything
   if(v==="health" && !canSeeHealth()) v="vision"; // same for the leadership dashboard
   if(v==="evals" && !canDoEvals()) v="board";     // only supervisors + HR/admins reach evaluations
   if(v==="planning" && !canSeePlanning()) v="vision"; // planning is Visionary/Integrator/Facility-Leader only
@@ -12607,7 +12878,7 @@ function switchView(v){
   $("#viewSub").textContent=(v==="vision")?"Company-wide · V/TO & Accountability"
                           :(v==="tools")?"Company-wide · how we run Warriors Heart"
                           :(v==="proven")?"Company-wide · 1 Million Warriors Home"
-                          :(v==="admin")?"Owner only · people & access"
+                          :(v==="admin")?(isAdmin()?"Owner only · people, teams & access":"Onboarding · add & place people")
                           :(v==="health")?"Leadership only · every team"
                           :(v==="evals")?"Confidential · your direct reports"
                           :(v==="people")?"Core Values & GWC · "+qLabel(paQuarter||curQuarter())
