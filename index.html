@@ -874,6 +874,13 @@
   .hl-img-x{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(20,22,27,.85);color:#fff;font-size:11px;cursor:pointer;line-height:20px;padding:0}
   .hl-thumb-broken{width:92px;height:92px;border-radius:10px;border:1px dashed var(--border);background:var(--bg);color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:11px;text-align:center}
   .seg-nav-bottom{display:flex;gap:8px;margin:4px 0 14px}
+  /* Conclude: closing WIFLS + that person's rating on one row */
+  .wr-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed var(--border)}
+  .wr-row:first-child{border-top:none}
+  .wr-name{flex:0 0 118px;font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wr-wifls{flex:1;min-width:0}
+  .wr-rate{flex:0 0 auto}
+  @media (max-width:560px){ .wr-row{flex-wrap:wrap} .wr-name{flex:0 0 100%} .wr-wifls{flex:1 1 auto} }
   .img-status{font-size:11.5px;color:var(--muted)}
   .img-status.busy{color:var(--accent)}
   .img-status.err{color:var(--red)}
@@ -4960,7 +4967,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=200;
+const BUILD=202;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -10888,6 +10895,16 @@ function scorecardSnapTextLines(sc){
   });
   return L;
 }
+function salesSnapTextLines(snap){
+  if(!snap||!(snap.sections||[]).length) return [];
+  const L=[`\nSALES CARD — ${salesWeekLabel(snap.weekStart)}`];
+  (snap.sections||[]).forEach(sec=>{ const cols=sec.columns||[], rows=sec.rows||[];
+    L.push(`  ${sec.name||""}:  ${cols.map(c=>c.name).join("  |  ")}`);
+    rows.forEach(r=>{ const vals=cols.map(c=>(((sec.values||{})[r.id]||{})[c.id])||"—"); L.push(`    ${r.name}: ${vals.join("  |  ")}`); });
+    L.push(`    TOTALS: ${cols.map(c=>salesColTotal(sec,c.id)).join("  |  ")}`);
+  });
+  return L;
+}
 function rocksSnapTextLines(rk){
   if(!rk||!rk.rows||!rk.rows.length) return [];
   const L=[`\nROCKS — ${rk.quarter}${rk.n?` · ${rk.done}/${rk.n} done (${rk.pct}%)`:""}`];
@@ -10925,6 +10942,7 @@ function minutesText(m){
   personSec("segue","WIFLS");
   if(n.scorecard) L.push(`\nSCORECARD NOTES\n${n.scorecard}`);
   scorecardSnapTextLines(m.scorecardSnap).forEach(x=>L.push(x));   // the numbers reviewed this meeting
+  salesSnapTextLines(m.salesSnap).forEach(x=>L.push(x));           // Sales Card grid reviewed this meeting (Admissions)
   rocksSnapTextLines(m.rocksSnap).forEach(x=>L.push(x));           // Rock status reviewed this meeting
   personSec("headlines","HEADLINES");   // legacy per-person headlines (older meetings)
   if((m.headlinesSnap||[]).length){
@@ -11034,6 +11052,7 @@ function minutesInnerHtml(m){
     ${sec("WIFLS", pBlock("segue")+(n.segue?`<p>${nl2br(n.segue)}</p>`:""))}
     ${sec("Scorecard", n.scorecard?`<p>${nl2br(n.scorecard)}</p>`:"")}
     ${sec(m.scorecardSnap?`Scorecard — ${esc(m.scorecardSnap.quarter)}`:"", scorecardSnapHtml(m.scorecardSnap))}
+    ${sec(m.salesSnap?`Sales Card — ${esc(salesWeekLabel(m.salesSnap.weekStart))}`:"", m.salesSnap?salesReadonlyHtml(m.salesSnap):"")}
     ${sec(m.rocksSnap?`Rocks — ${esc(m.rocksSnap.quarter)}${m.rocksSnap.n?` · ${m.rocksSnap.done}/${m.rocksSnap.n} done`:""}`:"", rocksSnapHtml(m.rocksSnap))}
     ${sec("Headlines", pBlock("headlines")+(n.headlines?`<p>${nl2br(n.headlines)}</p>`:"")+hlSnap)}
     ${sec("Issues Solved (IDS)", issues)}
@@ -11371,9 +11390,6 @@ function renderSegContent(i){
     }
   }else if(seg.key==="conclude"){
     const members=meetingRoster().length?meetingRoster():[{id:"me",name:"Me"}];
-    const rows=members.map(m=>`<div class="rate-row"><div>${esc(m.name)}${m.guest?' <span class="wf-guest">guest</span>':''}</div>
-      <div class="rate-cell"><input class="rate-input" type="number" min="1" max="10" inputmode="numeric" data-rate="${m.id}" value="${meeting.ratings[m.id]||""}" placeholder="1-10">
-        ${m.guest?`<button class="wf-del" data-guest-del="${esc(m.id)}" title="Remove this guest">✕</button>`:""}</div></div>`).join("");
     const meetingTodos=(meeting.createdTodos||[]).map(id=>TEAM().todos.find(t=>t.id===id)).filter(Boolean);
     const dataList=`<datalist id="member-names">${ownerOptionsHtml()}</datalist>`;
     const recap=meetingTodos.length?meetingTodos.map(t=>`<div class="recap-todo">
@@ -11381,11 +11397,14 @@ function renderSegContent(i){
         <div class="recap-meta">Due ${fmtShort(t.due)}${t.fromIssueText?" · ↳ from: "+esc(t.fromIssueText):""}</div>
         <div class="recap-owner"><label>Who owns it?</label><input list="member-names" data-todo-owner="${t.id}" value="${esc(t.owner||"")}" placeholder="Assign a person"></div>
       </div>`).join(""):'<div class="hint">No new to-dos were created this meeting.</div>';
-    // Closing WIFLS — "What I Feel Like Saying" check-out round, one box per person (keyed by name), captured
-    // right alongside the rating so the meeting ends on a human note.
+    // Closing WIFLS — "What I Feel Like Saying" check-out round, one box per person (keyed by name), with that
+    // person's 1–10 meeting rating on the SAME row, to the right, so each person's close + score read together.
     const closeWifls=(meeting.byPerson||{}).wifls_close||{};
-    const wiflsRows=members.map(m=>`<div class="wf-row"><span class="wf-name">${esc(m.name)}${m.guest?' <span class="wf-guest">guest</span>':''}</span>
-        <input class="wf-in" data-wfc="${esc(m.name)}" data-lock="by:wifls_close:${esc(m.name)}" placeholder="What I feel like saying…" value="${esc(closeWifls[m.name]||"")}"></div>`).join("");
+    const combinedRows=members.map(m=>`<div class="wr-row">
+        <span class="wr-name">${esc(m.name)}${m.guest?' <span class="wf-guest">guest</span>':''}</span>
+        <input class="wf-in wr-wifls" data-wfc="${esc(m.name)}" data-lock="by:wifls_close:${esc(m.name)}" placeholder="What I feel like saying…" value="${esc(closeWifls[m.name]||"")}">
+        <div class="rate-cell wr-rate"><input class="rate-input" type="number" min="1" max="10" inputmode="numeric" data-rate="${m.id}" value="${meeting.ratings[m.id]||""}" placeholder="1-10">${m.guest?`<button class="wf-del" data-guest-del="${esc(m.id)}" title="Remove this guest">✕</button>`:""}</div>
+      </div>`).join("");
     c.innerHTML=`<div class="seg-panel">
       <h4>To-Dos From This Meeting</h4>
       <div class="hint" style="margin:-4px 0 8px">Confirm each 7-day to-do and who is responsible to get it done.</div>
@@ -11395,10 +11414,9 @@ function renderSegContent(i){
       <div class="hint ai-status" id="cc-ai-status" hidden></div>
       <div class="ai-summary" id="cc-ai-summary" ${meeting.notes.aiSummary?"":"hidden"}>${meeting.notes.aiSummary?"<b>Meeting summary</b><br>"+esc(meeting.notes.aiSummary).replace(/\n/g,"<br>"):""}</div>
       <textarea id="seg-cascade" data-lock="note:cascade" placeholder="What needs to be communicated to the rest of the team?">${esc(meeting.notes.cascade||"")}</textarea>
-      <h4 style="margin-top:16px">WIFLS — What I Feel Like Saying</h4>
-      <div class="hint" style="margin:-4px 0 8px">A closing round — how everyone's leaving the meeting.</div>
-      <div class="wf-list">${wiflsRows||'<div class="hint">No one on this team yet.</div>'}</div>
-      <h4 style="margin-top:16px">Meeting Rating (1–10)</h4>${rows}
+      <h4 style="margin-top:16px">WIFLS &amp; Meeting Rating (1–10)</h4>
+      <div class="hint" style="margin:-4px 0 8px">A closing round — each person's final word, with their 1–10 rating for the meeting on the right.</div>
+      <div class="wr-list">${combinedRows||'<div class="hint">No one on this team yet.</div>'}</div>
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
       <div class="rate-avg" id="rateAvg">Average: —</div></div>`;
     c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
@@ -11755,6 +11773,7 @@ function concludeMeeting(auto){
     notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
     issues:(meeting.solvedIssues||[]), team:t.name, summary:meetingSummary(t),
     headlinesSnap:JSON.parse(JSON.stringify(teamHeadlines(t))),   // freeze the headlines shared this meeting (text + photos)
+    salesSnap:(t.salesCard?{weekStart:t.salesCard.weekStart, sections:JSON.parse(JSON.stringify(t.salesCard.sections||[]))}:null),   // freeze the Sales Card grid reviewed today (Admissions only)
     scorecardSnap:meetingScorecardSnap(t), rocksSnap:meetingRocksSnap(t)};   // freeze the numbers + Rock status reviewed today
   t.meetings.push(rec);
   t.liveMeeting=null;
