@@ -872,6 +872,8 @@
   .hl-thumb{position:relative}
   .hl-thumb img{width:92px;height:92px;object-fit:cover;border-radius:10px;border:1px solid var(--border);cursor:zoom-in;display:block}
   .hl-img-x{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(20,22,27,.85);color:#fff;font-size:11px;cursor:pointer;line-height:20px;padding:0}
+  .hl-thumb-broken{width:92px;height:92px;border-radius:10px;border:1px dashed var(--border);background:var(--bg);color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:11px;text-align:center}
+  .seg-nav-bottom{display:flex;gap:8px;margin:4px 0 14px}
   .img-status{font-size:11.5px;color:var(--muted)}
   .img-status.busy{color:var(--accent)}
   .img-status.err{color:var(--red)}
@@ -4767,6 +4769,7 @@ function migrate(d){
   if(!d.teams.length) d.teams=[newTeam("Leadership Team", true)];
   d.teams.forEach(migrateTeam);
   if(!Array.isArray(d.people)) d.people=[];
+  if(!d.hireDates || typeof d.hireDates!=="object" || Array.isArray(d.hireDates)) d.hireDates={};   // name-keyed hire dates (company-level, visible to facility leaders + HR) — drives the Branch Evals roster
   if(!Array.isArray(d.admins)) d.admins=[];   // extra admin emails granted in-app (owner-admins stay hardcoded)
   if(!d.meta) d.meta={};                      // holds app-version build number for live-update nudges
   if(!Array.isArray(d.pa)) d.pa=[];          // People Analyzer + Quarterly Conversation records
@@ -4957,7 +4960,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=198;
+const BUILD=200;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5137,17 +5140,25 @@ let _l10Timer=null;
 // one transaction. Like saveMeasurable, it never REFUSES and never clobbers other fields, so an add/edit
 // can't be lost to a concurrent save or a coalesced remote refresh — THE fix for "had to click Add/Save
 // twice." Falls back to the guarded persistMulti when transactions aren't available (offline).
+// A team transaction gives NO optimistic local snapshot, so until it resolves our change isn't yet in
+// _teamDocs. While one is in flight we hold off adopt-rebuilds (see adoptMulti) so a teammate's snapshot
+// can't rebuild the view from server state that predates our change — which is what reverted the button we
+// just pressed or the note we just typed ("had to click twice / it didn't save"). Capped at 3s so a stuck
+// write can never wedge updates.
+let _teamWriteInFlight=0, _teamWriteSince=0;
 function mergeTeamMulti(teamId, applyTeam){
   let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; }
   if(!fs || !fs.runTransaction){ persistMulti(); return; }
   const ref=fs.doc(TEAMS_COL+"/"+teamId), email=((firebase.auth().currentUser||{}).email)||"";
+  _teamWriteInFlight++; _teamWriteSince=Date.now();
+  const done=()=>{ _teamWriteInFlight=Math.max(0,_teamWriteInFlight-1); };
   fs.runTransaction(tx=>tx.get(ref).then(snap=>{
     const team=(snap.exists&&snap.data()&&snap.data().team) ? snap.data().team
              : JSON.parse(JSON.stringify((data.teams||[]).find(t=>t&&t.id===teamId)||{id:teamId}));
     applyTeam(team);
     const ts=Date.now(); tx.set(ref,{ team:team, updatedAt:ts, updatedBy:email }); return { team:team, at:ts };
-  })).then(res=>{ _teamDocs[teamId]=res.team; _teamAt[teamId]=res.at; _baseAt[teamId]=res.at; _shadowTeams[teamId]=JSON.stringify(res.team); setSync("Saved"); })
-    .catch(e=>{ console.error("team merge tx failed — falling back",e); persistMulti(); });
+  })).then(res=>{ _teamDocs[teamId]=res.team; _teamAt[teamId]=res.at; _baseAt[teamId]=res.at; _shadowTeams[teamId]=JSON.stringify(res.team); setSync("Saved"); done(); })
+    .catch(e=>{ console.error("team merge tx failed — falling back",e); done(); persistMulti(); });
 }
 // Merge a team-scoped change onto the LATEST server copy in either storage mode — the safe replacement for a
 // plain save() on any single-team edit (reorder, departments, etc.), so a concurrent sync can't refuse-and-revert it.
@@ -5440,7 +5451,8 @@ function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shad
 function adoptMulti(){
   const merged=assembleMulti(), json=JSON.stringify(merged);
   if(json===lastAdopted) return;                 // nothing changed since our last adopt
-  if(_multiBooted && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS)){ setTimeout(adoptMulti,400); return; }   // never rebuild mid-edit, during a click in progress, nor in the split-second around a just-committed click
+  if(_multiBooted && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
+      || (_teamWriteInFlight>0 && (Date.now()-_teamWriteSince)<3000))){ setTimeout(adoptMulti,400); return; }   // never rebuild mid-edit, during a click in progress, around a just-committed click, nor while our own team write is still confirming (would revert it)
   lastAdopted=json;
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
@@ -5450,9 +5462,16 @@ function adoptMulti(){
   // need a second click right after you acted. We still rebind data + refresh the merge baselines; we only skip
   // the DOM rebuild. This can never hide a real change: if anything differs, sameAsScreen is false → rebuild.
   const sameAsScreen = _multiBooted && JSON.stringify(nextData)===JSON.stringify(data);
+  // BLINK GUARD: if only ANOTHER team's doc changed — our current team slice AND the company doc are both
+  // byte-identical — a single-team view (L10 / Scorecard / Lists / team Rocks) cannot show anything different,
+  // so skip the rebuild. This is what stops one busy team's live L10 from flickering everyone else's screen.
+  const _teamSlice=d=>{ const x=((d&&d.teams)||[]).find(y=>y&&y.id===curTeamId); return x?JSON.stringify(x):""; };
+  const singleTeamView=(currentView==="l10"||currentView==="scorecard"||currentView==="lists"||(currentView==="rocks"&&rocksMode==="team"));
+  const viewUnaffected = _multiBooted && singleTeamView && !sameAsScreen
+     && _teamSlice(nextData)===_teamSlice(data) && JSON.stringify(companyOf(nextData))===JSON.stringify(companyOf(data));
   data=nextData; syncMeetingRef(); refreshShadows(); _baseAt=Object.assign({},_teamAt); _baseCompany=_companyAt;   // local data now reflects the received team + company versions
   const recovered = reMergeMeetingTodos(pend); if(recovered) saveL10(true);   // a To-Do you just added survived the per-team refresh
-  if(_multiBooted && (!sameAsScreen || recovered)){
+  if(_multiBooted && (!sameAsScreen || recovered) && !(viewUnaffected && !recovered)){
     // Preserve the caret: if the cursor is in a note/IDS box, put it back after the rebuild so a teammate's
     // edit elsewhere never yanks you out of what you're typing.
     const act=document.activeElement, fk=(act&&act.getAttribute)?act.getAttribute("data-lock"):null;
@@ -5741,10 +5760,41 @@ function saveEvals(){
   },600);
 }
 const evNameKey=n=>String(n||"").trim().toLowerCase();
+/* ===== HIRE DATES (company-level, name-keyed) =====
+   Hire dates live on the COMPANY doc (data.hireDates: { <nameKey>: "YYYY-MM-DD" }) — not in the
+   confidential per-supervisor eval files — so facility leaders + HR can both SEE and ENTER them, and the
+   due date is just the next hire anniversary. The eval system still keeps its own copy for a supervisor's
+   own reminders, kept in sync whenever a date is set from a place that can write it. */
+function personHireDate(name){
+  const k=evNameKey(name);
+  const h=(data.hireDates||{})[k];
+  if(h) return h;
+  const r=(evalData.reports||{})[k];     // fall back to an eval-file date we can see (our own reports / HR)
+  return (r&&r.hireDate)||"";
+}
+function hireDue(name){ const h=personHireDate(name); return h?nextAnniversary(h,todayIso()):""; }
+function setPersonHireDate(name, iso){
+  const k=evNameKey(name); iso=(iso||"").trim();
+  data.hireDates=data.hireDates||{};
+  if(iso) data.hireDates[k]=iso; else delete data.hireDates[k];
+  mergeCompany(comp=>{ comp.hireDates=comp.hireDates||{}; if(iso) comp.hireDates[k]=iso; else delete comp.hireDates[k]; });
+  try{ if(evalData&&evalData.reports){ const r=evalReport(name); r.hireDate=iso; r.nextDue=iso?nextAnniversary(iso,todayIso()):""; saveEvals(); } }catch(e){}   // keep the supervisor's own eval reminders in sync when we hold that file
+}
+// HR: anyone. Facility leader: anyone in their branch. Supervisor: their direct reports.
+function canSetHireDate(name){
+  if(isEvalAdmin()) return true;
+  const me=myName(); if(!me) return false;
+  if(facilitiesLedBy(me).length && peopleBelowMe(me).some(n=>sameName(n,name))) return true;
+  if(directReportsOf(me).some(n=>sameName(n,name))) return true;
+  return false;
+}
+// Who can open the Branch Evals roster: facility leaders (their branch) + HR (everyone).
+function canSeeBranchEvals(){ return isEvalAdmin() || facilitiesLedBy(myName()).length>0; }
 function evalReport(name){
   evalData.reports=evalData.reports||{}; const k=evNameKey(name);
   if(!evalData.reports[k]) evalData.reports[k]={name:String(name||"").trim(), hireDate:"", nextDue:"", draft:null, history:[]};
   else if(!evalData.reports[k].name) evalData.reports[k].name=String(name||"").trim();
+  if(!evalData.reports[k].hireDate){ const ph=(data.hireDates||{})[k]; if(ph){ evalData.reports[k].hireDate=ph; if(!evalData.reports[k].nextDue) evalData.reports[k].nextDue=nextAnniversary(ph,todayIso()); } }   // adopt a company-level hire date set by a facility leader / HR
   return evalData.reports[k];
 }
 /* Due dates ride the hire-date anniversary. */
@@ -7869,7 +7919,7 @@ const canEditOwn=name=>{ const me=myName(); return !!me && sameName(name,me); };
 function refreshAdminNav(){
   const b=$("#navAdmin"); if(b) b.style.display=canManagePeople()?"":"none";
   const h=$("#navHealth"); if(h) h.style.display=canSeeHealth()?"":"none";
-  const e=$("#navEvals"); if(e) e.style.display=canDoEvals()?"":"none";
+  const e=$("#navEvals"); if(e) e.style.display=(canDoEvals()||canSeeBranchEvals())?"":"none";
   const p=$("#navPlanning"); if(p) p.style.display=canSeePlanning()?"":"none";
   const sa=$("#navSales"); if(sa) sa.style.display=canSeeSales()?"":"none";
 }
@@ -8320,6 +8370,8 @@ function addMemberWizard(){
       <div class="hint" style="margin-top:6px">Only seats already on the chart appear here. Missing one? Add it on <b>Vision → Accountability</b> first.</div></div>
     <div class="field"><label>Team</label>
       <select id="am-team">${teamOpts||'<option value="">— No teams yet —</option>'}</select></div>
+    <div class="field"><label>Hire date <small>— sets their annual evaluation due date (optional)</small></label>
+      <input id="am-hire" type="date"></div>
     <div class="field"><label>Permission</label>
       <div class="who-list" id="am-role" style="flex-direction:column">
         <button type="button" class="onb-seat on" data-role="member" style="width:100%;text-align:left"><b>Team Member</b> <small style="color:var(--muted)">— views everything · edits only their own Rocks, numbers &amp; to-dos</small></button>
@@ -8342,6 +8394,7 @@ function addMemberWizard(){
     const email=($("#am-email").value||"").trim().toLowerCase();
     const seatId=$("#am-seat").value||"";
     const teamId=$("#am-team").value||"";
+    const hire=($("#am-hire")&&$("#am-hire").value||"").trim();
     if(!name){ $("#am-name").focus(); return; }
     if(!email || email.indexOf("@")<1){ alert("Enter a valid work email — it's how they sign in."); $("#am-email").focus(); return; }
     if(!teamId){ alert("Pick a team for them."); return; }
@@ -8365,6 +8418,8 @@ function addMemberWizard(){
       if(!t.leader){ t.leader=name; permLabel="Department Owner (team leader)"; }
       else { t.editors=t.editors||[]; if(!t.editors.some(e=>sameName(e,name))) t.editors.push(name); permLabel="Department Owner (editor)"; }
     }
+    // 5) hire date (drives the annual evaluation due date; visible to facility leaders + HR)
+    if(hire){ data.hireDates=data.hireDates||{}; data.hireDates[evNameKey(name)]=hire; }
     save(true);
     const where=`${t?t.name:""} · ${permLabel}`;
     const makeLogin=$("#am-makelogin")?$("#am-makelogin").checked:false;
@@ -8654,18 +8709,59 @@ const EVAL_EXEC=[["rpps","Strong — Right Person, Right Seat"],["structure","Pe
 const evRatingLabel=v=>{ const m={below:"Below Standard",meets:"Meets Standard",strong:"Strong",exceptional:"Exceptional"}; return m[v]||"—"; };
 const evExecLabel=v=>{ const o=EVAL_EXEC.find(x=>x[0]===v); return o?o[1]:"—"; };
 
+// One row of the Branch Evals roster: name · seat · hire date · next-due badge · Set/Edit (if permitted).
+function hireRosterRow(name){
+  const seat=(seatsFor(name)[0]||{}).role||"";
+  const hire=personHireDate(name), due=hire?nextAnniversary(hire,todayIso()):"";
+  const d=due?daysUntilIso(due):null, tier=due?evalTier(due):null;
+  let pill;
+  if(!hire) pill=`<span class="ev-pill set">No hire date</span>`;
+  else if(d<0) pill=`<span class="ev-pill over">Overdue ${-d}d</span>`;
+  else if(tier) pill=`<span class="ev-pill due">Due in ${d}d</span>`;
+  else pill=`<span class="ev-pill ok">Due ${esc(fmtShortY(due))}</span>`;
+  const canEd=canSetHireDate(name);
+  return `<div class="ev-row hr-roster-row">
+    <div class="ev-main"><div class="ev-name">${esc(name)}</div>
+      <div class="ev-meta">${seat?esc(seat)+" · ":""}${hire?"Hired "+esc(fmtShortY(hire)):'<span style="color:var(--muted)">hire date not set</span>'}</div></div>
+    <div class="ev-right">${pill}${canEd?`<button class="btn ghost sm" data-hire-set="${esc(name)}">${hire?"Edit":"Set"}</button>`:""}</div></div>`;
+}
+// The Branch Evals roster — facility leaders see their whole branch; HR sees everyone grouped by facility.
+function branchEvalsHtml(){
+  if(!canSeeBranchEvals()) return "";
+  const me=myName();
+  let html=`<div class="sec-title" style="margin-top:22px">🗓️ Branch — hire dates &amp; evaluations due</div>
+    <div class="hint" style="margin:0 2px 10px">${isEvalAdmin()?"Everyone in the company":"Everyone in your branch"}, with their hire date and next annual evaluation (on the hire anniversary). Tap <b>Set</b>/<b>Edit</b> to record a hire date — reminders then fire at 30, 15, 7 and 1 day.</div>`;
+  if(isEvalAdmin()){
+    const seen=new Set(); let any=false;
+    acFunctionSeats().forEach(fseat=>{ const ids=seatsAtOrBelowId(fseat.id), names=new Set();
+      ids.forEach(id=>{ const s=acSeatById(id); if(s) seatNames(s).forEach(n=>{ n=(n||"").trim(); if(n) names.add(n); }); });
+      const list=[...names].filter(n=>{ const k=evNameKey(n); if(seen.has(k)) return false; seen.add(k); return true; }).sort((a,b)=>a.localeCompare(b));
+      if(list.length){ any=true; html+=`<div class="ev-grp">${esc(fseat.role||"Facility")}</div>`+list.map(hireRosterRow).join(""); }
+    });
+    const rest=knownPeople().filter(n=>!seen.has(evNameKey(n)));
+    if(rest.length){ html+=`<div class="ev-grp">Not on a facility</div>`+rest.map(hireRosterRow).join(""); }
+    if(!any && !rest.length) html+=`<div class="hint">No people on the chart yet.</div>`;
+  } else {
+    const branch=peopleBelowMe(me);
+    html+= branch.length ? branch.map(hireRosterRow).join("") : `<div class="hint">No one is below your seat on the Accountability Chart yet.</div>`;
+  }
+  return html;
+}
 function renderEvals(){
   const wrap=$("#evalsWrap");
-  if(!canDoEvals()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>Evaluations are for supervisors and HR.</div>`; return; }
+  if(!canDoEvals() && !canSeeBranchEvals()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>Evaluations are for supervisors, facility leaders and HR.</div>`; return; }
   const me=myName(), reports=me?directReportsOf(me):[];
-  const note=`<div class="ev-note">🔒 <b>Confidential.</b> These records live in a locked, per-supervisor file — only you and HR can open them. Reviews run on each person's <b>hire-date anniversary</b>, with reminders at 30, 15, 7 and 1 day.</div>`;
+  const doesEvals=canDoEvals();
+  const note=doesEvals?`<div class="ev-note">🔒 <b>Confidential.</b> These records live in a locked, per-supervisor file — only you and HR can open them. Reviews run on each person's <b>hire-date anniversary</b>, with reminders at 30, 15, 7 and 1 day.</div>`:"";
   let body;
-  if(!me) body=`<div class="empty"><span class="emoji">👤</span>Set who you are in Setup first — then your direct reports appear here.</div>`;
+  if(!doesEvals) body="";   // facility-leader-only viewer: skip the per-supervisor section, show the branch roster below
+  else if(!me) body=`<div class="empty"><span class="emoji">👤</span>Set who you are in Setup first — then your direct reports appear here.</div>`;
   else if(!reports.length) body=`<div class="empty"><span class="emoji">🙂</span>No direct reports under your seat on the Accountability Chart.</div>`;
   else body=`<div class="sec-title">Your direct reports (${reports.length})</div>`+reports.map(evalReportRow).join("");
-  const guideBtn=`<button class="btn ghost wide" id="ev-guide" style="margin-bottom:14px">📖 How to run an evaluation</button>`;
+  const guideBtn=doesEvals?`<button class="btn ghost wide" id="ev-guide" style="margin-bottom:14px">📖 How to run an evaluation</button>`:"";
   const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-top:18px">🗂️ HR · view all evaluations (audit)</button>`:"";
-  wrap.innerHTML=note+guideBtn+`<div id="ev-inbox"></div>`+body+hrBtn;
+  wrap.innerHTML=note+guideBtn+`<div id="ev-inbox"></div>`+body+branchEvalsHtml()+hrBtn;
+  wrap.querySelectorAll("[data-hire-set]").forEach(b=>b.onclick=()=>setHireDate(b.dataset.hireSet, ()=>renderEvals()));
   // "Awaiting your approval" — evals submitted for the current user to review (as supervisor or HR).
   evReviewInbox(list=>{ const box=$("#ev-inbox"); if(!box) return;
     if(!list.length){ box.innerHTML=""; return; }
@@ -8734,20 +8830,19 @@ function evalReportRow(name){
         <button class="btn sm" data-ev-do="${esc(name)}">${r.draft?"Resume":"Evaluate"}</button>
       </div></div></div>`;
 }
-function setHireDate(name){
-  const r=evalReport(name);
+function setHireDate(name, after){
+  const cur=personHireDate(name);
   openSheet(`<h2>Hire date · ${esc(name)}</h2>
-    <div class="hint" style="margin:-4px 2px 12px">Annual evaluations come due on this date each year; reminders fire 30, 15, 7 and 1 day before.</div>
-    <div class="field"><label>Hire date</label><input id="hd-date" type="date" value="${esc(r.hireDate||"")}"></div>
+    <div class="hint" style="margin:-4px 2px 12px">Annual evaluations come due on this date each year; reminders fire 30, 15, 7 and 1 day before. Visible to ${esc(name).split(" ")[0]}'s facility leader and HR.</div>
+    <div class="field"><label>Hire date</label><input id="hd-date" type="date" value="${esc(cur||"")}"></div>
     <div id="hd-due" class="hint" style="margin:-4px 2px 4px"></div>
     <div class="sheet-actions"><button class="btn ghost" id="hd-cancel">Cancel</button><button class="btn" id="hd-save">Save</button></div>`);
   const upd=()=>{ const box=$("#hd-due"); if(!box) return; const v=$("#hd-date").value;
-    box.innerHTML = v ? `First evaluation due: <b>${esc(fmtLong(nextAnniversary(v,todayIso())))}</b> <span style="color:var(--muted)">(on the hire anniversary)</span>` : ""; };
+    box.innerHTML = v ? `Next evaluation due: <b>${esc(fmtLong(nextAnniversary(v,todayIso())))}</b> <span style="color:var(--muted)">(on the hire anniversary)</span>` : ""; };
   upd(); { const di=$("#hd-date"); if(di) di.oninput=upd; }
   $("#hd-cancel").onclick=closeSheet;
-  $("#hd-save").onclick=()=>{ const v=$("#hd-date").value; const r2=evalReport(name);
-    r2.hireDate=v||""; r2.nextDue=v?nextAnniversary(v,todayIso()):"";
-    saveEvals(); closeSheet(); renderEvals(); };
+  $("#hd-save").onclick=()=>{ const v=$("#hd-date").value; setPersonHireDate(name, v);
+    closeSheet(); if(after) after(); else if(currentView==="evals") renderEvals(); };
 }
 function evaluateReport(name){
   const r=evalReport(name);
@@ -10460,16 +10555,27 @@ function compressImage(file, maxDim, quality){
   });
 }
 function storageReady(){ return !!(window.firebase && firebase.apps && firebase.apps.length && firebase.storage); }
+function isHeic(file){ const t=(file.type||"").toLowerCase(), n=(file.name||"").toLowerCase(); return t.indexOf("heic")>=0||t.indexOf("heif")>=0||/\.(heic|heif)$/.test(n); }
 async function uploadImage(file){
   if(!file) throw new Error("No file chosen.");
-  if(!/^image\//.test(file.type||"")) throw new Error("Please choose an image file (JPG, PNG, HEIC…).");
+  if(!/^image\//.test(file.type||"") && !/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name||"")) throw new Error("Please choose an image file (JPG, PNG, GIF or WEBP).");
   if(file.size>25*1024*1024) throw new Error("That image is over 25 MB — please pick a smaller one.");
   if(!storageReady()) throw new Error("Photo storage isn't switched on yet. Ask an owner to enable Firebase Storage.");
-  let blob; try{ blob=await compressImage(file,1600,0.82); }catch(e){ blob=file; }   // fall back to the original if the canvas can't read it
+  // Re-encode to JPEG in the browser so EVERY uploaded photo is small AND universally viewable on the web.
+  let blob=null; try{ blob=await compressImage(file,1600,0.82); }catch(e){ blob=null; }
+  if(!blob){
+    // The browser couldn't decode it. iPhone HEIC/HEIF can't be shown on the web at all — reject with a fix
+    // rather than silently uploading an image nobody can see (that's the "uploaded but no photo" trap).
+    if(isHeic(file)) throw new Error("That's an iPhone HEIC photo — web browsers can't display it. On your iPhone: Settings → Camera → Formats → “Most Compatible”, or export/share the photo as a JPG, then upload. (Screenshots and JPG/PNG work as-is.)");
+    if(/^image\/(jpeg|png|gif|webp)$/i.test(file.type||"")) blob=file;   // a web-safe type that just failed to compress (rare) — upload as-is
+    else throw new Error("Couldn't read that image. Please try a JPG or PNG.");
+  }
+  const raw=(blob===file), ct=raw?(file.type||"image/jpeg"):"image/jpeg";
+  const ext=ct==="image/png"?"png":ct==="image/gif"?"gif":ct==="image/webp"?"webp":"jpg";
   const u=(firebase.auth().currentUser||{}), uidPart=(u.uid||"anon").slice(0,28);
-  const path="images/"+uidPart+"/"+Date.now()+"-"+Math.random().toString(36).slice(2,8)+".jpg";
+  const path="images/"+uidPart+"/"+Date.now()+"-"+Math.random().toString(36).slice(2,8)+"."+ext;
   const ref=firebase.storage().ref().child(path);
-  const snap=await ref.put(blob,{contentType:blob.type||"image/jpeg"});
+  const snap=await ref.put(blob,{contentType:ct});
   const url=await snap.ref.getDownloadURL();
   return { url, path, name:(file.name||"photo") };
 }
@@ -10556,7 +10662,12 @@ function renderHeadlines(container, renderFn){
   container.querySelectorAll("[data-hl-imgdel]").forEach(b=>b.onclick=()=>{ const card=b.closest(".hl-card"); if(card) removeHeadlineImage(tid, card.dataset.id, b.dataset.hlImgdel); renderFn(); });
   wireHeadlineThumbs(container);
 }
-function wireHeadlineThumbs(container){ container.querySelectorAll("[data-hl-img]").forEach(im=>im.onclick=()=>showImageLightbox(im.dataset.hlImg)); }
+function wireHeadlineThumbs(container){ container.querySelectorAll("[data-hl-img]").forEach(im=>{
+  im.onclick=()=>showImageLightbox(im.dataset.hlImg);
+  const fail=()=>{ if(!im.parentNode) return; const ph=document.createElement("div"); ph.className="hl-thumb-broken"; ph.title="This photo couldn't load — it may be an unsupported format (e.g. an iPhone HEIC)."; ph.textContent="⚠ photo"; im.parentNode.replaceChild(ph, im); };
+  im.onerror=fail;
+  if(im.complete && im.naturalWidth===0) fail();   // already failed before we attached the handler
+}); }
 
 function renderLists(){
   const addRow=$("#listAddRow"), wrap=$("#listsWrap");
@@ -10841,6 +10952,7 @@ function minutesText(m){
     m.todos.forEach(t=>L.push(`  • ${t.text} — ${t.owner||"unassigned"}${t.due?` (due ${fmtShort(t.due)})`:""}${t.fromIssueText?` [from: ${t.fromIssueText}]`:""}`));
   }
   if(n.cascade) L.push(`\nCASCADING MESSAGES\n${n.cascade}`);
+  personSec("wifls_close","WIFLS — CLOSING");
   const rl=m.ratingList||[];
   if(rl.length) L.push(`\nRATINGS\n`+rl.map(r=>`  • ${r.name}: ${r.score}/10`).join("\n"));
   return L.join("\n");
@@ -10928,8 +11040,9 @@ function minutesInnerHtml(m){
     ${sec(reviewedHdr, reviewed?`<ul class="min-list">${reviewed}</ul>`:"")}
     ${sec("New To-Dos", todos?`<ul class="min-list">${todos}</ul>`:"")}
     ${sec("Cascading Messages", n.cascade?`<p>${nl2br(n.cascade)}</p>`:"")}
+    ${sec("WIFLS — Closing", pBlock("wifls_close"))}
     ${sec("Ratings", rl)}
-    ${(!n.segue&&!n.scorecard&&!n.headlines&&!hlSnap&&!issues&&!todos&&!reviewed&&!n.cascade&&!rl)?'<div class="hint">This meeting was finished without any notes recorded.</div>':""}`;
+    ${(!n.segue&&!n.scorecard&&!n.headlines&&!hlSnap&&!issues&&!todos&&!reviewed&&!n.cascade&&!pBlock("wifls_close")&&!rl)?'<div class="hint">This meeting was finished without any notes recorded.</div>':""}`;
 }
 // Render the minutes into the print layer and open the browser's print dialog — the user picks
 // "Save as PDF" (or a printer). Same offline, no-library path as the V/TO packet.
@@ -10946,7 +11059,15 @@ function printMinutes(m){
   st.textContent=`@media print{@page{size:portrait; margin:14mm}}`;
   const cleanup=()=>{ const s=document.getElementById("minDynPage"); if(s) s.remove(); window.removeEventListener("afterprint",cleanup); };
   window.addEventListener("afterprint",cleanup);
-  setTimeout(()=>{ window.print(); setTimeout(cleanup,1500); }, 30);   // fallback if afterprint never fires
+  // Headline photos are remote URLs — WAIT for them to load (cap 5s) before printing, so the PDF
+  // actually contains the pictures instead of blank boxes.
+  const waitImages=()=>{ const imgs=[...doc.querySelectorAll("img")];
+    if(!imgs.length) return Promise.resolve();
+    return Promise.race([
+      Promise.all(imgs.map(im=>(im.complete&&im.naturalWidth>0)?Promise.resolve():new Promise(res=>{ im.addEventListener("load",res,{once:true}); im.addEventListener("error",res,{once:true}); }))),
+      new Promise(res=>setTimeout(res,5000))
+    ]); };
+  waitImages().then(()=>{ window.print(); setTimeout(cleanup,1500); });   // fallback if afterprint never fires
 }
 // A meeting is "final" unless explicitly flagged draft — so older records (no flag) always read as final.
 function meetingIsFinal(m){ return !m || m.finalized!==false; }
@@ -10968,7 +11089,7 @@ function showMinutes(id){
       <button class="btn ghost" id="min-pdf">⬇ PDF</button>
       <button class="btn ghost" id="min-copy">Copy</button>
     </div>`);
-  $("#sheet").querySelectorAll("[data-hl-img]").forEach(im=>im.onclick=()=>showImageLightbox(im.dataset.hlImg));
+  wireHeadlineThumbs($("#sheet"));
   { const b=$("#min-pdf"); if(b) b.onclick=()=>printMinutes(m); }
   { const b=$("#min-edit"); if(b) b.onclick=()=>editMinutes(id); }
   { const b=$("#min-final"); if(b) b.onclick=()=>{ setMinutesFinal(id,true); showMinutes(id); renderArchive(); }; }
@@ -11102,13 +11223,20 @@ function renderL10(){
     </div>
     ${scribeBar}
     <div id="segContent"></div>
+    ${driving?`<div class="seg-nav-bottom">
+        <button class="btn ghost sm" id="prevSegB" ${meeting.seg===0?"disabled style=opacity:.4":""}>‹ Back</button>
+        <button class="btn" style="flex:1" id="nextSegB">${meeting.seg<6?"Next Segment ›":"Finish & Rate"}</button>
+      </div>`:""}
     <div class="agenda ${driving?"":"ro"}">${agenda}</div>
     ${driving?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px">Cancel meeting</button>`:""}`;
 
   renderSegContent(meeting.seg);
   if(driving){
-    wrap.querySelector("#nextSeg").onclick=()=>{ if(meeting.seg<6){ advanceSeg(meeting.seg+1); } else { concludeMeeting(); } };
-    wrap.querySelector("#prevSeg").onclick=()=>{ if(meeting.seg>0) advanceSeg(meeting.seg-1); };
+    const goNext=()=>{ if(meeting.seg<6){ advanceSeg(meeting.seg+1); } else { concludeMeeting(); } };
+    const goPrev=()=>{ if(meeting.seg>0) advanceSeg(meeting.seg-1); };
+    wrap.querySelector("#nextSeg").onclick=goNext;
+    wrap.querySelector("#prevSeg").onclick=goPrev;
+    { const nb=wrap.querySelector("#nextSegB"); if(nb) nb.onclick=goNext; const pb=wrap.querySelector("#prevSegB"); if(pb) pb.onclick=goPrev; }
     wrap.querySelectorAll(".ag-item").forEach(a=>a.onclick=()=>advanceSeg(+a.dataset.seg));
     wrap.querySelector("#cancelMeeting").onclick=()=>{ if(confirm("Cancel this meeting without saving? This ends it for everyone following.")){
       TEAM().liveMeeting=null; saveL10(true, true); stopTick(); meeting=null; renderL10(); } };   // ending=true: this is the one place a saveL10 is ALLOWED to clear the meeting
@@ -11253,6 +11381,11 @@ function renderSegContent(i){
         <div class="recap-meta">Due ${fmtShort(t.due)}${t.fromIssueText?" · ↳ from: "+esc(t.fromIssueText):""}</div>
         <div class="recap-owner"><label>Who owns it?</label><input list="member-names" data-todo-owner="${t.id}" value="${esc(t.owner||"")}" placeholder="Assign a person"></div>
       </div>`).join(""):'<div class="hint">No new to-dos were created this meeting.</div>';
+    // Closing WIFLS — "What I Feel Like Saying" check-out round, one box per person (keyed by name), captured
+    // right alongside the rating so the meeting ends on a human note.
+    const closeWifls=(meeting.byPerson||{}).wifls_close||{};
+    const wiflsRows=members.map(m=>`<div class="wf-row"><span class="wf-name">${esc(m.name)}${m.guest?' <span class="wf-guest">guest</span>':''}</span>
+        <input class="wf-in" data-wfc="${esc(m.name)}" data-lock="by:wifls_close:${esc(m.name)}" placeholder="What I feel like saying…" value="${esc(closeWifls[m.name]||"")}"></div>`).join("");
     c.innerHTML=`<div class="seg-panel">
       <h4>To-Dos From This Meeting</h4>
       <div class="hint" style="margin:-4px 0 8px">Confirm each 7-day to-do and who is responsible to get it done.</div>
@@ -11262,9 +11395,13 @@ function renderSegContent(i){
       <div class="hint ai-status" id="cc-ai-status" hidden></div>
       <div class="ai-summary" id="cc-ai-summary" ${meeting.notes.aiSummary?"":"hidden"}>${meeting.notes.aiSummary?"<b>Meeting summary</b><br>"+esc(meeting.notes.aiSummary).replace(/\n/g,"<br>"):""}</div>
       <textarea id="seg-cascade" data-lock="note:cascade" placeholder="What needs to be communicated to the rest of the team?">${esc(meeting.notes.cascade||"")}</textarea>
+      <h4 style="margin-top:16px">WIFLS — What I Feel Like Saying</h4>
+      <div class="hint" style="margin:-4px 0 8px">A closing round — how everyone's leaving the meeting.</div>
+      <div class="wf-list">${wiflsRows||'<div class="hint">No one on this team yet.</div>'}</div>
       <h4 style="margin-top:16px">Meeting Rating (1–10)</h4>${rows}
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
       <div class="rate-avg" id="rateAvg">Average: —</div></div>`;
+    c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
     c.querySelectorAll("[data-todo-owner]").forEach(inp=>inp.oninput=()=>{ const t=TEAM().todos.find(x=>x.id===inp.dataset.todoOwner); if(t){ t.owner=inp.value; saveL10(); } });
     c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); saveL10(true); renderSegContent(i); });
     { const g=$("#cc-guest"), ga=$("#cc-guest-add");
@@ -11539,7 +11676,8 @@ function commitSegTime(){ if(!meeting||!meeting.segStart) return; const add=(Dat
 function segLiveSecs(){ if(!meeting) return 0; const base=meeting.segElapsed||0; const s=meeting.segStart; return s?base+(Date.now()-s)/1000:base; }
 function totalLiveSecs(){ if(!meeting) return 0; const base=meeting.totalElapsed||0; const s=meeting.segStart; return s?base+(Date.now()-s)/1000:base; }
 function paintTimer(){
-  if(!meeting) return; checkMeetingCap(); const hero=$(".l10-hero"); if(!hero) return;
+  if(!meeting) return; checkMeetingCap(); if(!meeting) return;   // checkMeetingCap may auto-conclude at the cap, nulling `meeting` — re-check before using it
+  const hero=$(".l10-hero"); if(!hero) return;
   const seg=SEGMENTS[meeting.seg]; const elapsed=Math.floor(segLiveSecs()); const allot=seg.min*60;
   const big=hero.querySelector(".big"); if(big) big.textContent=String(Math.floor(elapsed/60)).padStart(2,"0")+":"+String(elapsed%60).padStart(2,"0");
   hero.classList.toggle("over",elapsed>allot);
@@ -12868,7 +13006,7 @@ function switchView(v){
   if(v!=="vision") acDraftMode=false;              // draft chart is confined to the chart view — exit it on navigate-away
   if(v==="admin" && !canManagePeople()) v="setup";   // the onboarding permission opens a TRIMMED Admin tab; full admins see everything
   if(v==="health" && !canSeeHealth()) v="vision"; // same for the leadership dashboard
-  if(v==="evals" && !canDoEvals()) v="board";     // only supervisors + HR/admins reach evaluations
+  if(v==="evals" && !canDoEvals() && !canSeeBranchEvals()) v="board";     // supervisors, facility leaders + HR/admins reach evaluations
   if(v==="planning" && !canSeePlanning()) v="vision"; // planning is Visionary/Integrator/Facility-Leader only
   if(v==="sales" && !canSeeSales()) v="scorecard";  // sales card shows only for teams that have one (+ their leaders)
   if(v!=="people") paPerson=null;                 // don't leave someone's worksheet open behind you
