@@ -14,8 +14,8 @@
 // ───────────────────────────────────────────────────────────────────────────
 import crypto from "crypto";
 
-const SA_RAW = process.env.FIREBASE_SERVICE_ACCOUNT || "";
-const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
+const SA_RAW = (process.env.FIREBASE_SERVICE_ACCOUNT || "").trim();
+const AUTH_TOKEN = (process.env.MCP_AUTH_TOKEN || "").trim();   // tolerate a trailing newline/space from pasting into Netlify
 const WS_PATH = "workspaces/main";
 const TEAMS_COL = "workspaces/main/teams";
 
