@@ -4777,6 +4777,7 @@ function migrate(d){
   d.teams.forEach(migrateTeam);
   if(!Array.isArray(d.people)) d.people=[];
   if(!d.hireDates || typeof d.hireDates!=="object" || Array.isArray(d.hireDates)) d.hireDates={};   // name-keyed hire dates (company-level, visible to facility leaders + HR) — drives the Branch Evals roster
+  if(!d.evalDone || typeof d.evalDone!=="object" || Array.isArray(d.evalDone)) d.evalDone={};   // name-keyed: the hire-anniversary date whose review was marked done (company-level) — so the roster KNOWS a cycle was completed
   if(!Array.isArray(d.admins)) d.admins=[];   // extra admin emails granted in-app (owner-admins stay hardcoded)
   if(!d.meta) d.meta={};                      // holds app-version build number for live-update nudges
   if(!Array.isArray(d.pa)) d.pa=[];          // People Analyzer + Quarterly Conversation records
@@ -4967,7 +4968,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=210;
+const BUILD=212;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5813,13 +5814,30 @@ function personHireDate(name){
   const r=(evalData.reports||{})[k];     // fall back to an eval-file date we can see (our own reports / HR)
   return (r&&r.hireDate)||"";
 }
-function hireDue(name){ const r=(evalData.reports||{})[evNameKey(name)]; if(r&&r.nextDue) return r.nextDue; const h=personHireDate(name); return h?currentEvalDue(h,todayIso()):""; }
+function hireDue(name){ const k=evNameKey(name), r=(evalData.reports||{})[k], hire=personHireDate(name);
+  if(r && r.nextDue && (r.history||[]).length) return r.nextDue;   // a full eval filed in-app → trust its rolled-forward date
+  const done=(data.evalDone||{})[k];
+  if(done && hire) return nextAnniversary(hire, addDaysIso(done,1));   // user marked THIS cycle reviewed → next anniversary after it
+  return evalDueFromHire(hire); }                                  // else: current-cycle window default
+// Did the current review cycle already get handled — marked "reviewed this year" OR a full eval filed this cycle?
+function evalCycleDone(name){ const k=evNameKey(name), hire=personHireDate(name); if(!hire) return false;
+  const cur=currentEvalDue(hire, todayIso()), done=(data.evalDone||{})[k];
+  if(done && done>=cur) return true;
+  const r=(evalData.reports||{})[k];
+  return !!(r && (r.history||[]).length && r.nextDue && r.nextDue>cur); }
+// The "Reviewed this year" toggle: records company-wide that THIS cycle's review is done, so the due date
+// rolls to next year for everyone who views the roster — the app KNOWS instead of guessing.
+function markEvalDone(name, done){ const k=evNameKey(name), hire=personHireDate(name); if(!hire) return;
+  const cycle=currentEvalDue(hire, todayIso());
+  data.evalDone=data.evalDone||{}; if(done) data.evalDone[k]=cycle; else delete data.evalDone[k];
+  mergeCompany(comp=>{ comp.evalDone=comp.evalDone||{}; if(done) comp.evalDone[k]=cycle; else delete comp.evalDone[k]; });
+  try{ if(evalData&&evalData.reports){ const r=evalReport(name); r.nextDue = done ? nextAnniversary(hire, addDaysIso(cycle,1)) : evalDueFromHire(hire); saveEvals(); } }catch(e){} }
 function setPersonHireDate(name, iso){
   const k=evNameKey(name); iso=(iso||"").trim();
   data.hireDates=data.hireDates||{};
   if(iso) data.hireDates[k]=iso; else delete data.hireDates[k];
   mergeCompany(comp=>{ comp.hireDates=comp.hireDates||{}; if(iso) comp.hireDates[k]=iso; else delete comp.hireDates[k]; });
-  try{ if(evalData&&evalData.reports){ const r=evalReport(name); r.hireDate=iso; r.nextDue=iso?currentEvalDue(iso,todayIso()):""; saveEvals(); } }catch(e){}   // keep the supervisor's own eval reminders in sync when we hold that file — THIS cycle's anniversary, overdue allowed
+  try{ if(evalData&&evalData.reports){ const r=evalReport(name); r.hireDate=iso; if(!(r.history||[]).length) r.nextDue=iso?evalDueFromHire(iso):""; saveEvals(); } }catch(e){}   // sync the supervisor's reminder — current-cycle window; never clobber a COMPLETED review's rolled-forward date
 }
 // HR: anyone. Facility leader: anyone in their branch. Supervisor: their direct reports.
 function canSetHireDate(name){
@@ -5835,7 +5853,7 @@ function evalReport(name){
   evalData.reports=evalData.reports||{}; const k=evNameKey(name);
   if(!evalData.reports[k]) evalData.reports[k]={name:String(name||"").trim(), hireDate:"", nextDue:"", draft:null, history:[]};
   else if(!evalData.reports[k].name) evalData.reports[k].name=String(name||"").trim();
-  if(!evalData.reports[k].hireDate){ const ph=(data.hireDates||{})[k]; if(ph){ evalData.reports[k].hireDate=ph; if(!evalData.reports[k].nextDue) evalData.reports[k].nextDue=currentEvalDue(ph,todayIso()); } }   // adopt a company-level hire date set by a facility leader / HR
+  if(!evalData.reports[k].hireDate){ const ph=(data.hireDates||{})[k]; if(ph){ evalData.reports[k].hireDate=ph; if(!evalData.reports[k].nextDue) evalData.reports[k].nextDue=evalDueFromHire(ph); } }   // adopt a company-level hire date set by a facility leader / HR
   return evalData.reports[k];
 }
 /* Due dates ride the hire-date anniversary. */
@@ -5857,6 +5875,17 @@ function currentEvalDue(hireISO, fromISO){
   let due=new Date(f.getFullYear(), h.getMonth(), h.getDate());
   if(due<=h) due=new Date(f.getFullYear()+1, h.getMonth(), h.getDate());
   return isoOfDate(due);
+}
+// The review a person CURRENTLY owes, computed from the hire date alone (the roster can't see completions —
+// those live in confidential per-supervisor files). This year's anniversary is the one owed only if it's
+// upcoming or passed within the last ~60 days; an anniversary that passed longer ago belongs to a cycle
+// that's behind us (it was reviewed, or that window has lapsed), so we roll to next year's. This is why
+// October people (anniversary now) show due, while February people (anniversary 8 months back) do not.
+const EVAL_OVERDUE_GRACE_DAYS=60;
+function evalDueFromHire(hireISO){
+  if(!hireISO) return "";
+  const cur=currentEvalDue(hireISO, todayIso());
+  return (daysUntilIso(cur) >= -EVAL_OVERDUE_GRACE_DAYS) ? cur : nextAnniversary(hireISO, todayIso());
 }
 function daysUntilIso(iso){ if(!iso) return null; const t=new Date(todayIso()+"T00:00:00"), d=new Date(iso+"T00:00:00"); return Math.round((d-t)/86400000); }
 function addDaysIso(iso,n){ const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+n); return isoOfDate(d); }
@@ -8767,18 +8796,25 @@ const evExecLabel=v=>{ const o=EVAL_EXEC.find(x=>x[0]===v); return o?o[1]:"—";
 // One row of the Branch Evals roster: name · seat · hire date · next-due badge · Set/Edit (if permitted).
 function hireRosterRow(name){
   const seat=(seatsFor(name)[0]||{}).role||"";
-  const hire=personHireDate(name), due=hireDue(name);
+  const hire=personHireDate(name), due=hireDue(name), canEd=canSetHireDate(name), k=evNameKey(name);
   const d=due?daysUntilIso(due):null, tier=due?evalTier(due):null;
+  const markedDone = !!(hire && (data.evalDone||{})[k] && (data.evalDone[k] >= currentEvalDue(hire, todayIso())));
   let pill;
   if(!hire) pill=`<span class="ev-pill set">No hire date</span>`;
   else if(d<0) pill=`<span class="ev-pill over">Overdue ${-d}d</span>`;
   else if(tier) pill=`<span class="ev-pill due">Due in ${d}d</span>`;
   else pill=`<span class="ev-pill ok">Due ${esc(fmtShortY(due))}</span>`;
-  const canEd=canSetHireDate(name);
+  // "Reviewed this year" clears a person the app shows as due but you've actually reviewed — recorded company-wide
+  // so the due rolls to next year for everyone. Undo appears once marked.
+  let doneBtn="";
+  if(hire && canEd){
+    if(markedDone) doneBtn=`<button class="btn ghost sm" data-eval-undo="${esc(name)}" title="Undo — this year's review is not done">✓ reviewed · undo</button>`;
+    else if(d!==null && (d<0 || tier)) doneBtn=`<button class="btn ghost sm" data-eval-done="${esc(name)}" title="Record that this year's review is complete">Reviewed this year</button>`;
+  }
   return `<div class="ev-row hr-roster-row">
     <div class="ev-main"><div class="ev-name">${esc(name)}</div>
       <div class="ev-meta">${seat?esc(seat)+" · ":""}${hire?"Hired "+esc(fmtShortY(hire)):'<span style="color:var(--muted)">hire date not set</span>'}</div></div>
-    <div class="ev-right">${pill}${canEd?`<button class="btn ghost sm" data-hire-set="${esc(name)}">${hire?"Edit":"Set"}</button>`:""}</div></div>`;
+    <div class="ev-right">${pill}${doneBtn}${canEd?`<button class="btn ghost sm" data-hire-set="${esc(name)}">${hire?"Edit":"Set"}</button>`:""}</div></div>`;
 }
 // The Branch Evals roster — facility leaders see their whole branch; HR sees everyone grouped by facility.
 function branchEvalsHtml(){
@@ -8817,6 +8853,8 @@ function renderEvals(){
   const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-top:18px">🗂️ HR · view all evaluations (audit)</button>`:"";
   wrap.innerHTML=note+guideBtn+`<div id="ev-inbox"></div>`+body+branchEvalsHtml()+hrBtn;
   wrap.querySelectorAll("[data-hire-set]").forEach(b=>b.onclick=()=>setHireDate(b.dataset.hireSet, ()=>renderEvals()));
+  wrap.querySelectorAll("[data-eval-done]").forEach(b=>b.onclick=()=>{ markEvalDone(b.dataset.evalDone, true); renderEvals(); });
+  wrap.querySelectorAll("[data-eval-undo]").forEach(b=>b.onclick=()=>{ markEvalDone(b.dataset.evalUndo, false); renderEvals(); });
   // "Awaiting your approval" — evals submitted for the current user to review (as supervisor or HR).
   evReviewInbox(list=>{ const box=$("#ev-inbox"); if(!box) return;
     if(!list.length){ box.innerHTML=""; return; }
@@ -8893,8 +8931,8 @@ function setHireDate(name, after){
     <div id="hd-due" class="hint" style="margin:-4px 2px 4px"></div>
     <div class="sheet-actions"><button class="btn ghost" id="hd-cancel">Cancel</button><button class="btn" id="hd-save">Save</button></div>`);
   const upd=()=>{ const box=$("#hd-due"); if(!box) return; const v=$("#hd-date").value;
-    box.innerHTML = v ? (function(){ const d=currentEvalDue(v,todayIso()), past=d<todayIso();
-      return `${past?"Evaluation due <b style='color:var(--red)'>now (overdue)</b> — ":"Evaluation due: "}<b>${esc(fmtLong(d))}</b> <span style="color:var(--muted)">(on the hire anniversary)</span>`; })() : ""; };
+    box.innerHTML = v ? (function(){ const d=evalDueFromHire(v), past=d<todayIso();
+      return `${past?"Evaluation due <b style='color:var(--red)'>now (overdue)</b> — ":"Next evaluation due: "}<b>${esc(fmtLong(d))}</b> <span style="color:var(--muted)">(on the hire anniversary)</span>`; })() : ""; };
   upd(); { const di=$("#hd-date"); if(di) di.oninput=upd; }
   $("#hd-cancel").onclick=closeSheet;
   $("#hd-save").onclick=()=>{ const v=$("#hd-date").value; setPersonHireDate(name, v);
@@ -8985,7 +9023,10 @@ function openEvalForm(name,f){
     const r=evalReport(name);
     r.history=r.history||[]; r.history.push(Object.assign({completedAt:todayIso(), completedBy:myName()||myEmail()}, form));
     r.draft=null;
-    if(r.hireDate){ const base=r.nextDue||nextAnniversary(r.hireDate,todayIso()); r.nextDue=nextAnniversary(r.hireDate, addDaysIso(base,1)); }
+    if(r.hireDate){ const base=r.nextDue||nextAnniversary(r.hireDate,todayIso());
+      r.nextDue=nextAnniversary(r.hireDate, addDaysIso(base,1));
+      const kk=evNameKey(name); data.evalDone=data.evalDone||{}; data.evalDone[kk]=base;   // record the completed cycle company-wide so the Branch roster knows (viewers can't read this confidential file)
+      mergeCompany(comp=>{ comp.evalDone=comp.evalDone||{}; comp.evalDone[kk]=base; }); }
     saveEvals(); closeSheet(); renderEvals(); setSync("Evaluation filed ✓");
   }; }
 }
