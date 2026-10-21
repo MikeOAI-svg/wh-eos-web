@@ -4967,7 +4967,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=205;
+const BUILD=208;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5647,8 +5647,8 @@ if(typeof window!=="undefined" && window.__EXPOSE_MULTI__){
    happened to be on any L10 anywhere, which is not what "who's on this L10" means. One shared doc
    (rather than a doc per team) keeps this on the existing workspaces/* rule and to one subscription;
    the team lives on each entry instead. Separate doc = never touches the main data sync. */
-let presRef=null, presUnsub=null, presTimer=null, presUsers={};
-const PRES_FRESH=90000;
+let presRef=null, presUnsub=null, presTimer=null, presUsers={}, _presVizWired=false;
+const PRES_FRESH=150000;   // was 90s — phones throttle the 20s heartbeat when the screen dims, dropping people who ARE there; a longer window tolerates several missed beats
 function presKey(email){ return (email||"").toLowerCase().replace(/[^a-z0-9]/g,"_")||"anon"; }
 function initialsOf(s){ s=(s||"").trim(); if(!s) return "?";
   if(s.indexOf("@")>=0 && s.indexOf(" ")<0) return s[0].toUpperCase();
@@ -5657,7 +5657,10 @@ function initialsOf(s){ s=(s||"").trim(); if(!s) return "?";
 // stale/empty selection, so we can never heartbeat into a team id that isn't really selected.
 function presTeamId(){ try{ return String((TEAM()||{}).id||""); }catch(e){ return ""; } }
 function beatPresence(){ const em=myEmail(); if(!presRef||!em) return;
-  const u={}; u[presKey(em)]={name:(myName()||em), at:Date.now(), team:presTeamId()};
+  // sat = SERVER timestamp (one shared clock for everyone) — the source of truth for "how recent".
+  // at = device timestamp, kept only so clients on an older build still have something to read.
+  let sv; try{ sv=firebase.firestore.FieldValue.serverTimestamp(); }catch(e){ sv=Date.now(); }
+  const u={}; u[presKey(em)]={name:(myName()||em), at:Date.now(), sat:sv, team:presTeamId()};
   presRef.set({users:u},{merge:true}).catch(()=>{}); }
 function startPresence(){
   const em=myEmail(); if(!em) return;
@@ -5671,23 +5674,37 @@ function startPresence(){
   }, ()=>{});
   beatPresence();
   if(!presTimer) presTimer=setInterval(beatPresence, 20000);
+  // Re-beat the moment the tab wakes (phone unlock, app switch back, window refocus) so a throttled
+  // heartbeat doesn't leave someone looking offline — they pop back on instantly instead of waiting 20s.
+  if(!_presVizWired){ _presVizWired=true;
+    document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && presUnsub) beatPresence(); });
+    window.addEventListener("focus", ()=>{ if(presUnsub) beatPresence(); });
+  }
   renderPresence();
 }
 function stopPresence(){
   if(presTimer){ clearInterval(presTimer); presTimer=null; }
   if(presUnsub){ presUnsub(); presUnsub=null; }
   const em=myEmail();
-  if(presRef&&em){ const u={}; u[presKey(em)]={name:(myName()||em), at:0, team:presTeamId()}; presRef.set({users:u},{merge:true}).catch(()=>{}); }  // leave = drop immediately
+  if(presRef&&em){ const u={}; u[presKey(em)]={name:(myName()||em), at:0, sat:0, team:presTeamId()}; presRef.set({users:u},{merge:true}).catch(()=>{}); }  // leave = drop immediately (both stamps zeroed)
 }
 function renderPresence(){
   const box=$("#l10Presence"); if(!box) return;
   if(currentView!=="l10"){ box.classList.add("hide"); return; }
   const now=Date.now(), meKey=presKey(myEmail()), team=presTeamId();
   const t=TEAM()||{}, tName=t.name?" · "+esc(t.name):"";
-  const list=Object.keys(presUsers||{}).map(k=>Object.assign({k}, presUsers[k]))
-    // Only this team's L10. An entry with no team is from a client on an older build that didn't record
-    // one — excluded rather than shown everywhere, which is the bug this replaced.
-    .filter(u=>u && u.at>0 && (now-u.at)<PRES_FRESH && String(u.team||"")===team)
+  // Measure freshness against the SERVER clock: read each heartbeat's server stamp (sat) and compare it to
+  // the newest server stamp in the doc — one shared clock, so no device's wrong local time can hide anyone.
+  // Only fall back to the device stamp (at vs local now) for entries that have no server stamp yet.
+  const rows=Object.keys(presUsers||{}).map(k=>{ const e=presUsers[k]||{};
+    const satMs=(e.sat && typeof e.sat.toMillis==="function") ? e.sat.toMillis() : (typeof e.sat==="number" ? e.sat : 0);
+    return { k, name:e.name, team:e.team, atMs:(typeof e.at==="number"?e.at:0), satMs }; });
+  const maxSat=rows.reduce((m,r)=>Math.max(m, r.satMs||0), 0);
+  const fresh=r=> (maxSat>0 && r.satMs>0) ? (maxSat-r.satMs)<PRES_FRESH : (r.atMs>0 && (now-r.atMs)<PRES_FRESH);
+  // Only this team's L10. An entry with no team is from a client on an older build that didn't record
+  // one — excluded rather than shown everywhere, which is the bug this replaced.
+  const list=rows
+    .filter(r=> (r.satMs>0||r.atMs>0) && fresh(r) && String(r.team||"")===team)
     .sort((a,b)=> a.k===meKey?-1 : b.k===meKey?1 : String(a.name||"").localeCompare(String(b.name||"")));
   // "🚨 Tangent!" — only while a meeting is actually running; anyone on the L10 can fire it.
   const tBtn = meeting ? '<button class="lp-tangent" id="lpTangent" title="Call a tangent — everyone on this L10 sees it!">🚨 Tangent!</button>' : '';
@@ -5907,7 +5924,10 @@ function mirroredRows(t, key){
   const add=(o,h)=>{ if(seen.has(o.id)) return; seen.add(o.id); rows.push({o,home:h,mirror:true}); };
   // EXPLICIT surfacing: an item shows on its home team + any team in item.showOn (the chips you clicked).
   // Same rule for Rocks AND measurables — nothing implicit, so nothing surprises you.
-  (data.teams||[]).forEach(h=>{ if(h===t || !canSeeTeam(h)) return;   // a restricted team's items never mirror onto a board for people who can't see it
+  // We do NOT gate this on whether the viewer can see the HOME team: sharing a number onto team `t` is a
+  // deliberate choice to report it there, so everyone who can open `t` must see it — otherwise a leader who
+  // reports their own metric up to a shared meeting is invisible to the very team they shared it with.
+  (data.teams||[]).forEach(h=>{ if(h===t) return;
     (h[key]||[]).forEach(o=>{ if(Array.isArray(o.showOn) && o.showOn.indexOf(t.id)>=0) add(o,h); }); });
   return rows;
 }
