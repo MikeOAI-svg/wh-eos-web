@@ -4967,7 +4967,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=208;
+const BUILD=210;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5429,10 +5429,21 @@ function flushAdopt(){
 // a short tail after release so the click has landed. Capture + passive so it can't interfere with the click.
 window.addEventListener("pointerdown",()=>{ _pointerDown=true; _pointerDownAt=Date.now(); },{capture:true,passive:true});
 ["pointerup","pointercancel"].forEach(ev=>window.addEventListener(ev,()=>{ _pointerDown=false; _pointerUpAt=Date.now(); lastCommit=Date.now(); },{capture:true,passive:true}));
-// Auto-update ONLY a truly-abandoned tab (10+ minutes with zero activity) and never during a live meeting.
-// The 25-second version was yanking people out of the L10 AND the Sales Card mid-entry on every deploy —
-// losing their numbers. Anyone still working just sees the "new version" bar and reloads when they choose.
-setInterval(()=>{ if(updateReady && !meeting && !isBusy() && Date.now()-lastActivity>600000) location.reload(); },5000);
+// Get a stale device onto the current build FAST, so no one runs last month's buggy code through a whole
+// meeting (the old "10 min idle AND never in a meeting" rule let that happen every L10). We reload ONLY at a
+// genuinely safe moment, so nothing is lost: NOT focused in any field, NOT mid-click, and ~40s since ANY
+// interaction — far longer than the 700ms save debounce, so every pending write has already flushed. This is
+// why the earlier 25s version lost numbers: it reloaded people mid-entry. Works during a meeting too — the
+// live L10 lives in shared data, so a reload rejoins it at the current segment. A sessionStorage stamp stops a
+// browser that keeps serving cached code from reload-looping (then the manual "new version" bar takes over).
+setInterval(()=>{
+  if(!updateReady || isBusy() || gestureActive()) return;
+  if((Date.now()-lastActivity) < 40000) return;
+  let last=0; try{ last=+(sessionStorage.getItem("eostracker.updReload")||0); }catch(e){}
+  if(Date.now()-last < 180000) return;
+  try{ sessionStorage.setItem("eostracker.updReload", String(Date.now())); }catch(e){}
+  location.reload();
+}, 5000);
 
 /* ================= PER-TEAM DOCUMENTS (Phase 0 — GATED, off until migrated) =================
    The whole workspace is normally ONE doc (workspaces/main). That's the single lane where teams
@@ -5802,13 +5813,13 @@ function personHireDate(name){
   const r=(evalData.reports||{})[k];     // fall back to an eval-file date we can see (our own reports / HR)
   return (r&&r.hireDate)||"";
 }
-function hireDue(name){ const h=personHireDate(name); return h?nextAnniversary(h,todayIso()):""; }
+function hireDue(name){ const r=(evalData.reports||{})[evNameKey(name)]; if(r&&r.nextDue) return r.nextDue; const h=personHireDate(name); return h?currentEvalDue(h,todayIso()):""; }
 function setPersonHireDate(name, iso){
   const k=evNameKey(name); iso=(iso||"").trim();
   data.hireDates=data.hireDates||{};
   if(iso) data.hireDates[k]=iso; else delete data.hireDates[k];
   mergeCompany(comp=>{ comp.hireDates=comp.hireDates||{}; if(iso) comp.hireDates[k]=iso; else delete comp.hireDates[k]; });
-  try{ if(evalData&&evalData.reports){ const r=evalReport(name); r.hireDate=iso; r.nextDue=iso?nextAnniversary(iso,todayIso()):""; saveEvals(); } }catch(e){}   // keep the supervisor's own eval reminders in sync when we hold that file
+  try{ if(evalData&&evalData.reports){ const r=evalReport(name); r.hireDate=iso; r.nextDue=iso?currentEvalDue(iso,todayIso()):""; saveEvals(); } }catch(e){}   // keep the supervisor's own eval reminders in sync when we hold that file — THIS cycle's anniversary, overdue allowed
 }
 // HR: anyone. Facility leader: anyone in their branch. Supervisor: their direct reports.
 function canSetHireDate(name){
@@ -5824,7 +5835,7 @@ function evalReport(name){
   evalData.reports=evalData.reports||{}; const k=evNameKey(name);
   if(!evalData.reports[k]) evalData.reports[k]={name:String(name||"").trim(), hireDate:"", nextDue:"", draft:null, history:[]};
   else if(!evalData.reports[k].name) evalData.reports[k].name=String(name||"").trim();
-  if(!evalData.reports[k].hireDate){ const ph=(data.hireDates||{})[k]; if(ph){ evalData.reports[k].hireDate=ph; if(!evalData.reports[k].nextDue) evalData.reports[k].nextDue=nextAnniversary(ph,todayIso()); } }   // adopt a company-level hire date set by a facility leader / HR
+  if(!evalData.reports[k].hireDate){ const ph=(data.hireDates||{})[k]; if(ph){ evalData.reports[k].hireDate=ph; if(!evalData.reports[k].nextDue) evalData.reports[k].nextDue=currentEvalDue(ph,todayIso()); } }   // adopt a company-level hire date set by a facility leader / HR
   return evalData.reports[k];
 }
 /* Due dates ride the hire-date anniversary. */
@@ -5834,6 +5845,17 @@ function nextAnniversary(hireISO, fromISO){
   const h=new Date(hireISO+"T00:00:00"), f=new Date((fromISO||todayIso())+"T00:00:00");
   let due=new Date(f.getFullYear(), h.getMonth(), h.getDate());
   if(due<f) due=new Date(f.getFullYear()+1, h.getMonth(), h.getDate());
+  return isoOfDate(due);
+}
+// The review cycle currently IN PLAY for someone who hasn't been evaluated yet: THIS year's hire anniversary
+// — even if it has already passed (so an overdue review can still be logged, instead of skipping to next year
+// and making this year's impossible). Only rolls to next year when the anniversary falls on/before the hire
+// date itself (i.e. hired this calendar year, so no anniversary has come around yet).
+function currentEvalDue(hireISO, fromISO){
+  if(!hireISO) return "";
+  const h=new Date(hireISO+"T00:00:00"), f=new Date((fromISO||todayIso())+"T00:00:00");
+  let due=new Date(f.getFullYear(), h.getMonth(), h.getDate());
+  if(due<=h) due=new Date(f.getFullYear()+1, h.getMonth(), h.getDate());
   return isoOfDate(due);
 }
 function daysUntilIso(iso){ if(!iso) return null; const t=new Date(todayIso()+"T00:00:00"), d=new Date(iso+"T00:00:00"); return Math.round((d-t)/86400000); }
@@ -8745,7 +8767,7 @@ const evExecLabel=v=>{ const o=EVAL_EXEC.find(x=>x[0]===v); return o?o[1]:"—";
 // One row of the Branch Evals roster: name · seat · hire date · next-due badge · Set/Edit (if permitted).
 function hireRosterRow(name){
   const seat=(seatsFor(name)[0]||{}).role||"";
-  const hire=personHireDate(name), due=hire?nextAnniversary(hire,todayIso()):"";
+  const hire=personHireDate(name), due=hireDue(name);
   const d=due?daysUntilIso(due):null, tier=due?evalTier(due):null;
   let pill;
   if(!hire) pill=`<span class="ev-pill set">No hire date</span>`;
@@ -8871,7 +8893,8 @@ function setHireDate(name, after){
     <div id="hd-due" class="hint" style="margin:-4px 2px 4px"></div>
     <div class="sheet-actions"><button class="btn ghost" id="hd-cancel">Cancel</button><button class="btn" id="hd-save">Save</button></div>`);
   const upd=()=>{ const box=$("#hd-due"); if(!box) return; const v=$("#hd-date").value;
-    box.innerHTML = v ? `Next evaluation due: <b>${esc(fmtLong(nextAnniversary(v,todayIso())))}</b> <span style="color:var(--muted)">(on the hire anniversary)</span>` : ""; };
+    box.innerHTML = v ? (function(){ const d=currentEvalDue(v,todayIso()), past=d<todayIso();
+      return `${past?"Evaluation due <b style='color:var(--red)'>now (overdue)</b> — ":"Evaluation due: "}<b>${esc(fmtLong(d))}</b> <span style="color:var(--muted)">(on the hire anniversary)</span>`; })() : ""; };
   upd(); { const di=$("#hd-date"); if(di) di.oninput=upd; }
   $("#hd-cancel").onclick=closeSheet;
   $("#hd-save").onclick=()=>{ const v=$("#hd-date").value; setPersonHireDate(name, v);
