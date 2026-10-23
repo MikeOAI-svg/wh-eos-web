@@ -12009,6 +12009,16 @@ function concludeMeeting(auto){
     scorecardSnap:meetingScorecardSnap(t), rocksSnap:meetingRocksSnap(t)};   // freeze the numbers + Rock status reviewed today
   t.meetings.push(rec);
   t.liveMeeting=null;
+  // Closed-out items were just snapshotted into the minutes above — now remove them from the LIVE boards so
+  // a NEW meeting (and the Lists tab) starts clean: solved issues, done to-dos, and the headlines just
+  // presented. Nothing is lost; it's all frozen in rec. Headlines clear only by the ids we snapshotted, so
+  // a headline someone adds concurrently during the conclude survives for next time.
+  const _presentedHlIds=new Set((rec.headlinesSnap||[]).map(h=>h&&h.id).filter(Boolean));
+  const clearClosedOut=(x)=>{ if(!x) return;
+    if(x.issues)    x.issues   =x.issues.filter(i=>i&&!i.solved);
+    if(x.todos)     x.todos    =x.todos.filter(td=>td&&!td.done);
+    if(x.headlines) x.headlines=x.headlines.filter(h=>h&&!_presentedHlIds.has(h.id)); };
+  clearClosedOut(t);
   // Persist by MERGING into the latest server state — file the minutes, end the meeting, and keep every
   // to-do/issue (incl. ones added concurrently). Never refused, so the minutes always save.
   { const _tid=t.id, _rec=JSON.parse(JSON.stringify(rec));
@@ -12019,7 +12029,8 @@ function concludeMeeting(auto){
       st.meetings=st.meetings||[]; if(!st.meetings.some(m=>m&&m.id===_rec.id)) st.meetings.push(_rec);   // dedup by deterministic id
       st.liveMeeting=null;                                                                              // end it for everyone
       st.todos=upsertById(st.todos||[], _tTodos);   if(_dTodos.length)  st.todos=st.todos.filter(x=>!(x&&_dTodos.indexOf(x.id)>=0));
-      st.issues=upsertById(st.issues||[], _tIssues); if(_dIssues.length) st.issues=st.issues.filter(x=>!(x&&_dIssues.indexOf(x.id)>=0)); };
+      st.issues=upsertById(st.issues||[], _tIssues); if(_dIssues.length) st.issues=st.issues.filter(x=>!(x&&_dIssues.indexOf(x.id)>=0));
+      clearClosedOut(st); };                                                                             // strip solved issues / done to-dos / presented headlines from the server copy too
     // Surgical, auto-retrying write (mergeTeamMulti in multi-doc) so concluding is NEVER refused-and-reverted and
     // never clobbers concurrent edits by republishing the whole array — the meeting reliably ends + files once.
     if(MULTI) mergeTeamMulti(_tid, applyConclude); else mergeSave(state=>{ applyConclude((state.teams||[]).find(x=>x&&x.id===_tid)); }); }
