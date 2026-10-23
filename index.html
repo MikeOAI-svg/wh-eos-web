@@ -59,6 +59,11 @@
   .brand-word{font-size:19px; font-weight:800; letter-spacing:1px; color:var(--text)}
   .wh-mark{height:30px; width:auto; margin-left:auto; opacity:.92; display:block}
   .brandbar .bell{margin-left:0}   /* the WH mark now owns the right-push; keep bell right beside it */
+  /* Signed-in staff name, top right — personalizes the platform per user */
+  .user-badge{display:inline-flex; align-items:center; gap:7px; padding:4px 11px 4px 4px; border:1px solid var(--border); border-radius:999px; background:var(--card); max-width:210px}
+  .ub-av{width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff; font-size:10.5px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; letter-spacing:.3px}
+  .ub-name{font-size:12.5px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  @media(max-width:560px){ .ub-name{display:none} .user-badge{padding:3px; max-width:none} }
   .brand-word .dot{color:var(--accent); margin:0 1px}
   .brand-word .hl{color:var(--accent)}
   .brand-tag{margin-left:auto; font-size:10px; font-weight:800; letter-spacing:1px; text-transform:uppercase;
@@ -909,6 +914,22 @@
   .me-photo{position:relative}
   .me-photo img{width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid var(--border)}
   .me-img-x{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(20,22,27,.85);color:#fff;font-size:10px;cursor:pointer;line-height:18px;padding:0}
+  /* Editable snapshot grids (scorecard / sales) inside the minutes editor */
+  .me-grid-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:10px;margin-bottom:9px}
+  .me-grid{border-collapse:collapse;width:100%;min-width:560px}
+  .me-grid th,.me-grid td{border:1px solid var(--border);padding:2px;text-align:center;vertical-align:middle}
+  .me-grid th{font-size:9.5px;font-weight:800;color:var(--muted);background:var(--bg)}
+  .me-grid .me-in{border:none;border-radius:6px;padding:5px 6px;font-size:12px;background:transparent;text-align:center}
+  .me-grid td:first-child .me-in,.me-grid th:first-child .me-in{text-align:left}
+  .me-cellv{width:44px!important;min-width:44px}
+  .me-sc-s{border:1px solid var(--border);background:var(--card);color:var(--muted);border-radius:6px;width:22px;height:22px;font-size:12px;cursor:pointer;padding:0;line-height:20px}
+  .me-sc-s.g{background:rgba(31,157,85,.18);color:#1f9d55;border-color:rgba(31,157,85,.4)}
+  .me-sc-s.r{background:rgba(224,72,61,.18);color:#e0483d;border-color:rgba(224,72,61,.4)}
+  .me-cellwrap{display:flex;align-items:center;gap:3px;justify-content:center}
+  .me-addrow{align-self:flex-start;margin-top:4px}
+  .me-hdr-fields{display:flex;gap:10px;flex-wrap:wrap}
+  .me-hdr-fields>div{display:flex;flex-direction:column;gap:3px}
+  .me-hdr-fields label{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
   /* Scorecard + Rocks snapshots inside the minutes view */
   .min-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .min-sc{border-collapse:collapse;font-size:11px;width:100%;min-width:640px}
@@ -1784,6 +1805,7 @@
       <svg class="brand-mark" role="img" aria-label="HEART.OS" viewBox="0 0 120 60" style="height:32px;width:auto;display:block;overflow:visible"><polyline points="6,34 46,34 58,34 68,13 82,51 94,34 114,34" fill="none" style="stroke:var(--accent)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="brand-word">HEART<span class="hl">.OS</span></span>
       <img class="wh-mark" id="whMark" alt="Warriors Heart" title="Warriors Heart">
+      <span class="user-badge" id="userBadge" style="display:none"><span class="ub-av" id="userAv"></span><span class="ub-name" id="userName"></span></span>
       <button class="bell" id="bell" title="Notifications" aria-label="Notifications"><span class="bi">🔔</span><span class="bell-ct" id="bellCt">0</span></button>
     </div>
     <div class="titlerow">
@@ -4968,7 +4990,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=212;
+const BUILD=213;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -10914,14 +10936,14 @@ function renderArchive(){
     return;
   }
   wrap.innerHTML=intro+ms.map(m=>{
-    const nT=(m.todos||[]).length, nI=(m.issues||[]).length;
-    return `<div class="arch-card">
+    const nT=(m.todos||[]).length, nI=(m.issues||[]).length, draft=!meetingIsFinal(m);
+    return `<div class="arch-card${draft?" is-draft":""}">
       <div class="arch-top">
-        <div><div class="arch-date">${fmtLong(m.date)}</div>
+        <div><div class="arch-date">${fmtLong(m.date)} ${draft?'<span class="min-badge draft">Draft</span>':""}</div>
           <div class="arch-meta">${m.durationMin} min · ${nI} issue${nI===1?"":"s"} solved · ${nT} to-do${nT===1?"":"s"}</div></div>
         <span class="pill ${m.avg>=8?"green":(m.avg>=6?"amber":"red")}">${m.avg?"Avg "+m.avg:"—"}</span>
       </div>
-      <button class="btn ghost sm" data-open-min="${m.id}">View minutes</button>
+      <button class="btn ghost sm" data-open-min="${m.id}">${draft?"Open & finish":"View minutes"}</button>
     </div>`;
   }).join("");
   wrap.querySelectorAll("[data-open-min]").forEach(b=>b.onclick=()=>showMinutes(b.dataset.openMin));
@@ -11244,16 +11266,46 @@ function renderMinutesEditor(){
       <input class="me-in me-td-text" data-ti="${i}" value="${esc(t.text||"")}" placeholder="To-do…">
       <input class="me-in me-td-owner" data-ti="${i}" value="${esc(t.owner||"")}" placeholder="Owner" style="max-width:130px">
       <input class="me-in me-td-due" data-ti="${i}" type="date" value="${esc(t.due||"")}" style="max-width:150px"></div>`).join("");
+  // Ratings (name + score). The overall average is recomputed from these on save.
+  const rts=(d.ratingList||[]).map((r,i)=>`<div class="me-row" data-ri="${i}">
+      <input class="me-in me-rt-name" data-ri="${i}" value="${esc(r.name||"")}" placeholder="Name">
+      <input class="me-in me-rt-score" data-ri="${i}" type="number" min="0" max="10" step="0.5" value="${esc(r.score==null?"":String(r.score))}" placeholder="/10" style="max-width:90px;flex:0 0 auto">
+      <button class="me-del" data-delrt="${i}" title="Remove">✕</button></div>`).join("");
+  // Scorecard snapshot grid — name/owner/goal + 13 week cells (value + on/off status).
+  const sc=d.scorecardSnap;
+  const scHtml = sc ? `<div class="me-grid-wrap"><table class="me-grid"><thead><tr><th>Measurable / owner</th><th>Goal</th>${Array.from({length:13},(_,i)=>`<th>W${i+1}</th>`).join("")}</tr></thead><tbody>${(sc.rows||[]).map((r,ri)=>`<tr data-scr="${ri}"><td><input class="me-in me-sc-name" data-scr="${ri}" value="${esc(r.name||"")}" placeholder="measurable"><input class="me-in me-sc-owner" data-scr="${ri}" value="${esc(r.owner||"")}" placeholder="owner" style="font-size:10.5px;color:var(--muted)"></td><td><input class="me-in me-sc-goal" data-scr="${ri}" value="${esc(r.goal||"")}" style="width:72px"></td>${(r.cells||[]).map((c,ci)=>`<td><div class="me-cellwrap"><input class="me-in me-cellv me-sc-v" data-scr="${ri}" data-sc="${ci}" value="${esc(c.v||"")}"><button type="button" class="me-sc-s ${c.s==="on"?"g":c.s==="off"?"r":""}" data-scr="${ri}" data-sc="${ci}" title="toggle on / off">${c.s==="on"?"✓":c.s==="off"?"✗":"·"}</button></div></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : '<div class="hint">No scorecard was captured for this meeting.</div>';
+  // Rocks snapshot rows.
+  const rk=d.rocksSnap;
+  const rkHtml = rk ? (rk.rows||[]).map((r,i)=>`<div class="me-row" data-rkr="${i}">
+      <select class="me-in me-rk-st" data-rkr="${i}" style="max-width:120px;flex:0 0 auto">${["on","off","done","notdone"].map(s=>`<option value="${s}" ${r.status===s?"selected":""}>${ROCK_LABEL[s]}</option>`).join("")}</select>
+      <input class="me-in me-rk-title" data-rkr="${i}" value="${esc(r.title||"")}" placeholder="Rock">
+      <input class="me-in me-rk-owner" data-rkr="${i}" value="${esc(r.owner||"")}" placeholder="owner" style="max-width:120px;flex:0 0 auto">
+      <input class="me-in me-rk-pct" data-rkr="${i}" type="number" min="0" max="100" value="${esc(r.pct==null?"":String(r.pct))}" style="max-width:66px;flex:0 0 auto" title="% complete"></div>`).join("") : '<div class="hint">No rocks were captured for this meeting.</div>';
+  // Sales Card snapshot (Admissions only) — editable section/column/row names + values.
+  const sl=d.salesSnap;
+  const slHtml = (sl&&(sl.sections||[]).length) ? (sl.sections||[]).map((sec,si)=>{ const cols=sec.columns||[], rows=sec.rows||[];
+      return `<div class="me-grid-wrap"><table class="me-grid"><thead><tr><th><input class="me-in me-sl-secname" data-si="${si}" value="${esc(sec.name||"")}"></th>${cols.map((c,ci)=>`<th><input class="me-in me-sl-colname" data-si="${si}" data-ci="${ci}" value="${esc(c.name||"")}" style="width:78px"></th>`).join("")}</tr></thead><tbody>${rows.map((r,ri)=>`<tr><td><input class="me-in me-sl-rowname" data-si="${si}" data-ri="${ri}" value="${esc(r.name||"")}"></td>${cols.map(c=>{ const v=((sec.values||{})[r.id]||{})[c.id]||""; return `<td><input class="me-in me-cellv me-sl-val" data-si="${si}" data-rid="${esc(r.id)}" data-cid="${esc(c.id)}" value="${esc(v)}"></td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }).join("") : "";
   openSheet(`
     <h2>Edit minutes</h2>
-    <div class="min-head">${fmtLong(d.date)} · ${esc(d.team||TEAM().name)}</div>
+    <div class="min-head">${esc(d.team||TEAM().name)}</div>
     <div class="me-form">
+      <label>Meeting date &amp; length</label>
+      <div class="me-hdr-fields">
+        <div><label>Date</label><input class="me-in" id="me-date" type="date" value="${esc(d.date||"")}" style="max-width:170px"></div>
+        <div><label>Duration (min)</label><input class="me-in" id="me-dur" type="number" min="1" value="${esc(d.durationMin==null?"":String(d.durationMin))}" style="max-width:120px"></div>
+      </div>
       <label>WIFLS notes</label><textarea class="me-ta" id="me-segue" placeholder="Any shared notes…">${esc(n.segue||"")}</textarea>
       <label>Scorecard notes</label><textarea class="me-ta" id="me-scorecard">${esc(n.scorecard||"")}</textarea>
+      <label>Scorecard — numbers reviewed</label><div id="me-scsnap">${scHtml}</div>
+      ${slHtml?`<label>Sales Card — numbers reviewed</label><div id="me-slsnap">${slHtml}</div>`:""}
+      <label>Rocks — status reviewed</label><div id="me-rksnap">${rkHtml}</div>
       <label>Headlines</label><div id="me-hls">${hls||'<div class="hint">No headlines recorded.</div>'}</div>
       <label>Issues solved (IDS)</label><div id="me-isss">${iss||'<div class="hint">No issues recorded.</div>'}</div>
       <label>New to-dos</label><div id="me-tds">${tds||'<div class="hint">No to-dos recorded.</div>'}</div>
       <label>Cascading messages</label><textarea class="me-ta" id="me-cascade">${esc(n.cascade||"")}</textarea>
+      <label>Ratings (average is recalculated from these)</label>
+      <div id="me-rts">${rts||'<div class="hint">No ratings recorded.</div>'}</div>
+      <button class="btn ghost sm me-addrow" id="me-addrt">+ Add rating</button>
     </div>
     <div class="sheet-actions">
       <button class="btn ghost" id="me-cancel">Cancel</button>
@@ -11262,20 +11314,54 @@ function renderMinutesEditor(){
   // Live-bind every field straight into the draft so a re-render (e.g. after a photo change) keeps edits.
   const bindN=(sel,key)=>{ const el=$(sel); if(el) el.oninput=()=>{ d.notes=d.notes||{}; d.notes[key]=el.value; }; };
   bindN("#me-segue","segue"); bindN("#me-scorecard","scorecard"); bindN("#me-cascade","cascade");
+  { const e=$("#me-date"); if(e) e.oninput=()=>{ d.date=e.value; }; }
+  { const e=$("#me-dur"); if(e) e.oninput=()=>{ d.durationMin=Math.max(1,parseInt(e.value,10)||1); }; }
   $("#sheet").querySelectorAll(".me-hl-text").forEach(el=>el.oninput=()=>{ d.headlinesSnap[+el.dataset.hi].text=el.value; });
   $("#sheet").querySelectorAll(".me-iss-text").forEach(el=>el.oninput=()=>{ d.issues[+el.dataset.ii].text=el.value; });
   $("#sheet").querySelectorAll(".me-iss-f").forEach(el=>el.oninput=()=>{ const is=d.issues[+el.dataset.ii]; is.ids=is.ids||{}; is.ids[el.dataset.f]=el.value; });
   $("#sheet").querySelectorAll(".me-td-text").forEach(el=>el.oninput=()=>{ d.todos[+el.dataset.ti].text=el.value; });
   $("#sheet").querySelectorAll(".me-td-owner").forEach(el=>el.oninput=()=>{ d.todos[+el.dataset.ti].owner=el.value; });
   $("#sheet").querySelectorAll(".me-td-due").forEach(el=>el.oninput=()=>{ d.todos[+el.dataset.ti].due=el.value; });
+  // Ratings
+  $("#sheet").querySelectorAll(".me-rt-name").forEach(el=>el.oninput=()=>{ d.ratingList[+el.dataset.ri].name=el.value; });
+  $("#sheet").querySelectorAll(".me-rt-score").forEach(el=>el.oninput=()=>{ d.ratingList[+el.dataset.ri].score=el.value; });
+  $("#sheet").querySelectorAll("[data-delrt]").forEach(b=>b.onclick=()=>{ d.ratingList.splice(+b.dataset.delrt,1); renderMinutesEditor(); });
+  { const b=$("#me-addrt"); if(b) b.onclick=()=>{ d.ratingList=d.ratingList||[]; d.ratingList.push({name:"",score:""}); renderMinutesEditor(); }; }
+  // Scorecard snapshot — text fields bind live; the on/off button toggles in place (no re-render, so focus/scroll hold)
+  $("#sheet").querySelectorAll(".me-sc-name").forEach(el=>el.oninput=()=>{ d.scorecardSnap.rows[+el.dataset.scr].name=el.value; });
+  $("#sheet").querySelectorAll(".me-sc-owner").forEach(el=>el.oninput=()=>{ d.scorecardSnap.rows[+el.dataset.scr].owner=el.value; });
+  $("#sheet").querySelectorAll(".me-sc-goal").forEach(el=>el.oninput=()=>{ d.scorecardSnap.rows[+el.dataset.scr].goal=el.value; });
+  $("#sheet").querySelectorAll(".me-sc-v").forEach(el=>el.oninput=()=>{ d.scorecardSnap.rows[+el.dataset.scr].cells[+el.dataset.sc].v=el.value; });
+  $("#sheet").querySelectorAll(".me-sc-s").forEach(b=>b.onclick=()=>{ const c=d.scorecardSnap.rows[+b.dataset.scr].cells[+b.dataset.sc];
+      c.s = c.s==="on"?"off":(c.s==="off"?"":"on"); b.textContent=c.s==="on"?"✓":c.s==="off"?"✗":"·"; b.className="me-sc-s "+(c.s==="on"?"g":c.s==="off"?"r":""); });
+  // Rocks snapshot
+  $("#sheet").querySelectorAll(".me-rk-st").forEach(el=>el.onchange=()=>{ d.rocksSnap.rows[+el.dataset.rkr].status=el.value; });
+  $("#sheet").querySelectorAll(".me-rk-title").forEach(el=>el.oninput=()=>{ d.rocksSnap.rows[+el.dataset.rkr].title=el.value; });
+  $("#sheet").querySelectorAll(".me-rk-owner").forEach(el=>el.oninput=()=>{ d.rocksSnap.rows[+el.dataset.rkr].owner=el.value; });
+  $("#sheet").querySelectorAll(".me-rk-pct").forEach(el=>el.oninput=()=>{ d.rocksSnap.rows[+el.dataset.rkr].pct=Math.max(0,Math.min(100,parseInt(el.value,10)||0)); });
+  // Sales snapshot
+  $("#sheet").querySelectorAll(".me-sl-secname").forEach(el=>el.oninput=()=>{ d.salesSnap.sections[+el.dataset.si].name=el.value; });
+  $("#sheet").querySelectorAll(".me-sl-colname").forEach(el=>el.oninput=()=>{ d.salesSnap.sections[+el.dataset.si].columns[+el.dataset.ci].name=el.value; });
+  $("#sheet").querySelectorAll(".me-sl-rowname").forEach(el=>el.oninput=()=>{ d.salesSnap.sections[+el.dataset.si].rows[+el.dataset.ri].name=el.value; });
+  $("#sheet").querySelectorAll(".me-sl-val").forEach(el=>el.oninput=()=>{ const sec=d.salesSnap.sections[+el.dataset.si]; sec.values=sec.values||{}; const rid=el.dataset.rid, cid=el.dataset.cid; sec.values[rid]=sec.values[rid]||{}; if(el.value==="") delete sec.values[rid][cid]; else sec.values[rid][cid]=el.value; });
+  // Headlines photo add/remove (re-render keeps unsaved text because every field writes straight to the draft)
   $("#sheet").querySelectorAll("[data-delhl]").forEach(b=>b.onclick=()=>{ d.headlinesSnap.splice(+b.dataset.delhl,1); renderMinutesEditor(); });
   $("#sheet").querySelectorAll("[data-rmimg]").forEach(b=>b.onclick=()=>{ const h=d.headlinesSnap[+b.dataset.rmimg]; if(h&&h.images) h.images=h.images.filter(im=>im&&im.url!==b.dataset.url); renderMinutesEditor(); });
   $("#sheet").querySelectorAll("[data-addimg]").forEach(b=>{ const i=+b.dataset.addimg, st=$("#sheet").querySelector(`[data-hlstat="${i}"]`);
     b.onclick=()=>pickAndUpload(img=>{ const h=d.headlinesSnap[i]; if(h){ h.images=h.images||[]; h.images.push(img); } renderMinutesEditor(); }, st); });
   $("#me-cancel").onclick=()=>{ _meDraft=null; _meId=null; showMinutes(id); };
   $("#me-save").onclick=()=>{
-    const patch=JSON.parse(JSON.stringify({ notes:d.notes||{}, headlinesSnap:d.headlinesSnap||[], issues:d.issues||[], todos:d.todos||[] }));
-    const apply=t=>{ const mm=(t.meetings||[]).find(x=>x&&x.id===id); if(mm){ mm.notes=patch.notes; mm.headlinesSnap=patch.headlinesSnap; mm.issues=patch.issues; mm.todos=patch.todos; } };
+    // Recompute scorecard on/tot per row and the overall rating average from the edited values.
+    if(d.scorecardSnap&&d.scorecardSnap.rows) d.scorecardSnap.rows.forEach(r=>{ let on=0,off=0; (r.cells||[]).forEach(c=>{ if(c.s==="on")on++; else if(c.s==="off")off++; }); r.on=on; r.tot=on+off; });
+    const scores=(d.ratingList||[]).map(r=>parseFloat(r.score)).filter(v=>!isNaN(v));
+    const avg=scores.length?+(scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1):0;
+    const patch=JSON.parse(JSON.stringify({ date:d.date, durationMin:d.durationMin, avg:avg, ratingList:d.ratingList||[],
+      notes:d.notes||{}, headlinesSnap:d.headlinesSnap||[], issues:d.issues||[], todos:d.todos||[],
+      scorecardSnap:d.scorecardSnap||null, rocksSnap:d.rocksSnap||null, salesSnap:d.salesSnap||null }));
+    const apply=t=>{ const mm=(t.meetings||[]).find(x=>x&&x.id===id); if(mm){
+        mm.date=patch.date; mm.durationMin=patch.durationMin; mm.avg=patch.avg; mm.ratingList=patch.ratingList;
+        mm.notes=patch.notes; mm.headlinesSnap=patch.headlinesSnap; mm.issues=patch.issues; mm.todos=patch.todos;
+        mm.scorecardSnap=patch.scorecardSnap; mm.rocksSnap=patch.rocksSnap; mm.salesSnap=patch.salesSnap; } };
     apply(TEAM()); mergeTeam(TEAM().id, apply);
     _meDraft=null; _meId=null; showMinutes(id); renderArchive();
   };
@@ -11337,7 +11423,7 @@ function renderL10(){
         <button class="btn" style="flex:1" id="nextSegB">${meeting.seg<6?"Next Segment ›":"Finish & Rate"}</button>
       </div>`:""}
     <div class="agenda ${driving?"":"ro"}">${agenda}</div>
-    ${driving?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px">Cancel meeting</button>`:""}`;
+    ${driving?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px">End meeting early (saves a draft)</button>`:""}`;
 
   renderSegContent(meeting.seg);
   if(driving){
@@ -11347,8 +11433,8 @@ function renderL10(){
     wrap.querySelector("#prevSeg").onclick=goPrev;
     { const nb=wrap.querySelector("#nextSegB"); if(nb) nb.onclick=goNext; const pb=wrap.querySelector("#prevSegB"); if(pb) pb.onclick=goPrev; }
     wrap.querySelectorAll(".ag-item").forEach(a=>a.onclick=()=>advanceSeg(+a.dataset.seg));
-    wrap.querySelector("#cancelMeeting").onclick=()=>{ if(confirm("Cancel this meeting without saving? This ends it for everyone following.")){
-      TEAM().liveMeeting=null; saveL10(true, true); stopTick(); meeting=null; renderL10(); } };   // ending=true: this is the one place a saveL10 is ALLOWED to clear the meeting
+    wrap.querySelector("#cancelMeeting").onclick=()=>{ if(confirm("End this meeting now?\n\nYour notes, IDS and ratings so far will be saved as DRAFT minutes — you can finish editing them, or delete them, from Recent Meetings afterward. Nothing is lost.\n\nThis ends it for everyone following.")){
+      cancelToDraft(); } };   // auto-saves a draft via the same safe merge write as conclude
   } else {
     wrap.querySelector("#takeOver").onclick=takeOverMeeting;
   }
@@ -11838,6 +11924,61 @@ function startTick(){ stopTick(); paintTimer(); tick=setInterval(paintTimer,1000
 function stopTick(){ if(tick){ clearInterval(tick); tick=null; } }
 // keep totalElapsed roughly current
 setInterval(()=>{ if(meeting){ /* no-op; total computed live */ } },1000);
+// Build the minutes record from the CURRENT live meeting (pure snapshot, no side effects). Shared by the
+// normal conclude and by Cancel-saves-a-draft, so a canceled/accidentally-ended meeting keeps everything.
+// opts.draft=true marks it finalized:false so it files as an editable DRAFT.
+function buildMeetingRec(opts){
+  opts=opts||{};
+  const members=meetingRoster().length?meetingRoster():[{id:"me",name:"Me"}];   // includes meeting guests
+  const vals=members.map(m=>parseFloat(meeting.ratings[m.id])).filter(v=>!isNaN(v));
+  const avg=vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):0;
+  const durationMin=Math.max(1,Math.round((meeting.totalElapsed+meeting.segElapsed)/60));
+  const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
+  const createdIds=new Set(meeting.createdTodos||[]), revNow=Date.now(), REV_WIN=9*864e5;
+  const reviewedTodos=TEAM().todos
+    .filter(t=> !createdIds.has(t.id) && ( !t.done || (t.doneAt && (revNow-Date.parse(t.doneAt))<REV_WIN) ))
+    .map(t=>({text:t.text, owner:t.owner, due:t.due, done:!!t.done}));
+  const ratingList=members.map(m=>({name:m.name,score:meeting.ratings[m.id]}))
+                          .filter(r=>r.score!==undefined&&r.score!=="");
+  const t=TEAM();
+  const rec={id:"m_"+(meeting.startedAt||Date.now()),date:meeting.date,durationMin,avg,
+    ratings:{...meeting.ratings}, ratingList,
+    notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
+    issues:(meeting.solvedIssues||[]), team:t.name, summary:meetingSummary(t),
+    headlinesSnap:JSON.parse(JSON.stringify(teamHeadlines(t))),
+    salesSnap:(t.salesCard?{weekStart:t.salesCard.weekStart, sections:JSON.parse(JSON.stringify(t.salesCard.sections||[]))}:null),
+    scorecardSnap:meetingScorecardSnap(t), rocksSnap:meetingRocksSnap(t)};
+  if(opts.draft) rec.finalized=false;   // files as a DRAFT the team can finish or delete
+  return rec;
+}
+// Cancel / end-early: instead of discarding, snapshot the work-so-far as a DRAFT minutes record using the
+// SAME surgical, auto-retrying merge write as concludeMeeting — so nothing is lost and the write is never
+// refused-and-reverted. The meeting still ends for everyone following.
+function cancelToDraft(){
+  if(!meeting || meeting._concluding) return;
+  meeting._concluding=true;
+  clearTimeout(_l10Timer); _l10Timer=null;   // kill any pending debounced write so it can't resurrect the meeting
+  commitSegTime();
+  const t=TEAM();
+  const rec=buildMeetingRec({draft:true});
+  t.meetings.push(rec);
+  t.liveMeeting=null;
+  { const _tid=t.id, _rec=JSON.parse(JSON.stringify(rec));
+    const _tTodos=JSON.parse(JSON.stringify((t.todos||[]).filter(x=>x&&_touchedTodos.has(x.id))));
+    const _tIssues=JSON.parse(JSON.stringify((t.issues||[]).filter(x=>x&&_touchedIssues.has(x.id))));
+    const _dTodos=[..._deletedTodos], _dIssues=[..._deletedIssues];
+    const applyCancel=(st)=>{ if(!st) return;
+      st.meetings=st.meetings||[]; if(!st.meetings.some(m=>m&&m.id===_rec.id)) st.meetings.push(_rec);   // dedup by deterministic id
+      st.liveMeeting=null;                                                                               // end it for everyone
+      st.todos=upsertById(st.todos||[], _tTodos);   if(_dTodos.length)  st.todos=st.todos.filter(x=>!(x&&_dTodos.indexOf(x.id)>=0));
+      st.issues=upsertById(st.issues||[], _tIssues); if(_dIssues.length) st.issues=st.issues.filter(x=>!(x&&_dIssues.indexOf(x.id)>=0)); };
+    if(MULTI) mergeTeamMulti(_tid, applyCancel); else mergeSave(state=>{ applyCancel((state.teams||[]).find(x=>x&&x.id===_tid)); }); }
+  stopTick(); meeting=null;
+  const cb=$("#l10CapBar"); if(cb) cb.remove();
+  renderL10();
+  setSync("Saved as draft minutes 📝");
+  showMinutes(rec.id);   // open the draft so staff see it saved and can finish/download/delete it
+}
 function concludeMeeting(auto){
   if(!meeting || meeting._concluding) return;   // guard against a double-fire (e.g. two ticks / two editors)
   meeting._concluding=true;
@@ -13111,6 +13252,20 @@ const TITLES={scorecard:["Scorecard","13-week measurables"],rocks:["Rocks","Quar
   evals:["Evaluations","Annual performance reviews"],
   guide:["Guide","How to use your Operating System"]};
 function refreshHeader(){ /* team name in sub of scorecard */ }
+// Top-right signed-in staff name (initials avatar + name). Runs from switchView, so it fills in as
+// soon as the person is placed (has a name in data.people) and on every nav/sync. Hidden before sign-in.
+function renderUserBadge(){
+  const b=$("#userBadge"); if(!b) return;
+  const nm=myName();
+  if(!nm){ b.style.display="none"; return; }
+  const parts=nm.trim().split(/\s+/);
+  const initials=(((parts[0]||"")[0]||"")+((parts.length>1?parts[parts.length-1]:"")[0]||"")).toUpperCase();
+  const av=$("#userAv"), nmEl=$("#userName");
+  if(av) av.textContent=initials;
+  if(nmEl) nmEl.textContent=nm;   // textContent — never esc() needed, and never HTML
+  b.title="Signed in as "+nm;
+  b.style.display="";
+}
 let currentView="scorecard";
 function switchView(v){
   if(v!=="vision") acDraftMode=false;              // draft chart is confined to the chart view — exit it on navigate-away
@@ -13137,6 +13292,7 @@ function switchView(v){
                           :(v==="guide")?"How we use this to run the company"
                           :TEAM().name;
   renderTeamPicker();
+  renderUserBadge();
   $("main").scrollTop=0;
   if(v==="scorecard") renderScorecard();
   if(v==="rocks") renderRocks();
