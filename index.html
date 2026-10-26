@@ -5166,6 +5166,35 @@ function mergeSave(applyState){   // apply a change to the freshly-read SERVER s
   })).then(()=>setSync("Saved")).catch(e=>{ console.error("mergeSave tx failed — falling back",e); save(); });
 }
 let _l10Timer=null;
+// key -> last time THIS client typed in that box (WIFLS/notes/IDS). Lets the live-text patch stream a
+// teammate's typing into their box without a full rebuild, while NEVER reverting a box you just touched.
+let _fieldEditAt={};
+// Live-stream teammates' shared text (WIFLS one-box-per-person, IDS worksheet, Other notes, Cascade) into
+// their boxes WITHOUT a full view rebuild — so people see WIFLS being documented in real time even while
+// they're focused in their own box. We patch ONLY boxes you aren't focused in and haven't just edited (so
+// your own words are never reverted); the per-field locks already keep writes from colliding. Updates the
+// in-memory meeting too, so a later Next/save carries what streamed in. `team` is the incoming team doc.
+function livePatchSharedText(team){
+  const host=$("#segContent"); if(!host || !team || !meeting) return;
+  const lm=team.liveMeeting; if(!lm) return;
+  const ae=document.activeElement, nowT=Date.now();
+  host.querySelectorAll("[data-lock]").forEach(el=>{
+    if(el===ae) return;                                                  // never touch the box the cursor is in
+    const k=el.getAttribute("data-lock"); if(!k) return;
+    if((nowT-(_fieldEditAt[k]||0)) < 2500) return;                       // I typed here a moment ago — my value wins until my own write echoes back
+    let v, seg, person;
+    if(k.indexOf("by:")===0){ const rest=k.slice(3), si=rest.indexOf(":"); seg=rest.slice(0,si); person=rest.slice(si+1); v=((lm.byPerson||{})[seg]||{})[person]; }
+    else if(k.indexOf("note:")===0){ const f=k.slice(5); v=(lm.notes||{})[f]; }
+    else if(k.indexOf("ids:")===0){ const rest=k.slice(4), si=rest.indexOf(":"); const iid=rest.slice(0,si), f=rest.slice(si+1); const iss=(team.issues||[]).find(x=>x&&x.id===iid); v=iss&&iss.ids?iss.ids[f]:undefined; }
+    else return;
+    if(v===undefined) v="";
+    if(el.value!==v){ el.value=v;                                        // stream it in
+      if(k.indexOf("by:")===0){ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[seg]=meeting.byPerson[seg]||{}; meeting.byPerson[seg][person]=v; }   // keep local model in sync so Next/save carries it
+      else if(k.indexOf("note:")===0){ meeting.notes=meeting.notes||{}; meeting.notes[k.slice(5)]=v; }
+      // IDS text lives on the issue record; the full adopt updates TEAM().issues, so no extra local write needed here
+    }
+  });
+}
 // PER-TEAM MERGE: apply a change to THIS team's doc on the LATEST server copy — re-read, mutate, write in
 // one transaction. Like saveMeasurable, it never REFUSES and never clobbers other fields, so an add/edit
 // can't be lost to a concurrent save or a coalesced remote refresh — THE fix for "had to click Add/Save
@@ -5367,7 +5396,7 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); } }
+function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _fieldEditAt={}; } }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -5436,7 +5465,10 @@ let adoptTimer=null, lastAdopted="";
 function scheduleAdopt(incoming, at){ remoteQueued=incoming; if(typeof at==="number") remoteAt=at; clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,450); }
 function flushAdopt(){
   if(!remoteQueued) return;
-  if(isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS){ clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,400); return; }   // wait until they stop editing / a click in progress lands
+  if(isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS){
+    if(currentView==="l10" && meeting){ const mt=((remoteQueued&&remoteQueued.teams)||[]).find(x=>x&&x.id===curTeamId); livePatchSharedText(mt); }   // stream teammates' shared text in even while we can't rebuild yet
+    clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,400); return;   // wait until they stop editing / a click in progress lands
+  }
   const s=remoteQueued; remoteQueued=null;
   baseAt=Math.max(baseAt, remoteAt);        // our copy now reflects this server version (guards future writes)
   const json=JSON.stringify(s);
@@ -5499,7 +5531,10 @@ function adoptMulti(){
   const merged=assembleMulti(), json=JSON.stringify(merged);
   if(json===lastAdopted) return;                 // nothing changed since our last adopt
   if(_multiBooted && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
-      || (_teamWriteInFlight>0 && (Date.now()-_teamWriteSince)<3000))){ setTimeout(adoptMulti,400); return; }   // never rebuild mid-edit, during a click in progress, around a just-committed click, nor while our own team write is still confirming (would revert it)
+      || (_teamWriteInFlight>0 && (Date.now()-_teamWriteSince)<3000))){
+    if(currentView==="l10" && meeting){ const mt=(merged.teams||[]).find(x=>x&&x.id===curTeamId); livePatchSharedText(mt); }   // can't do a full rebuild yet (someone's typing) — but still STREAM teammates' shared text into their boxes so WIFLS/IDS show live
+    setTimeout(adoptMulti,400); return;   // never rebuild mid-edit, during a click in progress, around a just-committed click, nor while our own team write is still confirming (would revert it)
+  }
   lastAdopted=json;
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
@@ -11754,7 +11789,7 @@ function claimLock(key){ if(lockedByOther(key)) return false;
   if(_lockedKey && _lockedKey!==key) releaseLock(_lockedKey);
   meetLocks()[key]={email:myEmail(), name:myName()||myEmail(), at:Date.now()}; _lockedKey=key;
   startLockHb(); saveL10(true); return true; }
-function touchLock(key){ const l=meetLocks()[key]; if(l&&lockMine(l)) l.at=Date.now(); }
+function touchLock(key){ _fieldEditAt[key]=Date.now(); const l=meetLocks()[key]; if(l&&lockMine(l)) l.at=Date.now(); }   // stamp edit time so the live-text patch never reverts a box you just typed in
 function releaseLock(key){ if(!key) return; const l=meetLocks()[key];
   if(l&&lockMine(l)){ delete meetLocks()[key]; saveL10(true); }
   if(_lockedKey===key){ _lockedKey=null; stopLockHb(); } }
