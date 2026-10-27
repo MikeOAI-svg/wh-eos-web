@@ -4990,7 +4990,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=213;
+const BUILD=214;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5169,6 +5169,9 @@ let _l10Timer=null;
 // key -> last time THIS client typed in that box (WIFLS/notes/IDS). Lets the live-text patch stream a
 // teammate's typing into their box without a full rebuild, while NEVER reverting a box you just touched.
 let _fieldEditAt={};
+// {sa,at}: a meeting we JUST concluded/ended (by startedAt). Guards our own screen against a stale in-flight
+// snapshot briefly bringing it back after we end it (belt-and-suspenders to the server-side no-resurrect rule).
+let _justConcluded=null;
 // Live-stream teammates' shared text (WIFLS one-box-per-person, IDS worksheet, Other notes, Cascade) into
 // their boxes WITHOUT a full view rebuild — so people see WIFLS being documented in real time even while
 // they're focused in their own box. We patch ONLY boxes you aren't focused in and haven't just edited (so
@@ -5253,7 +5256,14 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
   const FAC=["activeIssue","solvedIssues","guests","locks"];   // facilitator drives IDS focus, solving, attendee list (locks ride along too)
   const apply=(st)=>{ const lt=JSON.parse(snapJson), loc=lt.liveMeeting;
     if(!loc){ if(ending) st.liveMeeting=null; }           // clear it for everyone ONLY on an explicit end — a stray/stale save must NEVER kick everyone out of a live meeting
-    else if(!st.liveMeeting){ st.liveMeeting=loc; }       // server has no meeting yet (we just started it) → take ours whole
+    else if(!st.liveMeeting){
+      // Server has no meeting. Normally that means WE just started it → take ours whole. BUT if this meeting
+      // was just CONCLUDED (its record is already filed in st.meetings, keyed by startedAt), a teammate's trailing
+      // rating/WIFLS save must NOT bring it back to life — that resurrection is exactly what made "Finish & Rate"
+      // need several clicks (each person's last save re-created the meeting the facilitator had just ended).
+      const sa=loc.startedAt||0, alreadyFiled = sa && (st.meetings||[]).some(m=>m && m.id===("m_"+sa));
+      if(!alreadyFiled) st.liveMeeting=loc;
+    }
     else { const merged=Object.assign({}, st.liveMeeting);   // start from the SERVER's latest, overlay only what we own
       const fac=isFacilitator();
       // NAV / IDENT / IDS-focus are facilitator-authoritative — but a CONTENT save (WIFLS/notes/IDS typing, the
@@ -5396,7 +5406,9 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); meeting=(t&&t.liveMeeting)||null; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _fieldEditAt={}; } }
+function syncMeetingRef(){ const t=TEAM(); let lm=(t&&t.liveMeeting)||null;
+  if(lm && _justConcluded && (lm.startedAt||0)===_justConcluded.sa && (Date.now()-_justConcluded.at)<8000) lm=null;   // ignore a meeting we just ended, even if a stale snapshot still carries it
+  meeting=lm; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _fieldEditAt={}; } }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -5900,12 +5912,15 @@ function setPersonHireDate(name, iso){
 function canSetHireDate(name){
   if(isEvalAdmin()) return true;
   const me=myName(); if(!me) return false;
-  if(facilitiesLedBy(me).length && peopleBelowMe(me).some(n=>sameName(n,name))) return true;
-  if(directReportsOf(me).some(n=>sameName(n,name))) return true;
+  if(peopleBelowMe(me).some(n=>sameName(n,name))) return true;   // any leader may set/edit hire dates for anyone in their branch (direct reports + everyone below)
   return false;
 }
-// Who can open the Branch Evals roster: facility leaders (their branch) + HR (everyone).
-function canSeeBranchEvals(){ return isEvalAdmin() || facilitiesLedBy(myName()).length>0; }
+// Who can open the Branch Evals roster: ANY leader with people below them sees their WHOLE branch's eval
+// schedule — direct reports AND everyone below them, all the way down — same as PA visibility cascading up
+// the chart. (HR/admin see everyone.) This is scheduling info only (hire dates + due dates); the confidential
+// review CONTENT stays per-supervisor (canDoEvals). Fixes "a director only saw their team lead, not the
+// people under that lead."
+function canSeeBranchEvals(){ const me=myName(); return isEvalAdmin() || (!!me && peopleBelowMe(me).length>0); }
 function evalReport(name){
   evalData.reports=evalData.reports||{}; const k=evNameKey(name);
   if(!evalData.reports[k]) evalData.reports[k]={name:String(name||"").trim(), hireDate:"", nextDue:"", draft:null, history:[]};
@@ -11992,6 +12007,7 @@ function buildMeetingRec(opts){
 function cancelToDraft(){
   if(!meeting || meeting._concluding) return;
   meeting._concluding=true;
+  _justConcluded={sa:(meeting.startedAt||0), at:Date.now()};   // a stale snapshot can't flicker the ended meeting back onto our screen
   clearTimeout(_l10Timer); _l10Timer=null;   // kill any pending debounced write so it can't resurrect the meeting
   commitSegTime();
   const t=TEAM();
@@ -12017,6 +12033,7 @@ function cancelToDraft(){
 function concludeMeeting(auto){
   if(!meeting || meeting._concluding) return;   // guard against a double-fire (e.g. two ticks / two editors)
   meeting._concluding=true;
+  _justConcluded={sa:(meeting.startedAt||0), at:Date.now()};   // so a stale in-flight snapshot can't flicker this meeting back onto our screen
   clearTimeout(_l10Timer); _l10Timer=null;   // kill any pending debounced note/rating write so it can't resurrect the meeting after we end it
   commitSegTime();
   // sum total across segments approximated by wall clock since start
