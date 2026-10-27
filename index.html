@@ -4990,7 +4990,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=214;
+const BUILD=215;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5843,7 +5843,7 @@ const EVAL_HR_EMAILS=["odellmike76@gmail.com","michael.odell@warriorsheart.com",
 // Texas → Gwen, Virginia → Ashtyn. Company-wide / shared staff (no single facility) show to all three.
 const EVAL_HR_PRIMARY={"Shared Services":"kayle.christian@warriorsheart.com","Texas Facility":"gwen.sanchez@warriorsheart.com","Virginia Facility":"ashtyn.morgan@warriorsheart.com"};
 const isEvalAdmin=()=>{ const e=myEmail(); return isAdmin() || EVAL_HR_EMAILS.indexOf(e)>=0; };
-const canDoEvals=()=>isSupervisor()||isEvalAdmin()||iHavePerm("evals");
+const canDoEvals=()=>evalIsSupervisor()||isEvalAdmin()||iHavePerm("evals");   // evalIsSupervisor covers people who conduct evals for reports under an open seat
 let evalData={reports:{}}, evalRef=null, evalUnsub=null, evalSaveTimer=null, evalPending=null;
 function startEvals(){
   const em=myEmail(); if(!em || evalRef) return;
@@ -7964,7 +7964,25 @@ function directReportsOf(name){
   });
   return [...m.values()].sort((a,b)=>a.localeCompare(b));
 }
+// WHO conducts a person's evaluations, honoring OPEN (vacant) seats: their direct reports PLUS anyone sitting
+// under a vacant child seat — when a supervisor seat is empty, responsibility for those people's evals rolls
+// UP to the nearest filled seat above the opening. Descends THROUGH empty seats only, stopping at each
+// occupied seat (that occupant owns their own branch). Mirror of managerOf, which climbs up past vacant seats.
+function evalReportsOf(name){
+  const seats=((data.accountability||{}).seats)||[];
+  const mine=seatsFor(name).map(s=>s.id); if(!mine.length) return [];
+  const out=new Map(), visited=new Set();
+  const kids=id=>seats.filter(s=>s&&s.parent===id);
+  const descend=id=>{ kids(id).forEach(cs=>{ if(visited.has(cs.id)) return; visited.add(cs.id);
+      const nms=seatNames(cs);
+      if(nms.length) nms.forEach(v=>{ if(!sameName(v,name)){ v=v.trim(); out.set(v.toLowerCase(),v); } });   // occupied seat → that person is my eval report; stop descending this branch
+      else descend(cs.id);                                                                                   // OPEN seat → look through it; its people roll up to me
+    }); };
+  mine.forEach(descend);
+  return [...out.values()].sort((a,b)=>a.localeCompare(b));
+}
 const isSupervisor=()=>directReportsOf(myName()).length>0;
+const evalIsSupervisor=()=>evalReportsOf(myName()).length>0;   // supervisor for EVAL purposes (includes people under open seats)
 // Everyone at or BELOW one of my seats on the chart — my whole branch, every level down. Excludes me and
 // my seat's co-occupants. (Uses seatsAtOrBelow, which includes side/staff reports — they're people I oversee.)
 function peopleBelowMe(name){
@@ -8821,7 +8839,7 @@ function myNotes(){
         sub:(overdue?"Was ":"On ")+fmtLong(qc.meetAt)+(managerOf(me)?" with "+managerOf(me):""), view:"board"}); } }
   // Annual performance evaluations coming due for my direct reports — 30 / 15 / 7 / 1-day windows,
   // plus overdue. Each window fires its own note once (id encodes the tier + this cycle's due date).
-  if(evalData&&evalData.reports){ directReportsOf(me).forEach(rn=>{
+  if(evalData&&evalData.reports){ evalReportsOf(me).forEach(rn=>{
     const r=evalData.reports[evNameKey(rn)]; if(!r||!r.hireDate||!r.nextDue) return;
     const tier=evalTier(r.nextDue); if(!tier) return;
     const d=daysUntilIso(r.nextDue);
@@ -8913,7 +8931,7 @@ function branchEvalsHtml(){
 function renderEvals(){
   const wrap=$("#evalsWrap");
   if(!canDoEvals() && !canSeeBranchEvals()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>Evaluations are for supervisors, facility leaders and HR.</div>`; return; }
-  const me=myName(), reports=me?directReportsOf(me):[];
+  const me=myName(), reports=me?evalReportsOf(me):[];   // includes reports under an open seat that rolls up to me
   const doesEvals=canDoEvals();
   const note=doesEvals?`<div class="ev-note">🔒 <b>Confidential.</b> These records live in a locked, per-supervisor file — only you and HR can open them. Reviews run on each person's <b>hire-date anniversary</b>, with reminders at 30, 15, 7 and 1 day.</div>`:"";
   let body;
@@ -8922,7 +8940,7 @@ function renderEvals(){
   else if(!reports.length) body=`<div class="empty"><span class="emoji">🙂</span>No direct reports under your seat on the Accountability Chart.</div>`;
   else body=`<div class="sec-title">Your direct reports (${reports.length})</div>`+reports.map(evalReportRow).join("");
   const guideBtn=doesEvals?`<button class="btn ghost wide" id="ev-guide" style="margin-bottom:14px">📖 How to run an evaluation</button>`:"";
-  const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-top:18px">🗂️ HR · view all evaluations (audit)</button>`:"";
+  const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-top:18px">🗂️ HR · evaluation status &amp; audit</button>`:"";
   wrap.innerHTML=note+guideBtn+`<div id="ev-inbox"></div>`+body+branchEvalsHtml()+hrBtn;
   wrap.querySelectorAll("[data-hire-set]").forEach(b=>b.onclick=()=>setHireDate(b.dataset.hireSet, ()=>renderEvals()));
   wrap.querySelectorAll("[data-eval-done]").forEach(b=>b.onclick=()=>{ markEvalDone(b.dataset.evalDone, true); renderEvals(); });
@@ -9206,8 +9224,8 @@ function evReviewWrite(leadEmail, reportKey, role, decision, note, done){
 // The reviewer's sheet — read-only eval content + Approve / Send back for the role(s) they can fill.
 function evalReviewSheet(leadEmail, leadName, reportKey, rep){
   const form=rep.draft||{}, rev=form.review||{};
-  const canSup = rev.supEmail && evMyE()===String(rev.supEmail).toLowerCase() && !rev.sup;
-  const canHr  = isEvalAdmin() && !rev.hr;
+  const canSup = rev.status==="submitted" && rev.supEmail && evMyE()===String(rev.supEmail).toLowerCase() && !rev.sup;
+  const canHr  = rev.status==="submitted" && isEvalAdmin() && !rev.hr;   // only act on a genuinely submitted eval — opening an approved/sent-back/draft one is read-only
   const who = canSup&&canHr ? "Supervisor &amp; HR" : canSup ? "Supervisor" : canHr ? "HR" : "";
   openSheet(`<h2>Review evaluation · ${esc(rep.name||reportKey)}</h2>
     <div class="min-head">By <b>${esc(leadName||leadEmail)}</b> · ${esc(form.jobTitle||"")} · submitted ${esc(rev.submittedAt||"")}</div>
@@ -9244,7 +9262,7 @@ function evReviewInbox(cb){
     fs.collection("evaluations").get().then(qs=>{ qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st){ st._lead=ds.id; addFromDoc(ds.id, st); } }); finish(); })
       .catch(e=>{ console.error("inbox HR",e); finish(); });
   } else {
-    const mgrOfReport={}; const reports=directReportsOf(myName());
+    const mgrOfReport={}; const reports=evalReportsOf(myName());   // people who roll up to me (through any open seat) submit their evals to me
     const emails=reports.map(n=>({n, e:(emailForName(n)||"").toLowerCase()})).filter(x=>x.e);
     if(!emails.length){ cb([]); return; }
     let pending=emails.length;
@@ -9252,22 +9270,59 @@ function evReviewInbox(cb){
       .catch(()=>{}).finally(()=>{ if(--pending===0) finish(); }); });
   }
 }
-/* HR/admin audit roster — reads EVERY supervisor's locked doc (Firestore rules allow HR/admins). */
+// Current pipeline stage of an IN-PROGRESS eval (one that has a draft). null = nothing in flight.
+function evLiveStage(rep){
+  const rev=rep && rep.draft && rep.draft.review;
+  if(rev && rev.status==="submitted") return {k:"awaiting", order:1, label:"⏳ Awaiting approval", pill:"due",  grp:"Awaiting approval"};
+  if(rev && rev.status==="changes")   return {k:"changes",  order:2, label:"↩ Sent back — with the supervisor", pill:"over", grp:"Sent back for changes"};
+  if(rev && rev.status==="cleared")   return {k:"approved", order:3, label:"✓ Approved — awaiting completion", pill:"ok", grp:"Approved — awaiting completion"};
+  if(rep && rep.draft)                return {k:"draft",    order:4, label:"✍️ Draft in progress", pill:"set",  grp:"Draft in progress"};
+  return null;
+}
+function evSupName(email){ const p=(data.people||[]).find(x=>x&&(x.email||"").toLowerCase()===String(email||"").toLowerCase()); return (p&&p.name)||email; }
+/* HR/admin STATUS + audit roster — reads EVERY supervisor's locked doc (Firestore rules allow HR/admins).
+   Top: the LIVE pipeline (awaiting approval / sent back / approved-pending / draft) so HR can see exactly
+   where every eval stands even AFTER they approve or send one back. Below: filed records, searchable. */
 function evalHRRoster(){
-  openSheet(`<h2>All evaluations · HR audit</h2>
-    <div class="hint" style="margin:-4px 2px 10px">Every supervisor's records, for compliance. Only HR/admins can load this. Each completed evaluation is listed by year — open one to download a PDF for the employee's file.</div>
+  openSheet(`<h2>Evaluation status &amp; HR audit</h2>
+    <div class="hint" style="margin:-4px 2px 10px">Every supervisor's evaluations. <b>In-progress pipeline up top</b> — who's waiting on whom — then filed records below. Only HR/admins can load this.</div>
+    <div id="hr-pipeline"><div class="hint">Loading…</div></div>
+    <div class="sec-title" style="margin-top:18px">Filed records</div>
     <input id="hr-search" class="hr-search" type="search" placeholder="Search a name or year — e.g. Misty Anthony 2026…" autocomplete="off">
     <div id="hr-list"><div class="hint">Loading…</div></div>
     <div class="sheet-actions"><button class="btn" id="hr-close">Close</button></div>`);
   $("#hr-close").onclick=closeSheet;
   firebase.firestore().collection("evaluations").get().then(qs=>{
-    const entries=[];
+    const entries=[], pipeline=[];
     qs.forEach(ds=>{ const st=(ds.data()||{}).state||{}; Object.keys(st.reports||{}).forEach(k=>{ const r=st.reports[k]||{}; const nm=r.name||k;
       const hist=(r.history||[]);
       hist.forEach(rec=>{ const yr=String(rec.completedAt||rec.reviewDate||"").slice(0,4);
         entries.push({ kind:"filed", name:nm, year:yr, rec, sup:ds.id, due:"", d:null }); });
       if(!hist.length) entries.push({ kind:"none", name:nm, year:"", rec:null, sup:ds.id, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null });
+      const stg=evLiveStage(r);
+      if(stg) pipeline.push({ name:nm, sup:ds.id, supName:evSupName(ds.id), stage:stg, rep:r, reportKey:k, rev:(r.draft&&r.draft.review)||null });
     }); });
+    // ----- Live pipeline (status board) -----
+    const pbox=$("#hr-pipeline");
+    if(pbox){
+      if(!pipeline.length){ pbox.innerHTML=`<div class="hint">Nothing in progress — no evaluations are awaiting approval, sent back, approved-pending, or in draft right now.</div>`; }
+      else{
+        pipeline.sort((a,b)=>a.stage.order-b.stage.order || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        const counts={}; pipeline.forEach(p=>counts[p.stage.k]=(counts[p.stage.k]||0)+1);
+        const summary=[["awaiting","⏳","awaiting approval"],["changes","↩","sent back"],["approved","✓","approved, awaiting completion"],["draft","✍️","in draft"]]
+          .filter(([k])=>counts[k]).map(([k,ic,lbl])=>`${ic} ${counts[k]} ${lbl}`).join(" · ");
+        let html=`<div class="hint" style="margin:0 2px 8px"><b>In progress (${pipeline.length})</b> — ${summary}</div>`, curGrp=null;
+        pipeline.forEach((p,i)=>{ if(p.stage.grp!==curGrp){ curGrp=p.stage.grp; html+=`<div class="ev-grp">${esc(curGrp)}</div>`; }
+          const reg=evRegionOf(p.name), sub=p.rev&&p.rev.submittedAt?` · submitted ${esc(p.rev.submittedAt)}`:"", clickable=!!p.rev;
+          html+=`<div class="ev-row${clickable?" hrclick":""}"${clickable?` data-pipe="${i}" style="cursor:pointer"`:""}>
+              <div class="ev-main"><div class="ev-name">${esc(p.name)}</div>
+                <div class="ev-meta">${reg?esc(reg)+" · ":""}supervisor: ${esc(p.supName)}${sub}</div></div>
+              <div class="ev-right"><span class="ev-pill ${p.stage.pill}">${p.stage.label}</span></div></div>`; });
+        pbox.innerHTML=html;
+        pbox.querySelectorAll("[data-pipe]").forEach(b=>b.onclick=()=>{ const p=pipeline[+b.dataset.pipe]; evalReviewSheet(p.sup, p.supName, p.reportKey, p.rep); });
+      }
+    }
+    // ----- Filed records (searchable) -----
     // Name A→Z, then most-recent year first; a person with nothing on file sorts after their filed rows.
     entries.sort((a,b)=>{ const an=a.name.toLowerCase(), bn=b.name.toLowerCase(); if(an<bn) return -1; if(an>bn) return 1; return String(b.year).localeCompare(String(a.year)); });
     const box=$("#hr-list"); if(!box) return;
@@ -9285,7 +9340,8 @@ function evalHRRoster(){
     };
     draw("");
     const si=$("#hr-search"); if(si){ si.oninput=()=>draw(si.value); setTimeout(()=>si.focus(),60); }
-  }).catch(e=>{ const box=$("#hr-list"); if(box) box.innerHTML=`<div class="hint">Couldn't load — ${esc(e.code||e.message||"error")}. (Only HR/admins listed in the security rules can view all.)</div>`; });
+  }).catch(e=>{ const msg=`<div class="hint">Couldn't load — ${esc(e.code||e.message||"error")}. (Only HR/admins listed in the security rules can view all.)</div>`;
+    const pb=$("#hr-pipeline"); if(pb) pb.innerHTML=msg; const box=$("#hr-list"); if(box) box.innerHTML=""; });
 }
 function renderNPanel(){
   const p=$("#npanel"), notes=myNotes();
@@ -12538,10 +12594,17 @@ function showPlanningSummary(s,t){
    qc.held (existing) = the conversation happened. No backend — "add to calendar" hands the user
    a Google/Outlook link or an .ics download; the app does NOT send email (see Tier-1 design). */
 const pad2=n=>String(n).padStart(2,"0");
-function managerOf(name){   // who this person reports to on the chart (their seat's parent occupant)
+function managerOf(name){   // who this person reports to — the nearest FILLED seat above them, climbing past any OPEN seats
   const seats=((data.accountability||{}).seats)||[];
-  for(const s of seats){ if(seatHasName(s,name)&&s.parent){ const p=seats.find(x=>x.id===s.parent);
-    if(p){ const nm=seatNames(p).filter(n=>!sameName(n,name))[0]; if(nm) return nm; } } }
+  const byId=id=>seats.find(x=>x&&x.id===id);
+  for(const s of seats){ if(seatHasName(s,name)&&s.parent){
+    let p=byId(s.parent), guard=0;
+    while(p && guard++<100){
+      const nm=seatNames(p).filter(n=>!sameName(n,name))[0];
+      if(nm) return nm;                          // nearest occupied ancestor seat → their real manager
+      p=p.parent?byId(p.parent):null;            // this seat is OPEN → keep climbing (eval responsibility rolls up)
+    }
+  } }
   return "";
 }
 function qcStatus(person,q){
