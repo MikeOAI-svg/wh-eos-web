@@ -1471,6 +1471,11 @@
   .hr-search{width:100%;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:10px;padding:10px 12px;font-size:14px;margin:0 0 12px;box-sizing:border-box}
   .hr-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .hr-yr{display:inline-block;margin-left:7px;font-size:12px;font-weight:800;color:var(--accent);background:var(--accent-soft);padding:1px 8px;border-radius:999px;vertical-align:middle}
+  .hr-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 14px}
+  .hr-tab{border:1px solid var(--border);background:var(--card);color:var(--muted);border-radius:999px;padding:6px 13px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .hr-tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .hr-tab .hr-tab-ct{opacity:.7;font-weight:800;margin-left:5px}
+  .hr-tab.on .hr-tab-ct{opacity:.9}
   .ev-form{display:flex;flex-direction:column;gap:2px}
   .ev-form input[readonly]{opacity:.7}
   .ev-sec{border-top:1px solid var(--border);margin-top:14px;padding-top:14px}
@@ -4990,7 +4995,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=215;
+const BUILD=216;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -8940,8 +8945,8 @@ function renderEvals(){
   else if(!reports.length) body=`<div class="empty"><span class="emoji">🙂</span>No direct reports under your seat on the Accountability Chart.</div>`;
   else body=`<div class="sec-title">Your direct reports (${reports.length})</div>`+reports.map(evalReportRow).join("");
   const guideBtn=doesEvals?`<button class="btn ghost wide" id="ev-guide" style="margin-bottom:14px">📖 How to run an evaluation</button>`:"";
-  const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-top:18px">🗂️ HR · evaluation status &amp; audit</button>`:"";
-  wrap.innerHTML=note+guideBtn+`<div id="ev-inbox"></div>`+body+branchEvalsHtml()+hrBtn;
+  const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-bottom:14px">🗂️ HR · evaluation status &amp; audit (by facility)</button>`:"";
+  wrap.innerHTML=hrBtn+note+guideBtn+`<div id="ev-inbox"></div>`+body+branchEvalsHtml();   // HR status/audit sits at the TOP so HR doesn't scroll past everyone's evals to reach it
   wrap.querySelectorAll("[data-hire-set]").forEach(b=>b.onclick=()=>setHireDate(b.dataset.hireSet, ()=>renderEvals()));
   wrap.querySelectorAll("[data-eval-done]").forEach(b=>b.onclick=()=>{ markEvalDone(b.dataset.evalDone, true); renderEvals(); });
   wrap.querySelectorAll("[data-eval-undo]").forEach(b=>b.onclick=()=>{ markEvalDone(b.dataset.evalUndo, false); renderEvals(); });
@@ -9285,7 +9290,8 @@ function evSupName(email){ const p=(data.people||[]).find(x=>x&&(x.email||"").to
    where every eval stands even AFTER they approve or send one back. Below: filed records, searchable. */
 function evalHRRoster(){
   openSheet(`<h2>Evaluation status &amp; HR audit</h2>
-    <div class="hint" style="margin:-4px 2px 10px">Every supervisor's evaluations. <b>In-progress pipeline up top</b> — who's waiting on whom — then filed records below. Only HR/admins can load this.</div>
+    <div class="hint" style="margin:-4px 2px 10px">Evaluations <b>by facility</b> — your facility opens first; switch tabs to help cover another. In-progress pipeline up top, filed records below. Only HR/admins can load this.</div>
+    <div id="hr-tabs" class="hr-tabs"></div>
     <div id="hr-pipeline"><div class="hint">Loading…</div></div>
     <div class="sec-title" style="margin-top:18px">Filed records</div>
     <input id="hr-search" class="hr-search" type="search" placeholder="Search a name or year — e.g. Misty Anthony 2026…" autocomplete="off">
@@ -9295,53 +9301,71 @@ function evalHRRoster(){
   firebase.firestore().collection("evaluations").get().then(qs=>{
     const entries=[], pipeline=[];
     qs.forEach(ds=>{ const st=(ds.data()||{}).state||{}; Object.keys(st.reports||{}).forEach(k=>{ const r=st.reports[k]||{}; const nm=r.name||k;
+      const region=evRegionOf(nm)||"";                                     // which facility this person belongs to (pillar seat)
       const hist=(r.history||[]);
       hist.forEach(rec=>{ const yr=String(rec.completedAt||rec.reviewDate||"").slice(0,4);
-        entries.push({ kind:"filed", name:nm, year:yr, rec, sup:ds.id, due:"", d:null }); });
-      if(!hist.length) entries.push({ kind:"none", name:nm, year:"", rec:null, sup:ds.id, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null });
+        entries.push({ kind:"filed", name:nm, year:yr, rec, sup:ds.id, region, due:"", d:null }); });
+      if(!hist.length) entries.push({ kind:"none", name:nm, year:"", rec:null, sup:ds.id, region, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null });
       const stg=evLiveStage(r);
-      if(stg) pipeline.push({ name:nm, sup:ds.id, supName:evSupName(ds.id), stage:stg, rep:r, reportKey:k, rev:(r.draft&&r.draft.review)||null });
+      if(stg) pipeline.push({ name:nm, sup:ds.id, supName:evSupName(ds.id), region, stage:stg, rep:r, reportKey:k, rev:(r.draft&&r.draft.review)||null });
     }); });
-    // ----- Live pipeline (status board) -----
-    const pbox=$("#hr-pipeline");
-    if(pbox){
-      if(!pipeline.length){ pbox.innerHTML=`<div class="hint">Nothing in progress — no evaluations are awaiting approval, sent back, approved-pending, or in draft right now.</div>`; }
-      else{
-        pipeline.sort((a,b)=>a.stage.order-b.stage.order || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-        const counts={}; pipeline.forEach(p=>counts[p.stage.k]=(counts[p.stage.k]||0)+1);
-        const summary=[["awaiting","⏳","awaiting approval"],["changes","↩","sent back"],["approved","✓","approved, awaiting completion"],["draft","✍️","in draft"]]
-          .filter(([k])=>counts[k]).map(([k,ic,lbl])=>`${ic} ${counts[k]} ${lbl}`).join(" · ");
-        let html=`<div class="hint" style="margin:0 2px 8px"><b>In progress (${pipeline.length})</b> — ${summary}</div>`, curGrp=null;
-        pipeline.forEach((p,i)=>{ if(p.stage.grp!==curGrp){ curGrp=p.stage.grp; html+=`<div class="ev-grp">${esc(curGrp)}</div>`; }
-          const reg=evRegionOf(p.name), sub=p.rev&&p.rev.submittedAt?` · submitted ${esc(p.rev.submittedAt)}`:"", clickable=!!p.rev;
-          html+=`<div class="ev-row${clickable?" hrclick":""}"${clickable?` data-pipe="${i}" style="cursor:pointer"`:""}>
-              <div class="ev-main"><div class="ev-name">${esc(p.name)}</div>
-                <div class="ev-meta">${reg?esc(reg)+" · ":""}supervisor: ${esc(p.supName)}${sub}</div></div>
-              <div class="ev-right"><span class="ev-pill ${p.stage.pill}">${p.stage.label}</span></div></div>`; });
-        pbox.innerHTML=html;
-        pbox.querySelectorAll("[data-pipe]").forEach(b=>b.onclick=()=>{ const p=pipeline[+b.dataset.pipe]; evalReviewSheet(p.sup, p.supName, p.reportKey, p.rep); });
-      }
-    }
-    // ----- Filed records (searchable) -----
     // Name A→Z, then most-recent year first; a person with nothing on file sorts after their filed rows.
     entries.sort((a,b)=>{ const an=a.name.toLowerCase(), bn=b.name.toLowerCase(); if(an<bn) return -1; if(an>bn) return 1; return String(b.year).localeCompare(String(a.year)); });
-    const box=$("#hr-list"); if(!box) return;
-    const rowHtml=(x,i)=>{ const reg=evRegionOf(x.name); let right, meta;
+
+    // ---- Facility tabs: Texas / Virginia / Shared Services (the Integrator's pillars) + Shared + All.
+    // Each HR rep's OWN facility opens first (EVAL_HR_PRIMARY), but they can switch to any to help cover. ----
+    const SHARED="__shared__", ALL="__all__";
+    const facRoles=acFunctionSeats().map(s=>s&&s.role).filter(Boolean);
+    const anyShared=entries.concat(pipeline).some(x=>!x.region);
+    const tabs=facRoles.map(r=>({reg:r, label:r.replace(/ Facility$/,"")}));
+    if(anyShared) tabs.push({reg:SHARED, label:"Shared / company-wide"});
+    tabs.push({reg:ALL, label:"All facilities"});
+    const myE=(myEmail()||"").toLowerCase();
+    let sel=ALL; Object.keys(EVAL_HR_PRIMARY).forEach(r=>{ if(EVAL_HR_PRIMARY[r]===myE && facRoles.indexOf(r)>=0) sel=r; });   // my facility as HR rep
+    if(sel===ALL){ const mr=evRegionOf(myName()); if(mr && facRoles.indexOf(mr)>=0) sel=mr; }                                 // else my own seat's facility
+    const inReg=region=> sel===ALL ? true : sel===SHARED ? !region : (region===sel);
+    const pipeCountFor=reg=> pipeline.filter(p=> reg===ALL?true:reg===SHARED?!p.region:p.region===reg).length;
+
+    const rowHtml=(x,i)=>{ let right, meta;
       if(x.kind==="filed"){ right=`<span class="ev-pill ok">PDF ›</span>`;
-        meta=`${reg?esc(reg)+" · ":""}filed ${esc(fmtLong(x.rec.completedAt||x.rec.reviewDate))} · supervisor: ${esc(x.sup)}`; }
+        meta=`${x.region?esc(x.region)+" · ":""}filed ${esc(fmtLong(x.rec.completedAt||x.rec.reviewDate))} · supervisor: ${esc(x.sup)}`; }
       else { right = x.d==null?`<span class="ev-pill set">no date</span>`:x.d<0?`<span class="ev-pill over">Overdue ${-x.d}d</span>`:evalTier(x.due)?`<span class="ev-pill due">Due ${x.d}d</span>`:`<span class="ev-pill ok">${fmtShort(x.due)}</span>`;
-        meta=`${reg?esc(reg)+" · ":""}no evaluation on file yet · supervisor: ${esc(x.sup)}`; }
+        meta=`${x.region?esc(x.region)+" · ":""}no evaluation on file yet · supervisor: ${esc(x.sup)}`; }
       const title=`${esc(x.name)}${x.kind==="filed"?` <span class="hr-yr">${esc(x.year||"—")}</span>`:""}`;
       return `<div class="ev-row${x.kind==="filed"?" hrclick":""}" data-hr="${i}"><div class="ev-main"><div class="ev-name">${title}</div><div class="ev-meta">${meta}</div></div><div class="ev-right">${right}</div></div>`; };
-    const draw=q=>{ const toks=(q||"").trim().toLowerCase().split(/\s+/).filter(Boolean);
-      const show=entries.map((x,i)=>[x,i]).filter(([x])=>{ const hay=(x.name+" "+x.year).toLowerCase(); return toks.every(t=>hay.indexOf(t)>=0); });
-      box.innerHTML = entries.length ? (show.length?show.map(([x,i])=>rowHtml(x,i)).join(""):'<div class="hint">No evaluations match that search.</div>') : '<div class="hint">No evaluations recorded yet.</div>';
+
+    const drawTabs=()=>{ const tb=$("#hr-tabs"); if(!tb) return;
+      tb.innerHTML=tabs.map(t=>{ const c=pipeCountFor(t.reg); return `<button class="hr-tab${t.reg===sel?" on":""}" data-reg="${esc(t.reg)}">${esc(t.label)}${c?`<span class="hr-tab-ct">${c}</span>`:""}</button>`; }).join("");
+      tb.querySelectorAll("[data-reg]").forEach(b=>b.onclick=()=>{ sel=b.dataset.reg; drawTabs(); drawPipeline(); drawFiled($("#hr-search")?$("#hr-search").value:""); }); };
+
+    const drawPipeline=()=>{ const pbox=$("#hr-pipeline"); if(!pbox) return;
+      const list=pipeline.filter(p=>inReg(p.region)).slice().sort((a,b)=>a.stage.order-b.stage.order || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+      if(!list.length){ pbox.innerHTML=`<div class="hint">Nothing in progress ${sel===ALL?"anywhere":sel===SHARED?"for shared staff":"in "+esc(sel.replace(/ Facility$/,""))} right now.</div>`; return; }
+      const counts={}; list.forEach(p=>counts[p.stage.k]=(counts[p.stage.k]||0)+1);
+      const summary=[["awaiting","⏳","awaiting approval"],["changes","↩","sent back"],["approved","✓","approved, awaiting completion"],["draft","✍️","in draft"]]
+        .filter(([k])=>counts[k]).map(([k,ic,lbl])=>`${ic} ${counts[k]} ${lbl}`).join(" · ");
+      let html=`<div class="hint" style="margin:0 2px 8px"><b>In progress (${list.length})</b> — ${summary}</div>`, curGrp=null;
+      list.forEach((p,i)=>{ if(p.stage.grp!==curGrp){ curGrp=p.stage.grp; html+=`<div class="ev-grp">${esc(curGrp)}</div>`; }
+        const sub=p.rev&&p.rev.submittedAt?` · submitted ${esc(p.rev.submittedAt)}`:"", clickable=!!p.rev;
+        html+=`<div class="ev-row${clickable?" hrclick":""}"${clickable?` data-pipe="${i}" style="cursor:pointer"`:""}>
+            <div class="ev-main"><div class="ev-name">${esc(p.name)}</div>
+              <div class="ev-meta">${p.region?esc(p.region)+" · ":""}supervisor: ${esc(p.supName)}${sub}</div></div>
+            <div class="ev-right"><span class="ev-pill ${p.stage.pill}">${p.stage.label}</span></div></div>`; });
+      pbox.innerHTML=html;
+      pbox.querySelectorAll("[data-pipe]").forEach(b=>b.onclick=()=>{ const p=list[+b.dataset.pipe]; evalReviewSheet(p.sup, p.supName, p.reportKey, p.rep); });
+    };
+
+    const drawFiled=q=>{ const box=$("#hr-list"); if(!box) return;
+      const toks=(q||"").trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const show=entries.map((x,i)=>[x,i]).filter(([x])=> inReg(x.region) && toks.every(t=>(x.name+" "+x.year).toLowerCase().indexOf(t)>=0));
+      box.innerHTML = show.length?show.map(([x,i])=>rowHtml(x,i)).join(""):`<div class="hint">${toks.length?"No records match that search":"No evaluations for this facility yet"}.</div>`;
       box.querySelectorAll("[data-hr]").forEach(b=>b.onclick=()=>{ const x=entries[+b.dataset.hr]; if(x&&x.rec) evalRecordSheet(x.name,x.rec,true); });
     };
-    draw("");
-    const si=$("#hr-search"); if(si){ si.oninput=()=>draw(si.value); setTimeout(()=>si.focus(),60); }
+
+    drawTabs(); drawPipeline(); drawFiled("");
+    const si=$("#hr-search"); if(si){ si.oninput=()=>drawFiled(si.value); setTimeout(()=>si.focus(),60); }
   }).catch(e=>{ const msg=`<div class="hint">Couldn't load — ${esc(e.code||e.message||"error")}. (Only HR/admins listed in the security rules can view all.)</div>`;
-    const pb=$("#hr-pipeline"); if(pb) pb.innerHTML=msg; const box=$("#hr-list"); if(box) box.innerHTML=""; });
+    const pb=$("#hr-pipeline"); if(pb) pb.innerHTML=msg; const box=$("#hr-list"); if(box) box.innerHTML=""; const tb=$("#hr-tabs"); if(tb) tb.innerHTML=""; });
 }
 function renderNPanel(){
   const p=$("#npanel"), notes=myNotes();
