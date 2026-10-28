@@ -4996,7 +4996,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=219;
+const BUILD=220;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5950,22 +5950,28 @@ function evHrFacilityRoles(){   // facility (pillar) roles this person is the HR
 }
 function canSeeEvalHR(){ return isEvalAdmin() || evHrFacilityRoles().length>0; }         // who gets the HR status/audit view
 function canHrApproveRegion(region){ return isEvalAdmin() || evHrFacilityRoles().indexOf(region)>=0; }   // may act as HR approver for an eval in `region`
-// Load the eval docs this HR-capable user may read: ADMIN/HR → the whole collection; a FACILITY LEADER → the
-// specific docs of the people in their branch (the per-doc reads the rules allow). cb(docs|null, err).
+// Load the eval docs this HR-capable user may read: ADMIN/HR → the whole collection; a FACILITY LEADER → one
+// QUERY for the docs that list them in state.reviewers (manager OR facility leader) + their OWN doc. Using a
+// query — instead of a read per branch person — avoids firing dozens of permission-denied reads, which with
+// offline persistence can HANG and leave the view stuck on "Loading…". A hard timeout is a last-resort guard.
+// cb(docs|null, err). (The array-contains query needs the Firestore rule to allow it — see the rules note.)
 function evLoadHrDocs(cb){
   let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ cb(null,"offline"); return; }
+  let done=false; const fire=(d,e)=>{ if(done) return; done=true; cb(d,e); };
+  setTimeout(()=>fire(null,"timeout — the status view couldn't load in time"), 15000);
   if(isEvalAdmin()){
-    fs.collection("evaluations").get().then(qs=>{ const out=[]; qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st) out.push({email:ds.id, state:st}); }); cb(out); })
-      .catch(e=>cb(null, e.code||e.message||"error"));
+    fs.collection("evaluations").get().then(qs=>{ const out=[]; qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st) out.push({email:ds.id, state:st}); }); fire(out); })
+      .catch(e=>fire(null, e.code||e.message||"error"));
     return;
   }
-  // The conducting docs for a facility = the leader's OWN doc (holds their direct reports' evals) + everyone below them.
-  const names=[myName(), ...peopleBelowMe(myName())];
-  const emails=[...new Set(names.map(n=>(emailForName(n)||"").toLowerCase()).filter(Boolean))];
-  if(!emails.length){ cb([]); return; }
-  const out=[]; let pending=emails.length, anyErr=null;
-  emails.forEach(e=>{ fs.doc("evaluations/"+e).get().then(s=>{ const st=(s.exists&&s.data()&&s.data().state); if(st) out.push({email:e, state:st}); })
-    .catch(err=>{ anyErr=err.code||err.message||"error"; }).finally(()=>{ if(--pending===0) cb(out, out.length?null:anyErr); }); });
+  const myE=(myEmail()||"").toLowerCase(); if(!myE){ fire([]); return; }
+  const out=[], seen=new Set(), add=(id,st)=>{ if(st && !seen.has(id)){ seen.add(id); out.push({email:id, state:st}); } };
+  let qErr=null;
+  Promise.all([
+    fs.collection("evaluations").where("state.reviewers","array-contains",myE).get()
+      .then(qs=>qs.forEach(ds=>add(ds.id,(ds.data()||{}).state))).catch(e=>{ qErr=e.code||e.message||"error"; }),
+    fs.doc("evaluations/"+myE).get().then(s=>{ if(s.exists) add(myE,(s.data()||{}).state); }).catch(()=>{})
+  ]).then(()=>{ if(!out.length && qErr) fire(null,qErr); else fire(out); });
 }
 function evalReport(name){
   evalData.reports=evalData.reports||{}; const k=evNameKey(name);
@@ -9105,6 +9111,9 @@ function evaluateReport(name){
 }
 function evRatingRow(val){ return `<div class="ev-rate">`+EVAL_RATINGS.map(([v,l])=>`<button type="button" class="ev-rb${val===v?" on "+v:""}" data-v="${v}">${l}</button>`).join("")+`</div>`; }
 function openEvalForm(name,f){
+  f=f||{};   // normalize a draft that's missing fields so a partial/legacy record can't white-screen the form
+  f.accountabilities=f.accountabilities||[]; f.lead=f.lead||{}; f.manage=f.manage||{};
+  f.nextFocus=f.nextFocus||["","",""]; f.sigEmployee=f.sigEmployee||{}; f.sigSupervisor=f.sigSupervisor||{}; f.sigHr=f.sigHr||{};
   const rev0=(f&&f.review)||null;   // review/approval state carried on the draft
   const accHtml=f.accountabilities.map(a=>`<div class="ev-acc">
       <div class="ev-acc-top"><input class="ev-acc-text" value="${esc(a.text)}" placeholder="Accountability from the chart…"><button type="button" class="ev-acc-del" title="Remove">✕</button></div>
@@ -9326,15 +9335,12 @@ function evReviewInbox(cb){
     fs.collection("evaluations").get().then(qs=>{ qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st){ st._lead=ds.id; addFromDoc(ds.id, st); } }); finish(); })
       .catch(e=>{ console.error("inbox HR",e); finish(); });
   } else {
-    // A FACILITY LEADER reviews their whole branch (so facility HR approvals surface, not just direct reports');
-    // a plain supervisor reviews only the people who roll up to them (through any open seat).
-    const scope = facilitiesLedBy(myName()).length ? peopleBelowMe(myName()) : evalReportsOf(myName());
-    const seenE=new Set();
-    const emails=scope.map(n=>({n, e:(emailForName(n)||"").toLowerCase()})).filter(x=>x.e && !seenE.has(x.e) && seenE.add(x.e));
-    if(!emails.length){ cb([]); return; }
-    let pending=emails.length;
-    emails.forEach(({n,e})=>{ fs.doc("evaluations/"+e).get().then(s=>{ const st=(s.exists&&s.data()&&s.data().state); if(st){ st._lead=n; addFromDoc(e, st); } })
-      .catch(()=>{}).finally(()=>{ if(--pending===0) finish(); }); });
+    // A supervisor OR facility leader: ONE query for docs that list me in state.reviewers (I'm the manager or
+    // the facility leader). This replaces a read per report/branch-person — no permission-denied reads to hang on.
+    const myE2=(myEmail()||"").toLowerCase(); if(!myE2){ cb([]); return; }
+    fs.collection("evaluations").where("state.reviewers","array-contains",myE2).get()
+      .then(qs=>{ qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st){ st._lead=evSupName(ds.id); addFromDoc(ds.id, st); } }); finish(); })
+      .catch(e=>{ console.error("inbox",e); finish(); });
   }
 }
 // Current pipeline stage of an IN-PROGRESS eval (one that has a draft). null = nothing in flight.
