@@ -5865,9 +5865,20 @@ function startEvals(){
   }, e=>{ console.error("eval sync",e); });
 }
 setInterval(()=>{ if(evalPending && !isBusy()){ evalData=evalPending; evalPending=null; if(currentView==="evals") renderEvals(); refreshNotes(); } },1500);
+// Doc-level access list for an eval doc (stored as state.reviewers — the Firestore rule reads exactly this):
+// the owner's DIRECT MANAGER plus their FACILITY LEADER(s). This is what lets a facility leader read &
+// approve their facility's evals WITH NO rules change — the existing rule grants anyone in state.reviewers.
+function evDocReviewers(ownerName){
+  const out=new Set();
+  const mgr=managerOf(ownerName); if(mgr){ const e=(emailForName(mgr)||"").toLowerCase(); if(e) out.add(e); }
+  const seat=(seatsFor(ownerName)||[])[0], pillar=seat?pillarSeatOf(seat.id):null;   // the owner's facility (pillar) seat
+  if(pillar) seatNames(pillar).forEach(n=>{ const e=(emailForName(n)||"").toLowerCase(); if(e) out.add(e); });   // facility leader(s)
+  return [...out];
+}
 function saveEvals(){
   refreshNotes();
   if(!evalRef) return;
+  try{ evalData.reviewers = evDocReviewers(myName()); }catch(e){}   // keep the access list current on every save (manager + facility leader)
   clearTimeout(evalSaveTimer);
   evalSaveTimer=setTimeout(()=>{
     setSync("Saving…");
@@ -9256,7 +9267,7 @@ function evSubmitForReview(name){
   const supEmail=evSupEmailFor(myName());
   if(!supEmail && !isEvalAdmin()){ if(!confirm("You don't have a manager set on the Accountability Chart, so only HR can review this. Submit for HR review only?")) return; }
   r.draft.review={ status:"submitted", submittedAt:todayIso(), submittedBy:(myName()||myEmail()), supEmail:supEmail, sup:null, hr:null, changes:null };
-  evalData.reviewers = supEmail?[supEmail]:[];   // doc-level reviewer list — the Firestore read rule keys off this
+  evalData.reviewers = evDocReviewers(myName());   // doc-level access list (manager + facility leader) — the Firestore read rule keys off this
   saveEvals(); renderEvals(); setSync("Submitted for review ✓");
 }
 // Reviewer action on ANOTHER lead's eval doc. Reads fresh, sets ONLY the review block, writes back. role: "sup"|"hr".
