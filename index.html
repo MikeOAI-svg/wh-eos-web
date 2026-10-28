@@ -607,6 +607,7 @@
   .seat-role{font-size:15px;font-weight:800;line-height:1.25}
   .seat-name{font-size:13px;color:var(--muted);font-weight:600;margin-top:2px}
   .seat-name .vacant{color:var(--accent);font-style:italic}
+  .open-spots{display:inline-block;font-size:11px;font-weight:800;color:var(--accent);background:var(--accent-soft);padding:0 7px;border-radius:999px;margin-left:5px;vertical-align:middle;font-style:normal}
   .seat-resp{margin:7px 0 2px;padding-left:19px}
   .seat-resp li{font-size:13px;line-height:1.5;color:var(--muted)}
 
@@ -4995,7 +4996,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=216;
+const BUILD=219;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5926,6 +5927,35 @@ function canSetHireDate(name){
 // review CONTENT stays per-supervisor (canDoEvals). Fixes "a director only saw their team lead, not the
 // people under that lead."
 function canSeeBranchEvals(){ const me=myName(); return isEvalAdmin() || (!!me && peopleBelowMe(me).length>0); }
+// ===== Facility leaders act as HR for THEIR OWN facility =====
+// A facility leader gets the same HR eval functions (status board, approve / send-back, audit) but SCOPED to
+// their facility; HR/eval admins cover every facility. NOTE: reading & approving other supervisors' eval docs
+// is ALSO gated by Firestore security rules — a facility leader must be permitted there, or these reads/writes
+// return permission-denied (the view then shows what it could read and flags it).
+function evHrFacilityRoles(){   // facility (pillar) roles this person is the HR for
+  if(isEvalAdmin()) return acFunctionSeats().map(s=>s&&s.role).filter(Boolean);
+  const me=myName(); if(!me) return [];
+  return facilitiesLedBy(me).map(id=>{ const s=acSeatById(id); return s&&s.role; }).filter(Boolean);
+}
+function canSeeEvalHR(){ return isEvalAdmin() || evHrFacilityRoles().length>0; }         // who gets the HR status/audit view
+function canHrApproveRegion(region){ return isEvalAdmin() || evHrFacilityRoles().indexOf(region)>=0; }   // may act as HR approver for an eval in `region`
+// Load the eval docs this HR-capable user may read: ADMIN/HR → the whole collection; a FACILITY LEADER → the
+// specific docs of the people in their branch (the per-doc reads the rules allow). cb(docs|null, err).
+function evLoadHrDocs(cb){
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ cb(null,"offline"); return; }
+  if(isEvalAdmin()){
+    fs.collection("evaluations").get().then(qs=>{ const out=[]; qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st) out.push({email:ds.id, state:st}); }); cb(out); })
+      .catch(e=>cb(null, e.code||e.message||"error"));
+    return;
+  }
+  // The conducting docs for a facility = the leader's OWN doc (holds their direct reports' evals) + everyone below them.
+  const names=[myName(), ...peopleBelowMe(myName())];
+  const emails=[...new Set(names.map(n=>(emailForName(n)||"").toLowerCase()).filter(Boolean))];
+  if(!emails.length){ cb([]); return; }
+  const out=[]; let pending=emails.length, anyErr=null;
+  emails.forEach(e=>{ fs.doc("evaluations/"+e).get().then(s=>{ const st=(s.exists&&s.data()&&s.data().state); if(st) out.push({email:e, state:st}); })
+    .catch(err=>{ anyErr=err.code||err.message||"error"; }).finally(()=>{ if(--pending===0) cb(out, out.length?null:anyErr); }); });
+}
 function evalReport(name){
   evalData.reports=evalData.reports||{}; const k=evNameKey(name);
   if(!evalData.reports[k]) evalData.reports[k]={name:String(name||"").trim(), hireDate:"", nextDue:"", draft:null, history:[]};
@@ -7045,7 +7075,7 @@ function seatListHtml(s, depth, byParent, seen, stopIds){
   const kids=(stopIds && stopIds.has(s.id))?[]:(byParent[s.id]||[]);
   return `<div class="seat" style="margin-left:${depth*14}px">
     <div class="seat-head"><div><div class="seat-role">${esc(s.role)||"Untitled Seat"}</div>
-      <div class="seat-name">${seatNames(s).length?seatNames(s).map(esc).join(", "):'<span class="vacant">Open seat</span>'}</div></div>
+      <div class="seat-name">${seatNames(s).length?seatNames(s).map(esc).join(", ")+(seatOpenCount(s)>0?` <span class="open-spots">+${seatOpenCount(s)} open</span>`:""):`<span class="vacant">${seatOpenCount(s)>1?seatOpenCount(s)+" open spots":"Open seat"}</span>`}</div></div>
       <button class="vto-editbtn" data-seat-edit="${s.id}">Edit</button></div>
     ${resp.length?'<ul class="seat-resp">'+resp.map(r=>`<li>${esc(r)}</li>`).join("")+"</ul>":""}
     ${kids.map(k=>seatListHtml(k,depth+1,byParent,seen,stopIds)).join("")}</div>`;
@@ -7223,7 +7253,7 @@ function acPModel(s, lma, W){
   W=W||ACP_W;
   const roleL=acWrap(s.role||"Untitled Seat", (W-20)/6.7);
   const names=seatNames(s), vacant=!names.length;
-  const nameL=acWrap(vacant?"Open seat":names.join(", "), (W-20)/5.5);
+  const nameL=acWrap(seatPeopleLabel(s), (W-20)/5.5);   // includes open spots: "Jane, Bob · +2 open" / "8 open spots"
   let R=seatRoles(s); if(lma==="none") R=[]; else if(lma==="trim") R=R.slice(0,3);
   const lmaL=R.map(r=>acWrap(r, (W-32)/4.9));
   const lmaLines=lmaL.reduce((n,a)=>n+a.length,0);
@@ -7588,7 +7618,7 @@ function acCopyTSV(){
   const body=rows.map(({seat:s})=>{
     const p=s.parent&&byId[s.parent] ? byId[s.parent] : null;
     return [ s.id, s.role||"Untitled Seat", p?p.id:"", p?(p.role||"Untitled Seat"):"",
-             seatNames(s).join("; ")||"Open seat", s.l10?"Yes":"", (s.side==="left"||s.side==="right")?("Side · "+s.side):"",
+             seatPeopleLabel(s), s.l10?"Yes":"", (s.side==="left"||s.side==="right")?("Side · "+s.side):"",
              seatRoles(s).join(" | ") ].map(acCell).join("\t");
   });
   acCopyText([head.join("\t")].concat(body).join("\n"),
@@ -7599,7 +7629,7 @@ function acCopyOutline(){
   if(!rows.length){ setSync("Nothing to copy — no seats in this view", true); return; }
   const lines=[(acDoc().title||"Accountability Chart")+(acDraftMode?" — DRAFT":""), ""];
   rows.forEach(({seat:s, depth})=>{
-    const pad="  ".repeat(depth), names=seatNames(s).join(", ")||"Open seat";
+    const pad="  ".repeat(depth), names=seatPeopleLabel(s);
     lines.push(pad+(s.role||"Untitled Seat")+" — "+names+((s.side==="left"||s.side==="right")?"  (side report)":""));
     seatRoles(s).forEach(r=>lines.push(pad+"    • "+r));
   });
@@ -7956,8 +7986,24 @@ function mismatches(a,b){
    A person can hold more than one seat, so gather every seat they sit in. */
 /* A seat can hold MULTIPLE people (e.g. several Admissions Advocates share one seat).
    Occupants live in seat.names[]; seat.name (legacy single string) is read as a fallback. */
-function seatNames(s){ if(!s) return []; if(Array.isArray(s.names)) return s.names.filter(n=>n&&n.trim());
-  return s.name?[s.name]:[]; }
+// Words people type to mean "nobody's in this seat yet". These are NOT real occupants — a seat whose only
+// name is one of these reads as an OPEN seat everywhere (chart display + the eval roll-up that sends an open
+// seat's reports up to the seat above). So staff can keep typing "Open" and it still works, but the editor
+// also has a dedicated "Open seat" toggle so they don't have to.
+const SEAT_OPEN_WORDS=new Set(["open","vacant","open seat","vacant seat","open position","vacancy","unfilled","empty","tbd","tba","to be hired","to be filled","none","n/a","na","-","—","–"]);
+function isOpenName(n){ return SEAT_OPEN_WORDS.has(String(n||"").trim().toLowerCase()); }
+function seatNames(s){ if(!s) return [];
+  const raw=Array.isArray(s.names)?s.names:(s.name?[s.name]:[]);
+  return raw.filter(n=>n&&n.trim()&&!isOpenName(n)); }   // real occupants only; "Open"/"Vacant" placeholders drop out → the seat is treated as open
+function isOpenSeat(s){ return !!s && seatNames(s).length===0; }
+// Headcount: a seat can hold MANY people (e.g. 8 advocates). `cap` is the target headcount; when fewer people
+// are in the seat than that, the difference is OPEN SPOTS — shown on the chart so you know what to hire for.
+function seatCapOf(s){ const c=s&&s.cap; return (typeof c==="number"&&c>0)?c:0; }                 // 0 = no target set
+function seatOpenCount(s){ const cap=seatCapOf(s); return cap>0?Math.max(0,cap-seatNames(s).length):0; }
+// Plain-text occupant label incl. open spots — for SVG/print/export. "Jane, Bob · +2 open" / "8 open spots".
+function seatPeopleLabel(s){ const nm=seatNames(s), open=seatOpenCount(s);
+  if(!nm.length) return open>1?(open+" open spots"):"Open seat";
+  return nm.join(", ")+(open>0?(" · +"+open+" open"):""); }
 function seatHasName(s,name){ return seatNames(s).some(n=>sameName(n,name)); }
 function seatsFor(name){ return (((data.accountability||{}).seats)||[]).filter(s=>seatHasName(s,name)); }
 function directReportsOf(name){
@@ -8945,7 +8991,7 @@ function renderEvals(){
   else if(!reports.length) body=`<div class="empty"><span class="emoji">🙂</span>No direct reports under your seat on the Accountability Chart.</div>`;
   else body=`<div class="sec-title">Your direct reports (${reports.length})</div>`+reports.map(evalReportRow).join("");
   const guideBtn=doesEvals?`<button class="btn ghost wide" id="ev-guide" style="margin-bottom:14px">📖 How to run an evaluation</button>`:"";
-  const hrBtn=isEvalAdmin()?`<button class="btn ghost wide" id="ev-hr" style="margin-bottom:14px">🗂️ HR · evaluation status &amp; audit (by facility)</button>`:"";
+  const hrBtn=canSeeEvalHR()?`<button class="btn ghost wide" id="ev-hr" style="margin-bottom:14px">🗂️ ${isEvalAdmin()?"HR · evaluation status &amp; audit (by facility)":"Facility evaluations — status &amp; audit"}</button>`:"";
   wrap.innerHTML=hrBtn+note+guideBtn+`<div id="ev-inbox"></div>`+body+branchEvalsHtml();   // HR status/audit sits at the TOP so HR doesn't scroll past everyone's evals to reach it
   wrap.querySelectorAll("[data-hire-set]").forEach(b=>b.onclick=()=>setHireDate(b.dataset.hireSet, ()=>renderEvals()));
   wrap.querySelectorAll("[data-eval-done]").forEach(b=>b.onclick=()=>{ markEvalDone(b.dataset.evalDone, true); renderEvals(); });
@@ -9122,7 +9168,9 @@ function openEvalForm(name,f){
       r.nextDue=nextAnniversary(r.hireDate, addDaysIso(base,1));
       const kk=evNameKey(name); data.evalDone=data.evalDone||{}; data.evalDone[kk]=base;   // record the completed cycle company-wide so the Branch roster knows (viewers can't read this confidential file)
       mergeCompany(comp=>{ comp.evalDone=comp.evalDone||{}; comp.evalDone[kk]=base; }); }
-    saveEvals(); closeSheet(); renderEvals(); setSync("Evaluation filed ✓");
+    saveEvals(); renderEvals(); setSync("Evaluation filed ✓");
+    const filed=r.history[r.history.length-1];
+    evalRecordSheet(name, filed);   // open the filed record immediately — it has a "⬇ Download PDF" button so the supervisor can print/sign it right away
   }; }
 }
 function showEvalHistory(name){
@@ -9230,7 +9278,7 @@ function evReviewWrite(leadEmail, reportKey, role, decision, note, done){
 function evalReviewSheet(leadEmail, leadName, reportKey, rep){
   const form=rep.draft||{}, rev=form.review||{};
   const canSup = rev.status==="submitted" && rev.supEmail && evMyE()===String(rev.supEmail).toLowerCase() && !rev.sup;
-  const canHr  = rev.status==="submitted" && isEvalAdmin() && !rev.hr;   // only act on a genuinely submitted eval — opening an approved/sent-back/draft one is read-only
+  const canHr  = rev.status==="submitted" && canHrApproveRegion(evRegionOf(rep.name)) && !rev.hr;   // HR/admin anywhere, or a facility leader for their own facility; only on a genuinely submitted eval
   const who = canSup&&canHr ? "Supervisor &amp; HR" : canSup ? "Supervisor" : canHr ? "HR" : "";
   openSheet(`<h2>Review evaluation · ${esc(rep.name||reportKey)}</h2>
     <div class="min-head">By <b>${esc(leadName||leadEmail)}</b> · ${esc(form.jobTitle||"")} · submitted ${esc(rev.submittedAt||"")}</div>
@@ -9258,7 +9306,7 @@ function evReviewInbox(cb){
     Object.keys(reports).forEach(k=>{ const rep=reports[k], rev=rep&&rep.draft&&rep.draft.review;
       if(!rev||rev.status!=="submitted") return;
       const needSup = rev.supEmail && myE===String(rev.supEmail).toLowerCase() && !rev.sup;
-      const needHr  = isEvalAdmin() && !rev.hr;
+      const needHr  = canHrApproveRegion(evRegionOf(rep.name||k)) && !rev.hr;   // HR/admin anywhere, or a facility leader for their own facility
       if(!needSup && !needHr) return;
       const id=leadEmail+"|"+k; if(seen.has(id)) return; seen.add(id);
       out.push({ leadEmail, leadName:st._lead||leadEmail, reportKey:k, rep, rev, region:evRegionOf(rep.name||k), as: needSup&&needHr?"Supervisor + HR":needSup?"Supervisor":"HR" }); }); };
@@ -9267,8 +9315,11 @@ function evReviewInbox(cb){
     fs.collection("evaluations").get().then(qs=>{ qs.forEach(ds=>{ const st=(ds.data()||{}).state; if(st){ st._lead=ds.id; addFromDoc(ds.id, st); } }); finish(); })
       .catch(e=>{ console.error("inbox HR",e); finish(); });
   } else {
-    const mgrOfReport={}; const reports=evalReportsOf(myName());   // people who roll up to me (through any open seat) submit their evals to me
-    const emails=reports.map(n=>({n, e:(emailForName(n)||"").toLowerCase()})).filter(x=>x.e);
+    // A FACILITY LEADER reviews their whole branch (so facility HR approvals surface, not just direct reports');
+    // a plain supervisor reviews only the people who roll up to them (through any open seat).
+    const scope = facilitiesLedBy(myName()).length ? peopleBelowMe(myName()) : evalReportsOf(myName());
+    const seenE=new Set();
+    const emails=scope.map(n=>({n, e:(emailForName(n)||"").toLowerCase()})).filter(x=>x.e && !seenE.has(x.e) && seenE.add(x.e));
     if(!emails.length){ cb([]); return; }
     let pending=emails.length;
     emails.forEach(({n,e})=>{ fs.doc("evaluations/"+e).get().then(s=>{ const st=(s.exists&&s.data()&&s.data().state); if(st){ st._lead=n; addFromDoc(e, st); } })
@@ -9298,31 +9349,34 @@ function evalHRRoster(){
     <div id="hr-list"><div class="hint">Loading…</div></div>
     <div class="sheet-actions"><button class="btn" id="hr-close">Close</button></div>`);
   $("#hr-close").onclick=closeSheet;
-  firebase.firestore().collection("evaluations").get().then(qs=>{
+  evLoadHrDocs((docs, loadErr)=>{
+    if(!docs){ const msg=`<div class="hint">Couldn't load — ${esc(loadErr||"error")}. (Facility leaders &amp; HR must be allowed by the security rules to read these.)</div>`;
+      const pb=$("#hr-pipeline"); if(pb) pb.innerHTML=msg; const tb=$("#hr-tabs"); if(tb) tb.innerHTML=""; const box=$("#hr-list"); if(box) box.innerHTML=""; return; }
     const entries=[], pipeline=[];
-    qs.forEach(ds=>{ const st=(ds.data()||{}).state||{}; Object.keys(st.reports||{}).forEach(k=>{ const r=st.reports[k]||{}; const nm=r.name||k;
+    docs.forEach(d=>{ const st=d.state||{}; Object.keys(st.reports||{}).forEach(k=>{ const r=st.reports[k]||{}; const nm=r.name||k;
       const region=evRegionOf(nm)||"";                                     // which facility this person belongs to (pillar seat)
       const hist=(r.history||[]);
       hist.forEach(rec=>{ const yr=String(rec.completedAt||rec.reviewDate||"").slice(0,4);
-        entries.push({ kind:"filed", name:nm, year:yr, rec, sup:ds.id, region, due:"", d:null }); });
-      if(!hist.length) entries.push({ kind:"none", name:nm, year:"", rec:null, sup:ds.id, region, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null });
+        entries.push({ kind:"filed", name:nm, year:yr, rec, sup:d.email, region, due:"", d:null }); });
+      if(!hist.length) entries.push({ kind:"none", name:nm, year:"", rec:null, sup:d.email, region, due:r.nextDue||"", d:r.nextDue?daysUntilIso(r.nextDue):null });
       const stg=evLiveStage(r);
-      if(stg) pipeline.push({ name:nm, sup:ds.id, supName:evSupName(ds.id), region, stage:stg, rep:r, reportKey:k, rev:(r.draft&&r.draft.review)||null });
+      if(stg) pipeline.push({ name:nm, sup:d.email, supName:evSupName(d.email), region, stage:stg, rep:r, reportKey:k, rev:(r.draft&&r.draft.review)||null });
     }); });
     // Name A→Z, then most-recent year first; a person with nothing on file sorts after their filed rows.
     entries.sort((a,b)=>{ const an=a.name.toLowerCase(), bn=b.name.toLowerCase(); if(an<bn) return -1; if(an>bn) return 1; return String(b.year).localeCompare(String(a.year)); });
 
     // ---- Facility tabs: Texas / Virginia / Shared Services (the Integrator's pillars) + Shared + All.
     // Each HR rep's OWN facility opens first (EVAL_HR_PRIMARY), but they can switch to any to help cover. ----
-    const SHARED="__shared__", ALL="__all__";
-    const facRoles=acFunctionSeats().map(s=>s&&s.role).filter(Boolean);
-    const anyShared=entries.concat(pipeline).some(x=>!x.region);
+    const SHARED="__shared__", ALL="__all__", admin=isEvalAdmin();
+    const facRoles=evHrFacilityRoles();                                  // ADMIN/HR → every facility; a facility leader → only theirs
+    const anyShared=admin && entries.concat(pipeline).some(x=>!x.region);
     const tabs=facRoles.map(r=>({reg:r, label:r.replace(/ Facility$/,"")}));
     if(anyShared) tabs.push({reg:SHARED, label:"Shared / company-wide"});
-    tabs.push({reg:ALL, label:"All facilities"});
+    if(admin && facRoles.length>1) tabs.push({reg:ALL, label:"All facilities"});   // only HR/admins get the cross-facility "All" view
     const myE=(myEmail()||"").toLowerCase();
-    let sel=ALL; Object.keys(EVAL_HR_PRIMARY).forEach(r=>{ if(EVAL_HR_PRIMARY[r]===myE && facRoles.indexOf(r)>=0) sel=r; });   // my facility as HR rep
-    if(sel===ALL){ const mr=evRegionOf(myName()); if(mr && facRoles.indexOf(mr)>=0) sel=mr; }                                 // else my own seat's facility
+    let sel = facRoles[0] || ALL;                                        // a facility leader opens on their facility
+    if(admin){ sel = (facRoles.length>1?ALL:(facRoles[0]||ALL));
+      Object.keys(EVAL_HR_PRIMARY).forEach(r=>{ if(EVAL_HR_PRIMARY[r]===myE && facRoles.indexOf(r)>=0) sel=r; }); }   // an HR rep opens on their own facility
     const inReg=region=> sel===ALL ? true : sel===SHARED ? !region : (region===sel);
     const pipeCountFor=reg=> pipeline.filter(p=> reg===ALL?true:reg===SHARED?!p.region:p.region===reg).length;
 
@@ -9364,8 +9418,7 @@ function evalHRRoster(){
 
     drawTabs(); drawPipeline(); drawFiled("");
     const si=$("#hr-search"); if(si){ si.oninput=()=>drawFiled(si.value); setTimeout(()=>si.focus(),60); }
-  }).catch(e=>{ const msg=`<div class="hint">Couldn't load — ${esc(e.code||e.message||"error")}. (Only HR/admins listed in the security rules can view all.)</div>`;
-    const pb=$("#hr-pipeline"); if(pb) pb.innerHTML=msg; const box=$("#hr-list"); if(box) box.innerHTML=""; const tb=$("#hr-tabs"); if(tb) tb.innerHTML=""; });
+  });
 }
 function renderNPanel(){
   const p=$("#npanel"), notes=myNotes();
@@ -9863,8 +9916,9 @@ const seatRoles=s=>(s.responsibilities||[]).filter(r=>r&&r.trim());
    on one wrapped line in a 228px box; a longer responsibility takes proportionally more vertical room. */
 function d3NodeH(s){ if(!s) return 1;
   const nm=Math.max(1,seatNames(s).length), l10=s.l10?16:0, lma=seatRoles(s), CPL=30;
+  const openPad=(seatNames(s).length && seatOpenCount(s)>0)?15:0;   // room for the "+N open" chip beside the names
   let lines=0; lma.forEach(t=>{ lines += Math.max(1, Math.ceil(String(t).length/CPL)); });
-  return 34 + nm*15 + l10 + (lma.length?(lines*15+8):0) + 30;
+  return 34 + nm*15 + l10 + openPad + (lma.length?(lines*15+8):0) + 30;
 }
 /* ===== Drag a box onto another to change who it reports to =====
    Pointer-based so it works with the pan/zoom viewport. Node pointerdown starts a potential drag (and
@@ -9988,11 +10042,14 @@ let _d3sideSeats=[];          // the left/right side reports from the last rende
 let _d3xform=null;            // the user's current pan/zoom — restored across background re-renders so the chart never auto-zooms out on you
 let _d3wantFit=true;          // fit only on first open / an explicit view change (set true by the facility & view buttons)
 function d3NodeCard(s, hasKids, collapsed, isSide){
-  const names=seatNames(s), vac=!names.length, lma=seatRoles(s), edit=canEditChart();
+  const names=seatNames(s), vac=!names.length, open=seatOpenCount(s), lma=seatRoles(s), edit=canEditChart();
+  const nameHtml = vac
+    ? (open>1?`${open} open spots`:"Open seat")
+    : names.map(esc).join(", ")+(open>0?` <span class="open-spots">+${open} open</span>`:"");
   return `<div class="d3node ${vac?"vac":""} ${s.color?("c-"+s.color):""} ${s.l10?"is-l10":""} ${isSide?"d3-side-card":""}">
     <div class="d3-body" data-seat-edit="${s.id}">
       <div class="d3-role">${esc(s.role)||"Untitled"}</div>
-      <div class="d3-name">${vac?"Open seat":names.map(esc).join(", ")}</div>
+      <div class="d3-name">${nameHtml}</div>
       ${s.l10?'<div class="d3-l10">✓ L10 TEAM</div>':""}
       ${lma.length?'<ul class="d3-lma">'+lma.map(r=>`<li title="${esc(r)}">${esc(r)}</li>`).join("")+"</ul>":""}
     </div>
@@ -10383,8 +10440,13 @@ function editSeat(id, newParent){
   const curPlace=(rec.side==="left"||rec.side==="right"||rec.side==="down")?rec.side:(_autoSide?"right":"down");
   openSheet(`<h2>${isNew?"New Seat":"Edit Seat"}</h2>
     <div class="field"><label>Seat / Role</label><input id="s-role" value="${esc(rec.role)}" placeholder="e.g. Admissions Advocate"></div>
-    <div class="field"><label>People in this seat <small>(one name per line or comma-separated — each becomes an individual; several people can share a seat)</small></label>
-      <textarea id="s-names" rows="3" placeholder="One name per line — blank = open seat">${esc(seatNames(rec).join("\n"))}</textarea></div>
+    <div class="field"><label class="ck-lbl"><input type="checkbox" id="s-open" ${seatNames(rec).length?"":"checked"}> <b>Open seat</b> — no one's in it yet</label>
+      <div class="hint" style="margin-top:3px">Mark a vacant seat here instead of typing “Open”. Its people's evaluations roll up to the seat above until it's filled. Uncheck to add names.</div></div>
+    <div class="field" id="s-names-field" ${seatNames(rec).length?"":'style="display:none"'}><label>People in this seat <small>(one name per line or comma-separated — each becomes an individual; several people can share a seat)</small></label>
+      <textarea id="s-names" rows="3" placeholder="One name per line">${esc(seatNames(rec).join("\n"))}</textarea></div>
+    <div class="field"><label>Positions in this seat <small>(headcount — the total it should have)</small></label>
+      <input id="s-cap" type="number" min="0" inputmode="numeric" value="${seatCapOf(rec)||""}" placeholder="e.g. 8" style="max-width:120px">
+      <div class="hint" style="margin-top:3px">Set this for a role with several identical seats (advocates, techs). If it's <b>8</b> and <b>6</b> people are in it, the chart shows <b>+2 open</b>. Leave blank for a one-person seat.</div></div>
     <div class="field"><label>Reports to</label><select id="s-parent">${parentOpts}</select></div>
     <div class="field"><label class="ck-lbl"><input type="checkbox" id="s-l10" ${rec.l10?"checked":""}> This seat runs an L10 — it's a team</label>
       <div class="hint" style="margin-top:3px">Gives it a Scorecard, Rocks, L10 &amp; Lists. The team = this seat + everyone below it, down to the next L10 seat. Link its data in <b>Admin → Teams &amp; the chart</b>.</div></div>
@@ -10430,6 +10492,7 @@ function editSeat(id, newParent){
   document.querySelectorAll('#s-also [data-also]').forEach(b=>b.onclick=()=>b.classList.toggle("on"));
   document.querySelectorAll('.s-place').forEach(b=>b.onclick=()=>{ document.querySelectorAll('.s-place').forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
   document.querySelectorAll('.s-color').forEach(b=>b.onclick=()=>{ document.querySelectorAll('.s-color').forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
+  { const ob=$("#s-open"), nf=$("#s-names-field"); if(ob&&nf) ob.onchange=()=>{ if(ob.checked){ nf.style.display="none"; const ta=$("#s-names"); if(ta) ta.value=""; } else { nf.style.display=""; const ta=$("#s-names"); if(ta) ta.focus(); } }; }
   { const aib=$("#s-ai-lma"); if(aib) aib.onclick=()=>aiRun(aib, $("#s-ai-status"), "Thinking about this seat…", async ()=>{
       const role=($("#s-role").value||"").trim(); if(!role){ $("#s-role").focus(); throw new Error("Name the seat/role first."); }
       const par=seats.find(x=>x.id===($("#s-parent").value||rec.parent));
@@ -10442,7 +10505,10 @@ function editSeat(id, newParent){
     }); }
   $("#s-save").onclick=()=>{
     rec.role=$("#s-role").value.trim()||"Untitled Seat";
-    rec.names=($("#s-names").value||"").split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);
+    const openChecked=$("#s-open")&&$("#s-open").checked;
+    rec.names = openChecked ? [] : ($("#s-names").value||"").split(/[\n,;]+/).map(x=>x.trim()).filter(n=>n&&!isOpenName(n));   // "Open"/"Vacant" typed as a name are dropped — an open seat is stored as no names
+    if(openChecked || !rec.names.length) rec.open=true; else delete rec.open;   // flag a deliberately-open seat (display + any future "open seats" listing)
+    { const cv=parseInt(($("#s-cap").value||"").trim(),10); if(!isNaN(cv)&&cv>0) rec.cap=cv; else delete rec.cap; }   // headcount → drives "+N open" spots on the chart
     delete rec.name;
     rec.parent=$("#s-parent").value||null;
     if(scoped && !canAddSeatUnder(rec.parent)) rec.parent=myTopSeatId();   // safety: pillar leaders stay in their branch
