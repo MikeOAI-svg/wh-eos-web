@@ -4996,7 +4996,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=220;
+const BUILD=221;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5874,6 +5874,36 @@ function evDocReviewers(ownerName){
   const seat=(seatsFor(ownerName)||[])[0], pillar=seat?pillarSeatOf(seat.id):null;   // the owner's facility (pillar) seat
   if(pillar) seatNames(pillar).forEach(n=>{ const e=(emailForName(n)||"").toLowerCase(); if(e) out.add(e); });   // facility leader(s)
   return [...out];
+}
+// ONE-TIME BACKFILL (HR/admin only): stamp the correct state.reviewers (manager + facility leader) onto EVERY
+// existing eval doc, so facility leaders can see their WHOLE facility — not just docs saved since build 220.
+// Only updates reviewers (dot-path), never other fields; skips docs already correct. Scoping is unchanged:
+// each leader is added only to THEIR facility's docs, so no cross-facility access is granted.
+function evBackfillReviewers(statusEl){
+  if(!isEvalAdmin()){ if(statusEl) statusEl.textContent="HR/admin only."; return; }
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ if(statusEl) statusEl.textContent="Offline — try again when connected."; return; }
+  const setS=(t,cls)=>{ if(statusEl){ statusEl.className="hint"+(cls?" "+cls:""); statusEl.textContent=t; } };
+  setS("Scanning every evaluation…");
+  fs.collection("evaluations").get().then(qs=>{
+    const jobs=[]; let total=0, changed=0, failed=0;
+    qs.forEach(ds=>{ total++; const st=(ds.data()||{}).state||{};
+      const want=evDocReviewers(evSupName(ds.id));                       // owner's manager + facility leader
+      if(!want.length) return;                                           // owner not on the chart → nothing to grant
+      const have=st.reviewers||[];
+      const same = want.length===have.length && want.every(e=>have.indexOf(e)>=0);
+      if(same) return;
+      changed++;
+      jobs.push( fs.doc("evaluations/"+ds.id).update({ "state.reviewers": want, updatedAt:Date.now(), updatedBy:myEmail() })
+        .catch(e=>{ failed++; console.error("backfill",ds.id,e&&e.code); }) );
+    });
+    if(!changed){ setS("✓ Already up to date — all "+total+" evaluations have the right access.","ok"); return; }
+    setS("Updating access on "+changed+" of "+total+" evaluations…");
+    Promise.all(jobs).then(()=>{
+      const ok=changed-failed;
+      setS("✓ Access updated on "+ok+" evaluation"+(ok===1?"":"s")+(failed?(" · "+failed+" couldn't be written"):"")+" — facility leaders can now see their whole facility.", failed?"":"ok");
+      setSync(failed?("Backfill done, "+failed+" failed"):"Facility access backfilled ✓");
+    });
+  }).catch(e=>{ setS("Couldn't scan evaluations — "+(e.code||e.message||"error")+". (HR/admins only.)"); });
 }
 function saveEvals(){
   refreshNotes();
@@ -9359,6 +9389,8 @@ function evSupName(email){ const p=(data.people||[]).find(x=>x&&(x.email||"").to
 function evalHRRoster(){
   openSheet(`<h2>Evaluation status &amp; HR audit</h2>
     <div class="hint" style="margin:-4px 2px 10px">Evaluations <b>by facility</b> — your facility opens first; switch tabs to help cover another. In-progress pipeline up top, filed records below. Only HR/admins can load this.</div>
+    ${isEvalAdmin()?`<div style="margin:0 2px 12px"><button class="btn ghost sm" id="hr-backfill">⟳ Fix facility-leader access</button> <span class="hint" id="hr-bf-status" style="display:inline"></span>
+      <div class="hint" style="margin-top:3px">Run once after this update: grants each facility leader access to every existing evaluation in <b>their own</b> facility (no cross-facility access). New evaluations update themselves.</div></div>`:""}
     <div id="hr-tabs" class="hr-tabs"></div>
     <div id="hr-pipeline"><div class="hint">Loading…</div></div>
     <div class="sec-title" style="margin-top:18px">Filed records</div>
@@ -9366,6 +9398,9 @@ function evalHRRoster(){
     <div id="hr-list"><div class="hint">Loading…</div></div>
     <div class="sheet-actions"><button class="btn" id="hr-close">Close</button></div>`);
   $("#hr-close").onclick=closeSheet;
+  { const bf=$("#hr-backfill"); if(bf) bf.onclick=()=>{
+      if(!confirm("Grant every facility leader access to all existing evaluations in their OWN facility?\n\nThis updates the access list on each evaluation (nothing else), and adds no cross-facility access. Safe to run more than once.")) return;
+      bf.disabled=true; evBackfillReviewers($("#hr-bf-status")); }; }
   evLoadHrDocs((docs, loadErr)=>{
     if(!docs){ const msg=`<div class="hint">Couldn't load — ${esc(loadErr||"error")}. (Facility leaders &amp; HR must be allowed by the security rules to read these.)</div>`;
       const pb=$("#hr-pipeline"); if(pb) pb.innerHTML=msg; const tb=$("#hr-tabs"); if(tb) tb.innerHTML=""; const box=$("#hr-list"); if(box) box.innerHTML=""; return; }
