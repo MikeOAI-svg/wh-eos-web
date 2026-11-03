@@ -5010,7 +5010,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=223;
+const BUILD=224;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -6903,6 +6903,19 @@ async function aiCall(task, payload){
   if(!r.ok) throw new Error(data.error||("AI error ("+r.status+")"));
   return data.text||"";
 }
+// Send a Warriors Heart-branded "set your password" invite via our Netlify function (Resend), so delivery
+// comes from our own domain instead of Firebase's firebaseapp.com sender (which Microsoft 365 quarantined).
+async function sendBrandedInvite(email, meta){
+  const u=(window.firebase&&firebase.auth&&firebase.auth().currentUser)||null;
+  if(!u) throw new Error("Please sign in first.");
+  const token=await u.getIdToken();
+  const r=await fetch("/.netlify/functions/invite",{ method:"POST",
+    headers:{ "content-type":"application/json", "authorization":"Bearer "+token },
+    body:JSON.stringify({ email, name:(meta&&meta.name)||"", teamName:(meta&&meta.teamName)||"", inviterName:myName()||"" }) });
+  const data=await r.json().catch(()=>({error:"Unexpected response from the invite service."}));
+  if(!r.ok) throw new Error(data.error||("Invite failed ("+r.status+")"));
+  return data;
+}
 function aiParseJSON(text){                    // model is told to return raw JSON; strip fences/prefix defensively
   let s=String(text||"").trim();
   const fence=s.match(/```(?:json)?\s*([\s\S]*?)```/i); if(fence) s=fence[1].trim();
@@ -8320,6 +8333,7 @@ function renderAdmin(){
         <div class="em">${claim?esc(claim.email):"no login linked"}${claim&&claim.wantRole?` · <span style="color:var(--accent);font-weight:600">says: “${esc(claim.wantRole)}”</span>`:""}</div></div>
       <div class="adm-actions">
         <button class="btn ghost sm" data-assign-teams="${esc(n)}">Assign teams</button>
+        ${cem?`<button class="btn ghost sm" data-resend-invite="${esc(cem)}" data-resend-name="${esc(n)}">Resend invite</button>`:""}
         ${isAdm&&!isOwn?`<button class="btn ghost sm" data-revoke-admin="${esc(cem)}">Remove admin</button>`:""}
         <button class="btn ghost sm" data-rename-person="${esc(n)}">Rename</button>
         <button class="btn danger sm" data-del-person="${esc(n)}" ${me?"disabled title='You cannot delete yourself'":""}>Delete</button>
@@ -8408,6 +8422,16 @@ function renderAdmin(){
   wrap.querySelectorAll("[data-del-person]").forEach(b=>{ if(!b.disabled) b.onclick=()=>deletePerson(b.dataset.delPerson); });
   wrap.querySelectorAll("[data-team-editors]").forEach(b=>b.onclick=()=>manageTeamEditors(b.dataset.teamEditors));
   wrap.querySelectorAll("[data-assign-teams]").forEach(b=>b.onclick=()=>assignTeams(b.dataset.assignTeams));
+  // Resend the branded "set your password" invite (links expire ~1h, so this is how you re-send one).
+  wrap.querySelectorAll("[data-resend-invite]").forEach(b=>b.onclick=()=>{
+    const email=b.dataset.resendInvite, nm=b.dataset.resendName||"";
+    const tm=(data.teams||[]).find(t=>teamRoster(t).some(x=>sameName(x,nm)));
+    const orig=b.textContent; b.disabled=true; b.textContent="Sending…";
+    sendBrandedInvite(email, {name:nm, teamName:(tm?tm.name:"")})
+      .then(()=>setSync(`✉️ Invite re-sent to ${email}.`))
+      .catch(err=>alert(`Couldn't send the invite to ${email}:\n\n${(err&&err.message)||err}`))
+      .then(()=>{ b.disabled=false; b.textContent=orig; });
+  });
   wrap.querySelectorAll("[data-rename-person]").forEach(b=>b.onclick=()=>{ const from=b.dataset.renamePerson;
     const to=(prompt("Rename “"+from+"” everywhere in the app?", from)||"").trim();
     if(to && !sameName(to,from)){ renamePerson(from,to); save(); renderAdmin(); } });
@@ -8576,19 +8600,23 @@ function restoreTeamsFromPoint(p){
    password the admin never sees, then email the person a set-password link from our own connection
    (which leaves the admin's session untouched). Requires connectivity; transactions/creation don't
    work offline. An already-existing email is treated as success (they just sign in / reset). */
-function provisionLogin(email){
+function provisionLogin(email, meta){
   return new Promise((resolve,reject)=>{
     let sec, opts=null;
     try{ opts=(firebase.app&&firebase.app().options)||null; }catch(e){ opts=null; }
     if(!opts){ reject(new Error("Login provisioning isn't available here.")); return; }
     try{ sec=firebase.app("userProvision"); }catch(e){ try{ sec=firebase.initializeApp(opts,"userProvision"); }catch(e2){ reject(e2); return; } }
     const rnd="Wh!"+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,6).toUpperCase()+"7";
+    // Create the login on a throwaway connection so the admin's own session is untouched, then send the
+    // "set your password" link as a Warriors Heart-branded email from our own domain (the invite function).
+    // We no longer use firebase.auth().sendPasswordResetEmail — that mail came from firebaseapp.com and
+    // Microsoft 365 was quarantining it, so the account got created but nobody ever got the link.
+    let existed=false;
     sec.auth().createUserWithEmailAndPassword(email,rnd)
-      .then(()=>firebase.auth().sendPasswordResetEmail(email))   // set-password link, sent from the admin's own app (session untouched)
-      .then(()=>{ try{ sec.auth().signOut(); }catch(e){} resolve({created:true}); })
-      .catch(err=>{ try{ sec.auth().signOut(); }catch(e){}
-        if(err&&err.code==="auth/email-already-in-use"){ resolve({created:false, existed:true}); return; }
-        reject(err); });
+      .catch(err=>{ if(err&&err.code==="auth/email-already-in-use"){ existed=true; return; } throw err; })
+      .then(()=>{ try{ sec.auth().signOut(); }catch(e){} return sendBrandedInvite(email, meta); })   // our branded email + server-generated set-password link
+      .then(()=>resolve({created:!existed, existed}))
+      .catch(err=>{ try{ sec.auth().signOut(); }catch(e){} reject(err); });
   });
 }
 function provisionError(e){ const c=(e&&e.code)||"";
@@ -8729,16 +8757,16 @@ function addMemberWizard(){
     const makeLogin=$("#am-makelogin")?$("#am-makelogin").checked:false;
     if(!makeLogin){ closeSheet(); renderAdmin();
       setSync(`Added ${name} · ${where}. Create their login in Firebase so they can sign in.`); return; }
-    const btn=$("#am-add"); if(btn){ btn.disabled=true; btn.textContent="Creating sign-in…"; }
+    const btn=$("#am-add"); if(btn){ btn.disabled=true; btn.textContent="Sending invite…"; }
     const ca=$("#am-cancel"); if(ca) ca.disabled=true;
-    provisionLogin(email).then(r=>{
+    provisionLogin(email, {name, teamName:(t?t.name:"")}).then(r=>{
       closeSheet(); renderAdmin();
       setSync(r.existed
-        ? `Added ${name} · ${where}. That email already had a login — they can sign in now.`
-        : `Added ${name} · ${where}. ✉️ Sent ${email} a link to set their password.`);
+        ? `Added ${name} · ${where}. ✉️ Sent ${email} a set-password link (they already had a login).`
+        : `Added ${name} · ${where}. ✉️ Invite sent to ${email} to set their password.`);
     }).catch(err=>{
       closeSheet(); renderAdmin();
-      alert(`${name} was placed on the boards, but their sign-in couldn't be created automatically:\n\n${provisionError(err)}\n\nYou can still create the login in the Firebase Console (Authentication → Users → Add user). Their placement is already saved.`);
+      alert(`${name} was placed on the boards, but the invite email couldn't be sent:\n\n${provisionError(err)}\n\nTheir placement is saved. You can resend the invite from the Admin tab (▸ their row ▸ “Resend invite”), or create the login in the Firebase Console.`);
     });
   };
 }
