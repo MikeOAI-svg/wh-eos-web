@@ -1061,6 +1061,14 @@
   .mb-tt{flex:1;font-size:13px;font-weight:700;min-width:0}
   .mb-td{font-size:10.5px;color:var(--muted);font-weight:700;flex:none}
   .mb-todo.late .mb-td{color:var(--pa-bad)}
+  /* Tick a to-do done right on My Board (stamps doneAt → shows ✓ at the next L10). */
+  .mb-open{display:flex;align-items:center;gap:10px;flex:1;min-width:0;background:none;border:0;padding:0;margin:0;
+    font-family:inherit;color:inherit;text-align:left;cursor:pointer}
+  .mb-tick{flex:0 0 auto;width:22px;height:22px;border-radius:50%;border:2px solid var(--border);background:var(--card);
+    cursor:pointer;padding:0;position:relative;transition:border-color .15s,background .15s}
+  .mb-tick:hover{border-color:var(--accent)}
+  .mb-tick:hover::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--accent);opacity:.5}
+  .mb-tick:active{transform:scale(.92)}
   .hero-row.hero3{grid-template-columns:repeat(3,1fr)}   /* two-class specificity beats plain .hero-row */
   @media (max-width:760px){ .hero-row.hero3{grid-template-columns:1fr} }
   .hero-row.hero4{grid-template-columns:repeat(4,1fr)}
@@ -5002,7 +5010,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=222;
+const BUILD=223;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5554,7 +5562,21 @@ function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shad
 function adoptMulti(){
   const merged=assembleMulti(), json=JSON.stringify(merged);
   if(json===lastAdopted) return;                 // nothing changed since our last adopt
-  if(_multiBooted && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
+  // FOLLOW-THE-FACILITATOR fast path: if the live meeting's segment (or the IDS issue being worked)
+  // just changed, jump this screen there IMMEDIATELY instead of waiting behind the "someone's typing"
+  // guard below — that guard is why followers sat on the old segment for seconds while their cursor was
+  // in a notes box. What they were typing is already saved (saveL10 fires on each input), so moving
+  // forward loses nothing. An open dialog (modal) is still never interrupted.
+  let _navJump=false;
+  if(_multiBooted && currentView==="l10" && meeting){
+    const _mdl=$("#modal"), _modalOpen=!!(_mdl&&_mdl.classList.contains("open"));
+    if(!_modalOpen){
+      const mt=(merged.teams||[]).find(x=>x&&x.id===curTeamId), lm=mt&&mt.liveMeeting;
+      if(!lm) _navJump=true;   // meeting ended elsewhere → leave the dead segment now
+      else if((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null)) _navJump=true;
+    }
+  }
+  if(_multiBooted && !_navJump && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
       || (_teamWriteInFlight>0 && (Date.now()-_teamWriteSince)<3000))){
     if(currentView==="l10" && meeting){ const mt=(merged.teams||[]).find(x=>x&&x.id===curTeamId); livePatchSharedText(mt); }   // can't do a full rebuild yet (someone's typing) — but still STREAM teammates' shared text into their boxes so WIFLS/IDS show live
     setTimeout(adoptMulti,400); return;   // never rebuild mid-edit, during a click in progress, around a just-committed click, nor while our own team write is still confirming (would revert it)
@@ -11701,6 +11723,17 @@ function renderL10(){
   startTick();   // followers (and anyone reloading mid-meeting) need the clock running too
 }
 function fmt(sec){ sec=Math.max(0,Math.floor(sec)); const m=Math.floor(sec/60),s=sec%60; return m+":"+String(s).padStart(2,"0"); }
+/* "Since the last L10" anchor for the To-Do review. A to-do ticked done between meetings (on My Board
+   or the Lists tab) must surface as ✓ Done at the NEXT meeting — a fixed 9-day window missed that whenever
+   the cadence slipped (a skipped week, a meeting a day or two late). So we anchor to the last REAL (non-draft)
+   meeting's timestamp instead, with a 12h grace, and fall back to 9 days when a team has no prior meeting. */
+function lastL10Ts(t){ const ms=(t&&t.meetings)||[];
+  for(let i=ms.length-1;i>=0;i--){ const m=ms[i]; if(!m||m.finalized===false) continue;   // skip canceled/draft records
+    const idTs=(typeof m.id==="string"&&m.id.indexOf("m_")===0)?parseInt(m.id.slice(2),10):0; if(idTs) return idTs;
+    const dt=Date.parse(m.date); if(!isNaN(dt)) return dt; }
+  return 0; }
+function l10TodoAnchor(t){ const ts=lastL10Ts(t); return ts ? (ts-12*36e5) : (Date.now()-9*864e5); }
+function todoDoneInWindow(td, anchor){ return !!(td && td.doneAt && Date.parse(td.doneAt)>=anchor); }
 function renderSegContent(i){
   const c=$("#segContent"); const seg=SEGMENTS[i];
   if(seg.key==="scorecard"){
@@ -11728,13 +11761,13 @@ function renderSegContent(i){
       sel.className="rate-input rock-stat rs-"+val;   // recolor immediately: green On / red Off / black Done
       if(fr){ fr.r.status=val; mergeTeam(fr.team.id, t=>{ const r=(t.rocks||[]).find(x=>x&&x.id===rid); if(r) r.status=val; }); } });   // merge onto latest so a concurrent edit isn't refused
   }else if(seg.key==="todos"){
-    // Review last week's To-Do list: show what's still OPEN plus what got DONE recently (so the meeting
-    // can report "these got done, these didn't"). Done items marked in the last ~9 days stay listed for
-    // this review, then drop off next week; anything created THIS meeting always shows.
-    const now=Date.now(), WIN=9*864e5, created=new Set(meeting.createdTodos||[]);
+    // Review last week's To-Do list: show what's still OPEN plus what got DONE SINCE THE LAST L10 (so the
+    // meeting can report "these got done, these didn't"), including to-dos ticked off on My Board / Lists
+    // between meetings. Anything created THIS meeting always shows. Done items drop off at the next meeting.
+    const created=new Set(meeting.createdTodos||[]), anchor=l10TodoAnchor(TEAM());
     const list=TEAM().todos.filter(t=> !t.done
         || created.has(t.id)
-        || (t.doneAt && (now-Date.parse(t.doneAt))<WIN));
+        || todoDoneInWindow(t, anchor));
     list.sort((a,b)=>(a.done?1:0)-(b.done?1:0) || String(a.due||"9999").localeCompare(String(b.due||"9999")));
     const doneN=list.filter(t=>t.done).length, openN=list.length-doneN;
     const rows=list.map(t=>`<div class="rate-row"><div><span class="tdl-txt ${t.done?"done":""}">${esc(t.text)}</span><div style="font-size:11px;color:var(--muted)">${t.owner?esc(t.owner):"—"}${t.due?" · due "+fmtShort(t.due):""}</div></div>
@@ -12191,9 +12224,9 @@ function buildMeetingRec(opts){
   const avg=vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):0;
   const durationMin=Math.max(1,Math.round((meeting.totalElapsed+meeting.segElapsed)/60));
   const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
-  const createdIds=new Set(meeting.createdTodos||[]), revNow=Date.now(), REV_WIN=9*864e5;
+  const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(TEAM());
   const reviewedTodos=TEAM().todos
-    .filter(t=> !createdIds.has(t.id) && ( !t.done || (t.doneAt && (revNow-Date.parse(t.doneAt))<REV_WIN) ))
+    .filter(t=> !createdIds.has(t.id) && ( !t.done || todoDoneInWindow(t, revAnchor) ))
     .map(t=>({text:t.text, owner:t.owner, due:t.due, done:!!t.done}));
   const ratingList=members.map(m=>({name:m.name,score:meeting.ratings[m.id]}))
                           .filter(r=>r.score!==undefined&&r.score!=="");
@@ -12251,9 +12284,9 @@ function concludeMeeting(auto){
   const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
   // Snapshot last week's reviewed TDL (done + not done, excluding ones created this meeting) so the
   // minutes report what got completed vs. carried over.
-  const createdIds=new Set(meeting.createdTodos||[]), revNow=Date.now(), REV_WIN=9*864e5;
+  const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(TEAM());
   const reviewedTodos=TEAM().todos
-    .filter(t=> !createdIds.has(t.id) && ( !t.done || (t.doneAt && (revNow-Date.parse(t.doneAt))<REV_WIN) ))
+    .filter(t=> !createdIds.has(t.id) && ( !t.done || todoDoneInWindow(t, revAnchor) ))
     .map(t=>({text:t.text, owner:t.owner, due:t.due, done:!!t.done}));
   // resolve rating names now — the minutes must stay readable even if members change later
   const ratingList=members.map(m=>({name:m.name,score:meeting.ratings[m.id]}))
@@ -12906,9 +12939,12 @@ function renderMyBoard(){
     <div class="sec-title" style="margin-top:22px">My To-Dos · this week <span class="mb-count">${myTodos.length}</span></div>
     <div class="hint" style="margin:0 2px 8px">Your open 7-day action items across all your teams, soonest due first. Tap one to open it on the Lists tab and tick it off.</div>
     ${myTodos.length?myTodos.map(x=>{ const late=x.d.due&&x.d.due<tdToday; const soon=!late&&(!x.d.due||x.d.due<=tdWeekEnd);
-        return `<button class="mb-todo ${late?"late":""}" data-go-todo="${x.t.id}">
-          <span class="mb-tt">${esc(x.d.text)}</span>
-          <span class="mb-td">${late?'<b style="color:var(--red)">OVERDUE</b> · ':(soon?"This week · ":"")}${x.d.due?fmtShort(x.d.due):"7-day"} · ${esc(x.t.name)}</span></button>`; }).join("")
+        return `<div class="mb-todo ${late?"late":""}">
+          <button class="mb-tick" data-done-todo="${esc(x.d.id)}|${esc(x.t.id)}" title="Mark done" aria-label="Mark ${esc(x.d.text)} done"></button>
+          <button class="mb-open" data-go-todo="${x.t.id}">
+            <span class="mb-tt">${esc(x.d.text)}</span>
+            <span class="mb-td">${late?'<b style="color:var(--red)">OVERDUE</b> · ':(soon?"This week · ":"")}${x.d.due?fmtShort(x.d.due):"7-day"} · ${esc(x.t.name)}</span></button>
+        </div>`; }).join("")
       :`<div class="empty"><span class="emoji">✅</span>No open to-dos — you're all clear this week.</div>`}
 
     <div class="sec-title" style="margin-top:22px">My Direct Reports${reports.length?` · ${esc(qLabel(q))}`:""}</div>
@@ -12941,6 +12977,15 @@ function renderMyBoard(){
   wrap.querySelectorAll("[data-go-todo]").forEach(b=>b.onclick=()=>{ listMode="todos";
     document.querySelectorAll("#view-lists .subtabs button").forEach(x=>x.classList.toggle("active",x.dataset.list==="todos"));
     setTeam(b.dataset.goTodo); switchView("lists"); });
+  // Tick a to-do done right here on My Board — stamps doneAt so it shows as ✓ Done at the next L10's
+  // To-Do review, and merge-saves so a concurrent edit elsewhere can never revert it.
+  wrap.querySelectorAll("[data-done-todo]").forEach(b=>b.onclick=e=>{ e.stopPropagation();
+    const parts=b.dataset.doneTodo.split("|"), tid=parts[0], teamId=parts[1];
+    const tm=(data.teams||[]).find(x=>x&&x.id===teamId); if(!tm) return;
+    const td=(tm.todos||[]).find(x=>x&&x.id===tid); if(!td) return;
+    const stamp=new Date().toISOString(); td.done=true; td.doneAt=stamp; _touchedTodos.add(tid);
+    mergeTeam(teamId, t=>{ const x=(t.todos||[]).find(y=>y&&y.id===tid); if(x){ x.done=true; x.doneAt=stamp; } });
+    setSync("✓ To-do done — it'll show at your next L10"); renderMyBoard(); });
   wrap.querySelectorAll("[data-open-pa]").forEach(b=>b.onclick=()=>{ paPerson=b.dataset.openPa; paQuarter=q; switchView("people"); });
   wrap.querySelectorAll("[data-qc-sched]").forEach(b=>b.onclick=()=>scheduleQC(b.dataset.qcSched));
 
