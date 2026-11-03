@@ -27,10 +27,17 @@ function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&
 const RATE_MAX = 30, RATE_WINDOW_MS = 60000, _hits = new Map();
 function rateLimited(uid){ const now = Date.now(); const arr = (_hits.get(uid) || []).filter(t => now - t < RATE_WINDOW_MS); arr.push(now); _hits.set(uid, arr); return arr.length > RATE_MAX; }
 
-// Is the signed-in caller an admin of THIS workspace? Read the company doc with the caller's own token
-// (rules allow any authed user to read it) and check state.admins. Unknown (can't read / no list) → null,
-// which the handler treats as "allow" since the Add-Member UI is already admin-only; a definite false blocks.
+// Owner-admins are hardcoded in the client (ADMIN_EMAILS in index.html) and are NOT necessarily in the
+// data `admins` list, so mirror them here or the owner gets a false 403.
+const OWNER_EMAILS = ["odellmike76@gmail.com"];
+
+// Is the signed-in caller an admin of THIS workspace? Owner-admins pass immediately; otherwise read the
+// company doc with the caller's own token (rules allow any authed user to read it) and check state.admins.
+// Unknown (can't read / no list) → null, which the handler treats as "allow" since the Add-Member UI is
+// already admin-only; a definite false blocks.
 async function callerIsAdmin(callerToken, callerEmail){
+  const who = String(callerEmail || "").trim().toLowerCase();
+  if(OWNER_EMAILS.indexOf(who) >= 0) return true;
   try{
     const r = await fetch(`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/workspaces/main`,
       { headers: { authorization: "Bearer " + callerToken } });
