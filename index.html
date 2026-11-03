@@ -1602,6 +1602,12 @@
   .mir-tag{display:inline-block; font-size:9.5px; font-weight:800; letter-spacing:.3px; vertical-align:middle;
     background:var(--accent-soft); color:var(--accent); border-radius:6px; padding:1px 6px; margin-left:6px}
   .dept-row.shared td{color:var(--accent)}
+  /* Owner group header — used on the Rocks tab and inside the L10 Scorecard/Rocks segments
+     so each person's items sit under their name. (The Scorecard TABLE reuses tr.dept-row.) */
+  .owner-head{font-weight:800;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--accent);margin:16px 2px 6px}
+  .owner-head:first-child{margin-top:2px}
+  .owner-head .owner-none{opacity:.7}
 
   /* ===== TANGENT! alert (anyone on the L10 can fire it — pops on everyone's screen) ===== */
   .lp-tangent{margin-left:auto; background:#e0483d; color:#fff; border:0; border-radius:20px;
@@ -4996,7 +5002,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=221;
+const BUILD=222;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -6138,6 +6144,23 @@ function mirroredRows(t, key){
 }
 function rocksOnBoard(t){ return mirroredRows(t,"rocks").map(x=>({r:x.o,home:x.home,mirror:x.mirror})); }
 function measuresOnBoard(t){ return mirroredRows(t,"measurables").map(x=>({m:x.o,home:x.home,mirror:x.mirror})); }
+/* ===== Group-by-owner: ONE way to group Scorecard measurables, Rocks, and the L10 segments, so every
+   person's items sit together and a newly ADDED item always lands in its owner's block instead of
+   dropping to the bottom. Owners are ordered alphabetically (unassigned last); input order is kept
+   WITHIN each owner, so a team's hand-arranged order (scOrder) still rules inside a person's block. */
+function ownerKey(n){ return String(n==null?"":n).trim(); }
+function groupByOwner(list, getOwner){
+  const groups=[], idx={};
+  (list||[]).forEach(item=>{ const name=ownerKey(getOwner(item)), k=name.toLowerCase();
+    if(!(k in idx)){ idx[k]=groups.length; groups.push({owner:name, key:k, items:[]}); }
+    groups[idx[k]].items.push(item);
+  });
+  groups.sort((a,b)=>{ const ea=!a.key, eb=!b.key; if(ea!==eb) return ea?1:-1; return a.key.localeCompare(b.key); });
+  return groups;
+}
+function ownerGroupHead(name){
+  return `<div class="owner-head">${name?esc(name):'<span class="owner-none">Unassigned</span>'}</div>`;
+}
 // The teams a person can push an item onto = the teams they're connected to (own + above + below).
 function connectedTeamsFor(){ return teamsForUser(); }
 // One-time: freeze each item's CURRENT surfacing into an explicit showOn list, so nothing moves when
@@ -6191,19 +6214,11 @@ function renderScorecard(){
   const weeks=weekDatesFrom(w1), cwi=isCurrent?currentWeekIndex():-1;
   const scOrd = TEAM().scOrder||[];                    // one hand-arranged order, shared by the whole team
   const scIdx = id => { const i=scOrd.indexOf(id); return i<0?1e9:i; };   // unplaced items keep their spot at the end
-  const groups=[];
-  if(isCurrent){
-    TEAM().departments.forEach(dp=>{ const items=board.filter(x=>!x.mirror&&x.m.deptId===dp.id); if(items.length) groups.push({name:dp.name,items}); });
-    const orphan=board.filter(x=>!x.mirror&&!TEAM().departments.some(d=>d.id===x.m.deptId)); if(orphan.length) groups.push({name:"Unassigned",items:orphan});
-    // Mirrored-in measurables (shared onto this board) grouped by their OWNER, so each department
-    // owner's numbers line up together instead of sitting in a generic "Shared" bucket.
-    const mir={}; board.filter(x=>x.mirror).forEach(x=>{ const k=x.m.owner||"—"; (mir[k]=mir[k]||[]).push(x); });
-    Object.keys(mir).sort((a,b)=>a.localeCompare(b)).forEach(n=>groups.push({name:"↔ "+n, items:mir[n], shared:true}));
-    groups.forEach(g=>g.items.sort((a,b)=>scIdx(a.m.id)-scIdx(b.m.id)));   // apply the team's custom order within each group
-  }else{
-    const by={}; board.forEach(x=>{ const n=x.m.dept||"Unassigned"; (by[n]=by[n]||[]).push(x); });
-    Object.keys(by).forEach(n=>groups.push({name:n,items:by[n]}));
-  }
+  // Group by OWNER (name) so everyone's measurables sit together — and a newly ADDED one lands in its
+  // owner's block instead of dropping to the bottom. Within a person's block the team's hand-arranged
+  // scOrder still rules; a brand-new (unplaced) measurable falls to the end of that person's block.
+  const ordered = board.slice().sort((a,b)=>scIdx(a.m.id)-scIdx(b.m.id));
+  const groups = groupByOwner(ordered, x=>x.m.owner).map(g=>({name:g.owner, key:g.key, items:g.items}));
 
   let head=`<tr><th class="sc-name">Measurable</th><th class="sc-goal">Goal</th><th class="sc-trend" title="On-track weeks this quarter">Trend</th>`;
   weeks.forEach((w,i)=>{ head+=`<th class="wk-h"${i===cwi?' style="background:var(--accent-soft)"':''}><div class="wn">W${i+1}</div><div class="wd">${fmtShort(w)}</div></th>`; });
@@ -6211,7 +6226,7 @@ function renderScorecard(){
 
   let body="";
   groups.forEach((g,gi)=>{
-    body+=`<tr class="dept-row ${g.shared?"shared":""}"><td colspan="16">${esc(g.name)}</td></tr>`;
+    body+=`<tr class="dept-row"><td colspan="16">${g.name?esc(g.name):"Unassigned"}</td></tr>`;
     g.items.forEach(({m,mirror})=>{
       let cells="", strip="", on=0, off=0;
       for(let i=0;i<13;i++){
@@ -6228,7 +6243,7 @@ function renderScorecard(){
       const trend=`<td class="sc-trend"><div class="tk-strip">${strip}</div>
         <div class="tk-lbl ${rate===null?"":rate>=80?"good":rate>=50?"warn":"bad"}">${tot?on+"/"+tot:"—"}</div></td>`;
       body+=`<tr ${isCurrent?`data-mid="${m.id}" data-grp="${gi}" class="sc-open" draggable="true"`:``}>
-        <td class="sc-name"><div class="m">${isCurrent?'<span class="sc-grip" title="Drag to reorder">⋮⋮</span> ':''}${esc(m.name)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</div><div class="o">${esc(m.owner||"—")}</div></td>
+        <td class="sc-name"><div class="m">${isCurrent?'<span class="sc-grip" title="Drag to reorder">⋮⋮</span> ':''}${esc(m.name)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</div>${(function(){const d=deptName(m.deptId); return (d&&d!=="Unassigned")?`<div class="o">${esc(d)}</div>`:"";})()}</td>
         <td class="sc-goal">${esc(m.goal)}</td>${trend}${cells}</tr>`;
     });
   });
@@ -6252,9 +6267,9 @@ function renderScorecard(){
   if(isCurrent) wireScDrag(wrap);   // anyone can drag to reorder — the order is shared with the whole team
 }
 /* Drag-to-reorder the scorecard. The order is one shared list per team (TEAM().scOrder); anyone can
-   change it and everyone sees the same arrangement. Reordering is limited to WITHIN a group (a
-   department, or an owner's shared block) so the grouping stays coherent — move an item to another
-   department by editing its Department field. HTML5 drag = desktop/laptop; that's where it's used. */
+   change it and everyone sees the same arrangement. Reordering is limited to WITHIN an owner's block
+   so the grouping by name stays coherent — move a measurable to another person by editing its Owner
+   field. HTML5 drag = desktop/laptop; that's where it's used. */
 function wireScDrag(wrap){
   const clear=()=>wrap.querySelectorAll(".sc-drop-be,.sc-drop-af").forEach(x=>x.classList.remove("sc-drop-be","sc-drop-af"));
   let dragMid=null, dragGrp=null;
@@ -6692,16 +6707,11 @@ function renderRocks(){
        <button class="btn sm" id="rkGoLive">▶ Activate ${esc(quarterLabel(_nextW1))} Rocks</button></div>` : "";
   const board=rocksOnBoard(TEAM());   // own Rocks + any owned by this team's leader that live on another team
   if(!board.length){ wrap.innerHTML=banner+qbar+`<div class="empty"><span class="emoji">🎯</span>No Rocks yet.<br>Add a quarterly Rock as a SMART goal, then break it into milestones.<br><small>Planning ahead? Switch the dropdown to <b>Next · ${esc(quarterLabel(_nextW1))}</b> to draft next quarter's Rocks without touching this board.</small></div>`; wireQ(); return; }
-  // Group Rocks by OWNER (alphabetical), so everyone's Rocks sit together instead of in creation order.
-  const grouped=board.slice().sort((a,b)=>{ const ea=!(a.r.owner||"").trim(), eb=!(b.r.owner||"").trim(); if(ea!==eb) return ea?1:-1;   // no-owner Rocks last
-    return String(a.r.owner||"").toLowerCase().localeCompare(String(b.r.owner||"").toLowerCase()) || String(a.r.title||"").localeCompare(String(b.r.title||"")); });
-  let _prevOwner=null;
-  wrap.innerHTML=banner+qbar+grouped.map(({r,home,mirror})=>{
+  // Group Rocks by OWNER so everyone's Rocks sit together instead of in creation order — a newly added
+  // Rock lands in its owner's block. Within a person's block, Rocks stay sorted by title.
+  const byTitle=board.slice().sort((a,b)=>String(a.r.title||"").localeCompare(String(b.r.title||"")));
+  wrap.innerHTML=banner+qbar+groupByOwner(byTitle, x=>x.r.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({r,home,mirror})=>{
     r.milestones=r.milestones||[];               // normalize legacy/imported Rocks so a missing list can't blank the whole board
-    const _own=(r.owner||"").trim();
-    let _ownerHead="";
-    if(_prevOwner===null || _own.toLowerCase()!==_prevOwner.toLowerCase()){ _prevOwner=_own;
-      _ownerHead=`<div style="font-weight:800;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:16px 2px 6px">${_own?esc(_own):'<span style="opacity:.7">Unassigned</span>'}</div>`; }
     const pct=rockPct(r);
     const stPill=r.status==="done"?'<span class="pill green">Done</span>':r.status==="notdone"?'<span class="pill notdone">Not Done</span>':(r.status==="off"?'<span class="pill red">Off Track</span>':'<span class="pill green">On Track</span>');
     const sm=r.smart||{};
@@ -6724,7 +6734,7 @@ function renderRocks(){
     const open=rkOpen.has(r.id);
     const openQ=(r.questions||[]).filter(q=>!q.answer).length;
     // Compact summary is always shown; a click drops down the SMART goal + milestones + the rest.
-    return _ownerHead+`<div class="card ${open?"":"collapsed"}" data-rid="${r.id}">
+    return `<div class="card ${open?"":"collapsed"}" data-rid="${r.id}">
       <div class="rk-summary" data-rk-toggle>
         <div class="top">
           <div><h3>${esc(r.title)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</h3>${rkAttr(r.owner, home.name, r.due)}</div>
@@ -6746,7 +6756,7 @@ function renderRocks(){
         </div>
       </div>
     </div>`;
-  }).join("");
+  }).join("")).join("");
   wrap.querySelectorAll(".card").forEach(card=>{
     const rid=card.dataset.rid; const fr=findRockAnywhere(rid); const r=fr&&fr.r;   // resolve across teams so mirrored Rocks edit the shared object
     if(!r) return;
@@ -11695,10 +11705,10 @@ function renderSegContent(i){
   const c=$("#segContent"); const seg=SEGMENTS[i];
   if(seg.key==="scorecard"){
     const cwi=currentWeekIndex();
-    // Same board as the Scorecard TAB: this team's own measurables PLUS any shared onto it (showOn).
-    const rows=measuresOnBoard(TEAM()).map(({m,mirror})=>{ const e=m.values&&m.values[cwi]; const v=e?(e.v||""):"", s=e?(e.s||""):"";
-      return `<div class="rate-row"><div><b>${esc(m.name)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</b><div style="font-size:11px;color:var(--muted)">${esc(m.owner||"—")} · goal ${esc(m.goal)}</div></div>
-        <span class="pill ${s==="on"?"green":(s==="off"?"red":"grey")}">${v===""?"—":esc(v)}${s==="on"?" · On":(s==="off"?" · Off":"")}</span></div>`; }).join("");
+    // Same board as the Scorecard TAB, grouped by OWNER so each person's numbers are reviewed together.
+    const rows=groupByOwner(measuresOnBoard(TEAM()), x=>x.m.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({m,mirror})=>{ const e=m.values&&m.values[cwi]; const v=e?(e.v||""):"", s=e?(e.s||""):"";
+      return `<div class="rate-row"><div><b>${esc(m.name)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</b><div style="font-size:11px;color:var(--muted)">goal ${esc(m.goal)}</div></div>
+        <span class="pill ${s==="on"?"green":(s==="off"?"red":"grey")}">${v===""?"—":esc(v)}${s==="on"?" · On":(s==="off"?" · Off":"")}</span></div>`; }).join("")).join("");
     const salesBlock=TEAM().salesCard
       ? `<h4 style="margin-top:18px">📋 Sales Card — ${esc(salesWeekLabel(TEAM().salesCard.weekStart))}</h4>
          ${salesReadonlyHtml(TEAM().salesCard)}
@@ -11707,12 +11717,11 @@ function renderSegContent(i){
       ${salesBlock}
       <textarea id="seg-note" data-lock="note:scorecard" placeholder="Notes / off-track measurables to drop into IDS…">${esc(meeting.notes.scorecard||"")}</textarea></div>`;
   }else if(seg.key==="rocks"){
-    // Same board as the Rocks TAB: this team's own Rocks PLUS any shared onto it (showOn).
-    // Owner is shown as a prominent accent chip so it's obvious at a glance who's accountable.
-    const rows=rocksOnBoard(TEAM()).map(({r,mirror})=>`<div class="rate-row rock-review" data-rid="${r.id}">
+    // Same board as the Rocks TAB, grouped by OWNER (name) so each person's Rocks are reviewed together.
+    const rows=groupByOwner(rocksOnBoard(TEAM()), x=>x.r.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({r,mirror})=>`<div class="rate-row rock-review" data-rid="${r.id}">
       <div class="rr-info"><div class="rr-title"><b>${esc(r.title)}</b>${mirror?' <span class="mir-tag">↔ shared</span>':''}</div>
-        <div class="rr-meta">${ownerChip(r.owner)}<span class="rr-pct">${rockPct(r)}%</span></div></div>
-      <select class="rate-input rock-stat rs-${r.status||'off'}" style="width:120px" data-rock-status="${r.id}"><option value="on" ${r.status==="on"?"selected":""}>On</option><option value="off" ${r.status==="off"?"selected":""}>Off</option><option value="done" ${r.status==="done"?"selected":""}>Done</option><option value="notdone" ${r.status==="notdone"?"selected":""}>Not Done</option></select></div>`).join("");
+        <div class="rr-meta"><span class="rr-pct">${rockPct(r)}%</span></div></div>
+      <select class="rate-input rock-stat rs-${r.status||'off'}" style="width:120px" data-rock-status="${r.id}"><option value="on" ${r.status==="on"?"selected":""}>On</option><option value="off" ${r.status==="off"?"selected":""}>Off</option><option value="done" ${r.status==="done"?"selected":""}>Done</option><option value="notdone" ${r.status==="notdone"?"selected":""}>Not Done</option></select></div>`).join("")).join("");
     c.innerHTML=`<div class="seg-panel"><h4>Rocks — On / Off Track</h4>${rows||'<div class="hint">No Rocks yet. Add them on the Rocks tab.</div>'}
       <div class="hint rock-key" style="margin-top:8px"><span class="rk rk-on">On</span><span class="rk rk-off">Off</span><span class="rk rk-done">Done</span> · Off-track Rocks should become issues for IDS.</div></div>`;
     c.querySelectorAll("[data-rock-status]").forEach(sel=>sel.onchange=()=>{ const rid=sel.dataset.rockStatus, val=sel.value; const fr=findRockAnywhere(rid);
