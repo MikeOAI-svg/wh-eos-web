@@ -5080,7 +5080,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=228;
+const BUILD=229;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -13831,6 +13831,9 @@ function recDeleteCandidate(id, cb){ let fs; try{ fs=firebase.firestore(); }catc
   fs.doc("recruiting/"+id).delete().then(()=>{ if(cb) cb(); }).catch(e=>console.error("recruiting delete",e)); }
 function recLog(c, action){ c.history=c.history||[]; c.history.push({ t:Date.now(), by:myName()||myEmail(), action }); }
 function recWhen(ms){ if(!ms) return ""; try{ const d=new Date(ms); return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); }catch(e){ return ""; } }   // ms timestamp → "Nov 4, 2:30 PM"
+// Make a pasted résumé link absolute — without a scheme the browser treats "warriorsheart.com" as a
+// relative path (…netlify.app/warriorsheart.com) and it 404s. Leave mailto:/other schemes alone.
+function recUrl(u){ u=String(u||"").trim(); if(!u) return ""; return /^[a-z][a-z0-9+.-]*:/i.test(u) ? u : ("https://"+u.replace(/^\/+/,"")); }
 // ARF approval chain — matches the Warriors Heart Action Request Form: Director → Executive Director → COO,
 // sequential, each approve/deny attributed + timestamped. COO approval advances the candidate to Prehire.
 const REC_APPROVALS=[{k:"director",label:"Director"},{k:"execdir",label:"Executive Director"},{k:"coo",label:"COO"}];
@@ -13952,7 +13955,7 @@ function recAddCandidate(reqId){
   $("#rc-save").onclick=()=>{ const name=($("#rc-name").value||"").trim(); if(!name){ $("#rc-name").focus(); return; }
     const req=recReqById($("#rc-req").value); if(!req){ return; }
     const c={ id:uid(), name, email:($("#rc-email").value||"").trim(), phone:($("#rc-phone").value||"").trim(),
-      resumeLink:($("#rc-link").value||"").trim(), resumeText:($("#rc-text").value||"").slice(0,4000),
+      resumeLink:recUrl($("#rc-link").value), resumeText:($("#rc-text").value||"").slice(0,4000),
       reqId:req.id, seatId:req.seatId, title:req.title, facility:req.facility,
       stage: isRecHR()?"inbox":"review", rating:0, notes:[], phoneScreen:{}, interview:{}, arf:{}, outcome:"", archived:false,
       createdAt:Date.now(), createdBy:myName()||myEmail(), history:[] };
@@ -13976,7 +13979,7 @@ function recCard(ref){
   const arfSubmitted=c.arf&&c.arf.submittedAt;
   openSheet(`<h2>${esc(c.name||"Candidate")}</h2>
     <div class="hint" style="margin:-4px 2px 10px">${esc(c.title||"")}${c.facility?" · "+esc(c.facility):""} · <b>${esc(recStageLabel(c.stage))}</b></div>
-    <div class="rec-contact">${c.email?`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`:""}${c.phone?` · ${esc(c.phone)}`:""}${c.resumeLink?` · <a href="${esc(c.resumeLink)}" target="_blank" rel="noopener">📄 Résumé</a>`:""}</div>
+    <div class="rec-contact">${c.email?`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`:""}${c.phone?` · ${esc(c.phone)}`:""}${c.resumeLink?` · <a href="${esc(recUrl(c.resumeLink))}" target="_blank" rel="noopener">📄 Résumé</a>`:""}</div>
     ${c.resumeText?`<div class="rec-resume">${esc(c.resumeText)}</div>`:""}
     ${canEdit?`<div class="field"><label>Rating</label><div class="rec-stars">${stars}</div></div>
       <div class="field"><label>Stage</label><select id="rec-stage">${stageOpts}</select></div>
