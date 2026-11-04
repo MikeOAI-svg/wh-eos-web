@@ -5080,7 +5080,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=229;
+const BUILD=230;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5375,6 +5375,15 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
       // AI-drafted (lockless) note fields: write them too, unless someone else is actively holding that box.
       _progNotes.forEach(f=>{ const sl=(st.liveMeeting.locks||{})["note:"+f]; if(lockActive(sl)&&!lockMine(sl)) return;
         if(loc.notes && (f in loc.notes)) merged.notes[f]=loc.notes[f]; });
+      // WIFLS / per-person boxes this client TYPED in: persist them even after the box's lock has been released.
+      // Blur calls releaseLock (deletes the lock) and THEN saves, so a value typed in the last moment — or when
+      // the facilitator advances the segment quickly — never reached the server under the lock-only rule above;
+      // it lived only in this client's local model, which is what builds the concluded minutes. That is exactly
+      // "the WIFLS showed as deleted / not saved, but they were in the archived minutes." Write every box I
+      // touched, letting the server win only where someone ELSE is actively holding that box's lock right now.
+      _touchedBy.forEach(sp=>{ const ci=sp.indexOf(":"); if(ci<0) return; const bseg=sp.slice(0,ci), person=sp.slice(ci+1);
+        const sl=(st.liveMeeting.locks||{})["by:"+bseg+":"+person]; if(lockActive(sl)&&!lockMine(sl)) return;
+        const v=((loc.byPerson||{})[bseg]||{})[person]; if(v!==undefined){ merged.byPerson[bseg]=merged.byPerson[bseg]||{}; merged.byPerson[bseg][person]=v; } });
       // ratings: per-member, only the members this client actually entered
       merged.ratings=Object.assign({}, st.liveMeeting.ratings||{});
       _touchedRate.forEach(id=>{ if(loc.ratings && (id in loc.ratings)) merged.ratings[id]=loc.ratings[id]; });
@@ -5498,7 +5507,14 @@ function isBusy(){
    so the old reference is stale and MUST be re-bound. */
 function syncMeetingRef(){ const t=TEAM(); let lm=(t&&t.liveMeeting)||null;
   if(lm && _justConcluded && (lm.startedAt||0)===_justConcluded.sa && (Date.now()-_justConcluded.at)<8000) lm=null;   // ignore a meeting we just ended, even if a stale snapshot still carries it
-  meeting=lm; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _fieldEditAt={}; } }
+  meeting=lm; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _touchedBy=new Set(); _fieldEditAt={}; } }
+// Stamp a navigation/action as newer than anything we've seen from the server, WITHOUT trusting the wall clock.
+// navAt gates whose change wins when two clients write the live meeting at once; it used to be a raw Date.now(),
+// so a teammate's device whose clock ran ahead made the facilitator's just-made nav/solve look "older," the gate
+// dropped it, and the next sync snapped the view back ("Mark Solved won't close — had to click it 4+ times").
+// Monotonic from the last value we hold means our fresh action always beats the state we based it on, while a
+// genuinely newer nav from someone else (seen in the transaction's fresh read) still correctly wins.
+function bumpNav(){ if(meeting) meeting.navAt=Math.max(Date.now(), (meeting.navAt||0)+1); }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -11347,7 +11363,7 @@ let meeting=null, tick=null;
    crashed/closed tab never freezes a box. saveL10's per-field merge writes ONLY the boxes you hold a live
    lock on, so your edits and a teammate's land side by side instead of overwriting each other. */
 const LOCK_TTL=9000;
-let _lockedKey=null, _lockHb=null, _touchedRate=new Set(), _touchedIssues=new Set(), _touchedTodos=new Set(), _deletedIssues=new Set(), _deletedTodos=new Set();   // records THIS client changed/deleted in the live L10 — saveL10 only writes those and keeps the server's value for everything else (no more full-array republish clobbering teammates)
+let _lockedKey=null, _lockHb=null, _touchedRate=new Set(), _touchedIssues=new Set(), _touchedTodos=new Set(), _deletedIssues=new Set(), _deletedTodos=new Set(), _touchedBy=new Set();   // records THIS client changed/deleted in the live L10 — saveL10 only writes those and keeps the server's value for everything else (no more full-array republish clobbering teammates). _touchedBy = "seg:person" WIFLS boxes I typed in, so they persist past the box's lock release.
 // Note fields written PROGRAMMATICALLY (not by typing in a focused box) — e.g. the AI-drafted cascade &
 // summary. Typed fields are written only while you hold their lock; these have no lock, so the merge must
 // still write them or the AI draft is silently dropped on the next sync.
@@ -11973,10 +11989,10 @@ function renderSegContent(i){
         ${solvedRows?`<div class="ids-solved-head">Solved this list <small>— tap Revisit to reopen &amp; add to one, or ✕ to clear it</small></div>${solvedRows}`:""}
         <div class="ids-addnote" style="margin-top:12px">📝 Need to add an issue? Add it from your <b>Lists</b> tab (Issues) — it drops right into this list.</div>
         <div class="hint" style="margin-top:8px">Tap “Work on it” to Identify, Discuss & Solve an issue, or ✕ to drop one that no longer belongs.</div></div>`;
-      c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=TEAM().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; meeting.navAt=Date.now(); saveL10(true); renderSegContent(i); });
+      c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=TEAM().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; bumpNav(); saveL10(true); renderSegContent(i); });
       c.querySelectorAll("[data-del-issue]").forEach(b=>b.onclick=()=>{ const id=b.dataset.delIssue, x=TEAM().issues.find(y=>y.id===id);
         if(!confirm(`Delete this issue from the meeting?\n\n"${(x&&x.text)||""}"\n\nThis removes it for everyone. To-Dos already created from it are kept.`)) return;
-        TEAM().issues=TEAM().issues.filter(y=>y.id!==id); _deletedIssues.add(id); if(meeting.activeIssue===id) meeting.activeIssue=null; meeting.navAt=Date.now(); mergeTeam(TEAM().id, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); saveL10(true); renderSegContent(i); });
+        TEAM().issues=TEAM().issues.filter(y=>y.id!==id); _deletedIssues.add(id); if(meeting.activeIssue===id) meeting.activeIssue=null; bumpNav(); mergeTeam(TEAM().id, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); saveL10(true); renderSegContent(i); });
     }else{
       seedIdsFromNote(active);
       const linked=TEAM().todos.filter(t=>t.fromIssue===active.id);
@@ -12022,13 +12038,13 @@ function renderSegContent(i){
         meeting.solvedIssues=meeting.solvedIssues||[];
         const six=meeting.solvedIssues.findIndex(x=>x&&x.issueId===a.id);
         if(six>=0) meeting.solvedIssues[six]=snap; else meeting.solvedIssues.push(snap);
-        meeting.activeIssue=null; meeting.navAt=Date.now(); saveL10(true); renderSegContent(i);
+        meeting.activeIssue=null; bumpNav(); saveL10(true); renderSegContent(i);
       }; }
       { const br=$("#ids-reopen"); if(br) br.onclick=()=>{   // put a solved issue back on the open list (still worked on)
         const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;
         a.solved=false; a.solvedDate=""; _touchedIssues.add(a.id);   // claim it for the reopen too
         meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===a.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
-        meeting.navAt=Date.now(); saveL10(true); renderSegContent(i);
+        bumpNav(); saveL10(true); renderSegContent(i);
       }; }
       const addTodo=()=>{ const ti=$("#ids-todo"), oi=$("#ids-todo-owner"), di=$("#ids-todo-due"); const v=ti.value.trim(); if(!v) return;
         const nt={id:uid(),text:v,owner:oi.value.trim(),due:di.value||isoAddDays(todayIso(),7),done:false,created:todayIso(),fromIssue:active.id,fromIssueText:active.text};
@@ -12071,11 +12087,11 @@ function renderSegContent(i){
       <div class="wr-list">${combinedRows||'<div class="hint">No one on this team yet.</div>'}</div>
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
       <div class="rate-avg" id="rateAvg">Average: —</div></div>`;
-    c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
+    c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; _touchedBy.add("wifls_close:"+inp.dataset.wfc); touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
     c.querySelectorAll("[data-todo-owner]").forEach(inp=>inp.oninput=()=>{ const t=TEAM().todos.find(x=>x.id===inp.dataset.todoOwner); if(t){ t.owner=inp.value; saveL10(); } });
-    c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); meeting.navAt=Date.now(); saveL10(true); renderSegContent(i); });
+    c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); bumpNav(); saveL10(true); renderSegContent(i); });
     { const g=$("#cc-guest"), ga=$("#cc-guest-add");
-      const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; meeting.navAt=Date.now(); saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
+      const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; bumpNav(); saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
       if(ga) ga.onclick=addG;
       if(g) g.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addG(); } }; }
     const recompute=()=>{ const vals=[...c.querySelectorAll("[data-rate]")].map(i2=>parseFloat(i2.value)).filter(v=>!isNaN(v));
@@ -12106,10 +12122,10 @@ function renderSegContent(i){
       <div class="wf-list">${rows}</div>
       <div class="wf-addguest"><input id="wf-guest" placeholder="＋ Add someone attending who isn't on the team…"><button class="btn ghost sm" id="wf-guest-add">Add attendee</button></div>
       <div class="wf-other"><label>Other notes</label><textarea id="seg-note" data-lock="note:${key}" placeholder="Anything not tied to one person…">${esc(meeting.notes[key]||"")}</textarea></div></div>`;
-    c.querySelectorAll(".wf-in").forEach(inp=>inp.oninput=()=>{ meeting.byPerson[key][inp.dataset.person]=inp.value; touchLock("by:"+key+":"+inp.dataset.person); saveL10(); });
-    c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); meeting.navAt=Date.now(); saveL10(true); renderSegContent(i); });
+    c.querySelectorAll(".wf-in").forEach(inp=>inp.oninput=()=>{ meeting.byPerson[key][inp.dataset.person]=inp.value; _touchedBy.add(key+":"+inp.dataset.person); touchLock("by:"+key+":"+inp.dataset.person); saveL10(); });
+    c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); bumpNav(); saveL10(true); renderSegContent(i); });
     { const g=$("#wf-guest"), ga=$("#wf-guest-add");
-      const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; meeting.navAt=Date.now(); saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
+      const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; bumpNav(); saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
       if(ga) ga.onclick=addG;
       if(g) g.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addG(); } }; }
   }
@@ -12196,7 +12212,7 @@ function isFacilitator(){ return !!meeting && (!meeting.facilitatorEmail || meet
 function takeOverMeeting(){
   if(!meeting || !canEditTeam()) return;
   if(!confirm(`Take over running this L10 from ${meeting.facilitatorName||"the facilitator"}?`)) return;
-  meeting.facilitatorEmail=myEmail(); meeting.facilitatorName=myName()||myEmail(); meeting.navAt=Date.now();
+  meeting.facilitatorEmail=myEmail(); meeting.facilitatorName=myName()||myEmail(); bumpNav();
   saveL10(true); renderL10();
 }
 /* ===== The SCRIBE = the single note-taker =====
@@ -12212,8 +12228,8 @@ function isScribe(){ if(!meeting) return false;
 function setScribe(name){ if(!meeting) return;
   meeting.scribeName=String(name||"").trim();
   meeting.scribeEmail=meeting.scribeName?emailForName(meeting.scribeName):"";   // "" if they've never logged in — name gate still applies
-  meeting.navAt=Date.now(); saveL10(true); renderL10(); }
-function becomeScribe(){ if(!meeting) return; meeting.scribeEmail=myEmail(); meeting.scribeName=myName()||myEmail(); meeting.navAt=Date.now(); saveL10(true); renderL10(); }
+  bumpNav(); saveL10(true); renderL10(); }
+function becomeScribe(){ if(!meeting) return; meeting.scribeEmail=myEmail(); meeting.scribeName=myName()||myEmail(); bumpNav(); saveL10(true); renderL10(); }
 /* ===== Field-lock primitives (see the LOCK_TTL note up top) ===== */
 function lockMine(l){ if(!l) return false; const me=myEmail(); if(l.email&&me) return l.email===me; return sameName(l.name, myName()); }
 function lockActive(l){ return !!(l && (Date.now()-(l.at||0) < LOCK_TTL)); }
@@ -12337,7 +12353,7 @@ function wireDictation(){
 }
 function advanceSeg(to){ if(!isFacilitator()) return; stopDictation(); commitSegTime();
   meeting.totalElapsed=(meeting.totalElapsed||0)+(meeting.segElapsed||0);   // roll the finished segment into the meeting total
-  meeting.seg=to; meeting.segStart=Date.now(); meeting.segElapsed=0; meeting.navAt=Date.now(); saveL10(true); renderL10(); }   // navAt stamps this navigation so a stale content write can't revert it
+  meeting.seg=to; meeting.segStart=Date.now(); meeting.segElapsed=0; bumpNav(); saveL10(true); renderL10(); }   // navAt stamps this navigation so a stale content write can't revert it
 function commitSegTime(){ if(!meeting||!meeting.segStart) return; const add=(Date.now()-meeting.segStart)/1000; meeting.segElapsed=(meeting.segElapsed||0)+add; }
 // The running clock = committed segElapsed + wall-clock since this segment started. The RENDER and
 // the TICK must both use this — otherwise a re-render draws the committed value (≈0) and the clock
@@ -12390,7 +12406,7 @@ function checkMeetingCap(){
          <div class="cb-count">Concludes on its own in <b class="cb-cd">${cd}</b> unless more time is added.</div>`;
     wrap.insertBefore(bar, wrap.firstChild);
     if(fac){
-      const more=bar.querySelector("#capMore"); if(more) more.onclick=()=>{ meeting.capMin=(meeting.capMin||L10_CAP_MIN)+15; meeting.navAt=Date.now(); saveL10(true); const b=$("#l10CapBar"); if(b) b.remove(); setSync("+15 minutes added"); };
+      const more=bar.querySelector("#capMore"); if(more) more.onclick=()=>{ meeting.capMin=(meeting.capMin||L10_CAP_MIN)+15; bumpNav(); saveL10(true); const b=$("#l10CapBar"); if(b) b.remove(); setSync("+15 minutes added"); };
       const end=bar.querySelector("#capEnd"); if(end) end.onclick=()=>concludeMeeting();
     }
   } else { const cdEl=bar.querySelector(".cb-cd"); if(cdEl) cdEl.textContent=cd; }
