@@ -1388,6 +1388,41 @@
   .cu-flag.warn{background:var(--red);color:#fff}
   .cu-flag.you{background:var(--accent);color:#fff}
   .cu-owns{font-weight:600;color:var(--text);opacity:.8}
+  /* Recruiting board */
+  .rec-top{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+  .rec-reqs{display:flex;flex-wrap:wrap;gap:8px;flex:1;min-width:0}
+  .rec-reqchip{display:flex;flex-direction:column;gap:1px;text-align:left;background:var(--card);border:1px solid var(--border);
+    border-radius:11px;padding:7px 12px;cursor:pointer;font-family:inherit;color:var(--text);transition:border-color .15s}
+  .rec-reqchip:hover{border-color:var(--accent)}
+  .rec-reqchip b{font-size:13px}
+  .rec-reqchip span{font-size:10.5px;color:var(--muted);font-weight:700}
+  .rec-actions{display:flex;gap:8px;flex:none}
+  .rec-board{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px}
+  .rec-col{flex:0 0 200px;background:var(--bg);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column}
+  .rec-colh{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:9px 11px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+  .rec-cnt{background:var(--border);color:var(--text);border-radius:999px;padding:0 7px;font-size:10px}
+  .rec-colbody{padding:8px;display:flex;flex-direction:column;gap:7px;min-height:40px}
+  .rec-empty{color:var(--muted);font-size:12px;text-align:center;padding:6px 0;opacity:.5}
+  .rec-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 10px;cursor:pointer;transition:border-color .15s,transform .1s}
+  .rec-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .rc-name{font-weight:700;font-size:13px}
+  .rc-role{font-size:10.5px;color:var(--muted);font-weight:700;margin-top:1px}
+  .rc-foot{font-size:11px;color:var(--accent);margin-top:4px;min-height:12px}
+  .rec-contact{font-size:12.5px;margin:0 2px 10px;color:var(--text)}
+  .rec-resume{font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin:0 0 12px;white-space:pre-wrap;max-height:150px;overflow:auto;color:var(--muted)}
+  .rec-stars{display:flex;gap:2px}
+  .rec-star{background:none;border:0;font-size:22px;line-height:1;color:var(--border);cursor:pointer;padding:0}
+  .rec-star.on{color:var(--accent)}
+  .rec-notes{margin:8px 0;display:flex;flex-direction:column;gap:7px}
+  .rec-note{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:13px}
+  .rec-note-m{font-size:10.5px;color:var(--muted);font-weight:700;margin-top:3px}
+  .rec-arf-done{background:var(--accent-soft);border-radius:9px;padding:8px 11px;font-size:12.5px;font-weight:700;margin:2px 0 10px}
+  .rec-decide{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+  .rec-arch{margin-top:18px;border-top:1px solid var(--border);padding-top:10px}
+  .rec-arch summary{font-weight:800;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);cursor:pointer}
+  .rec-archrow{display:flex;justify-content:space-between;gap:10px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;margin:6px 0;cursor:pointer;font-size:13px}
+  .rec-archrow:hover{border-color:var(--accent)}
+  .rec-archrow span{color:var(--muted);font-weight:600}
   .adm-group{border:1px solid var(--border);border-radius:12px;margin-bottom:8px;overflow:hidden;background:var(--card)}
   .adm-group-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel-2);
     border:none;color:var(--text);font-family:inherit;font-size:14px;font-weight:800;padding:11px 14px;cursor:pointer;text-align:left}
@@ -1946,6 +1981,11 @@
       <div id="evalsWrap"></div>
     </section>
 
+    <!-- ============ RECRUITING (applicant tracking; confidential candidate store) ============ -->
+    <section class="view" id="view-recruiting">
+      <div id="recruitingWrap"></div>
+    </section>
+
     <!-- ============ SALES CARD (custom weekly grid) ============ -->
     <section class="view" id="view-sales">
       <div id="salesWrap"></div>
@@ -1976,6 +2016,7 @@
     <button data-view="people"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.2" cy="8" r="3.3"/><path d="M2.8 20.2c0-3.5 2.9-6.4 6.4-6.4s6.4 2.9 6.4 6.4"/><circle cx="17.8" cy="9.6" r="2.4"/><path d="M16.4 14.4c2.9.6 4.8 3 4.8 5.8"/></svg></span>People</button>
     <button data-view="health" id="navHealth" style="display:none"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="4.4" width="18.8" height="15.2" rx="2.2"/><path d="M6 13.2h2.8l1.6-3.6 2.6 6.2 1.5-2.6H18"/></svg></span>Cabana Boy</button>
     <button data-view="evals" id="navEvals" style="display:none"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="4" width="13" height="17" rx="2.2"/><path d="M9 4V3.2a1.2 1.2 0 0 1 1.2-1.2h3.6A1.2 1.2 0 0 1 15 3.2V4"/><path d="M8.6 12.3l2 2 4.2-4.3"/></svg></span>Evaluations</button>
+    <button data-view="recruiting" id="navRecruiting" style="display:none"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="8" r="3.4"/><path d="M4.5 20c0-3.6 2.9-6.5 6.5-6.5 1.3 0 2.5.4 3.5 1"/><path d="M17.5 14.5v5M20 17h-5"/></svg></span>Recruiting</button>
     <button data-view="tools"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.8" y="7.8" width="18.4" height="12.4" rx="2.2"/><path d="M8.2 7.8V6a2 2 0 0 1 2-2h3.6a2 2 0 0 1 2 2v1.8"/><path d="M2.8 13.4h18.4"/><path d="M10.4 13.4h3.2"/></svg></span>Tools</button>
     <!-- Sliders, not a cog: at 21px a circle with radial spokes reads as a SUN/brightness toggle. -->
     <button data-view="setup"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 6.4h9.4M17.6 6.4h3"/><circle cx="15.2" cy="6.4" r="2.2"/><path d="M3.4 12h3.2M11.4 12h9.2"/><circle cx="9" cy="12" r="2.2"/><path d="M3.4 17.6h8.4M16.6 17.6h4"/><circle cx="14.2" cy="17.6" r="2.2"/></svg></span>Setup</button>
@@ -4834,6 +4875,8 @@ function migrate(d){
   if(!Array.isArray(d.people)) d.people=[];
   if(!d.hireDates || typeof d.hireDates!=="object" || Array.isArray(d.hireDates)) d.hireDates={};   // name-keyed hire dates (company-level, visible to facility leaders + HR) — drives the Branch Evals roster
   if(!d.evalDone || typeof d.evalDone!=="object" || Array.isArray(d.evalDone)) d.evalDone={};   // name-keyed: the hire-anniversary date whose review was marked done (company-level) — so the roster KNOWS a cycle was completed
+  if(!d.recruiting || typeof d.recruiting!=="object" || Array.isArray(d.recruiting)) d.recruiting={reqs:[]};   // recruiting requisitions (open seats); candidates live in their own confidential collection
+  if(!Array.isArray(d.recruiting.reqs)) d.recruiting.reqs=[];
   if(!Array.isArray(d.admins)) d.admins=[];   // extra admin emails granted in-app (owner-admins stay hardcoded)
   if(!d.meta) d.meta={};                      // holds app-version build number for live-update nudges
   if(!Array.isArray(d.pa)) d.pa=[];          // People Analyzer + Quarterly Conversation records
@@ -5024,7 +5067,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=226;
+const BUILD=227;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -8251,6 +8294,7 @@ function refreshAdminNav(){
   const b=$("#navAdmin"); if(b) b.style.display=canManagePeople()?"":"none";
   const h=$("#navHealth"); if(h) h.style.display=canSeeHealth()?"":"none";
   const e=$("#navEvals"); if(e) e.style.display=(canDoEvals()||canSeeBranchEvals())?"":"none";
+  const rc=$("#navRecruiting"); if(rc) rc.style.display=canSeeRecruiting()?"":"none";
   const p=$("#navPlanning"); if(p) p.style.display=canSeePlanning()?"":"none";
   const sa=$("#navSales"); if(sa) sa.style.display=canSeeSales()?"":"none";
 }
@@ -13700,6 +13744,7 @@ const TITLES={scorecard:["Scorecard","13-week measurables"],rocks:["Rocks","Quar
   board:["My Board","Your Rocks & your people"],
   planning:["Planning","Quarterly & annual sessions"],
   evals:["Evaluations","Annual performance reviews"],
+  recruiting:["Recruiting","Hiring pipeline & candidates"],
   guide:["Guide","How to use your Operating System"]};
 function refreshHeader(){ /* team name in sub of scorecard */ }
 // Top-right signed-in staff name (initials avatar + name). Runs from switchView, so it fills in as
@@ -13716,12 +13761,261 @@ function renderUserBadge(){
   b.title="Signed in as "+nm;
   b.style.display="";
 }
+/* ================= RECRUITING (lightweight Applicant Tracking) =================
+   Resumes become candidate cards that move through our hiring pipeline. A requisition IS an OPEN SEAT
+   on the Accountability Chart, so "we're hiring" always has a seat, and marking a candidate Hired fills
+   it. Candidates are PII, so — exactly like evaluations — they live in their OWN confidential Firestore
+   collection (recruiting/{id}), readable only by HR and the req's hiring managers (the open seat's
+   department head + their supervisor). Reqs (open seats) aren't sensitive and ride in company state. */
+const REC_STAGES=[
+  {k:"inbox",     label:"Inbox (HR)"},
+  {k:"manager",   label:"Sent to Manager"},
+  {k:"review",    label:"Resume Review"},
+  {k:"phone",     label:"Phone Screen"},
+  {k:"interview", label:"Interview"},
+  {k:"arf",       label:"ARF → Prehire"},
+  {k:"prehire",   label:"Prehire"},
+  {k:"offer",     label:"Offer"},
+  {k:"hired",     label:"Hired ✓"}
+];
+const recStageLabel=k=>{ const s=REC_STAGES.find(x=>x.k===k); return s?s.label:k; };
+const recStageIdx=k=>{ const i=REC_STAGES.findIndex(x=>x.k===k); return i<0?0:i; };
+function recInit(){ if(!data.recruiting||typeof data.recruiting!=="object"||Array.isArray(data.recruiting)) data.recruiting={reqs:[]}; if(!Array.isArray(data.recruiting.reqs)) data.recruiting.reqs=[]; return data.recruiting; }
+function isRecHR(){ return isEvalAdmin(); }                 // HR handles recruiting (same HR group as evaluations)
+// Hiring managers for a req = the open seat's department/branch HEAD (nearest filled seat above it) + that
+// head's own supervisor (next filled seat up). Reuses the chart's chain of supervision.
+function recFilledAncestor(seatId){ let s=acSeatById(seatId), guard=0; while(s&&s.parent&&guard++<60){ s=acSeatById(s.parent); if(s&&seatNames(s).length) return s; } return null; }
+function recManagerNames(seatId){ const head=recFilledAncestor(seatId), sup=head?recFilledAncestor(head.id):null; const out=[]; if(head) seatNames(head).forEach(n=>out.push(n)); if(sup) seatNames(sup).forEach(n=>out.push(n)); return [...new Set(out)]; }
+function recManagerEmails(seatId){ return [...new Set(recManagerNames(seatId).map(emailForName).filter(Boolean).map(e=>e.toLowerCase()))]; }
+function recReqFacility(seatId){ const p=pillarSeatOf(seatId); return (p&&p.role)||""; }
+function recMyReqs(){ const me=(myEmail()||"").toLowerCase(); return recInit().reqs.filter(r=> isRecHR() || recManagerEmails(r.seatId).indexOf(me)>=0 ); }
+function canSeeRecruiting(){ const me=(myEmail()||"").toLowerCase(); return isRecHR() || recInit().reqs.some(r=>recManagerEmails(r.seatId).indexOf(me)>=0); }
+function recReqById(id){ return recInit().reqs.find(r=>r&&r.id===id)||null; }
+
+// ----- Confidential candidate load/save (mirror of the evaluations collection) -----
+let recData=null, recLoading=false;
+function recLoad(cb){
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; }
+  if(!fs){ cb([]); return; }
+  const out=[]; let done=false;
+  const fire=()=>{ if(done) return; done=true; recData=out; cb(out); };
+  const to=setTimeout(fire, 15000);                         // never hang the view (offline / rules)
+  const collect=qs=>{ qs.forEach(ds=>{ const c=(ds.data()||{}).cand; if(c){ c._id=ds.id; out.push(c); } }); };
+  const q = isRecHR()
+    ? fs.collection("recruiting").get()                                                   // HR sees all
+    : fs.collection("recruiting").where("cand.reviewers","array-contains",(myEmail()||"").toLowerCase()).get();  // managers see theirs
+  q.then(qs=>{ collect(qs); clearTimeout(to); fire(); }).catch(e=>{ console.error("recruiting load",e); clearTimeout(to); fire(); });
+}
+function recSaveCandidate(c, cb){
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; }
+  if(!fs){ if(cb) cb(); return; }
+  c.reviewers=recManagerEmails(c.seatId); c.updatedAt=Date.now(); c.updatedBy=myName()||myEmail();
+  const id=c.id, store=JSON.parse(JSON.stringify(c)); delete store._id;
+  fs.doc("recruiting/"+id).set({ cand:store, updatedAt:Date.now(), updatedBy:myEmail() })
+    .then(()=>{ if(cb) cb(); }).catch(e=>{ console.error("recruiting save",e); setSync("Couldn't save the candidate — check connection",true); });
+}
+function recDeleteCandidate(id, cb){ let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ if(cb) cb(); return; }
+  fs.doc("recruiting/"+id).delete().then(()=>{ if(cb) cb(); }).catch(e=>console.error("recruiting delete",e)); }
+function recLog(c, action){ c.history=c.history||[]; c.history.push({ t:Date.now(), by:myName()||myEmail(), action }); }
+
+function renderRecruiting(){
+  const wrap=$("#recruitingWrap"); if(!wrap) return;
+  if(!canSeeRecruiting()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>Recruiting is for HR and hiring managers.</div>`; return; }
+  recInit();
+  if(recData===null && !recLoading){ recLoading=true; wrap.innerHTML=`<div class="empty"><span class="emoji">⏳</span>Loading candidates…</div>`;
+    recLoad(()=>{ recLoading=false; if(currentView==="recruiting") renderRecruiting(); }); return; }
+  const reqs=recMyReqs();
+  const cands=(recData||[]).filter(c=>{ const r=recReqById(c.reqId); if(!r) return isRecHR(); return isRecHR() || recManagerEmails(r.seatId).indexOf((myEmail()||"").toLowerCase())>=0; });
+  const active=cands.filter(c=>!c.archived && c.stage!=="rejected");
+  const archived=cands.filter(c=>c.archived || c.stage==="rejected");
+  // --- Requisitions bar ---
+  const reqChips=reqs.map(r=>{ const s=acSeatById(r.seatId); const open=s?seatOpenCount(s):0; const n=active.filter(c=>c.reqId===r.id).length;
+    return `<button class="rec-reqchip" data-rec-req="${esc(r.id)}"><b>${esc(r.title)}</b><span>${esc(r.facility||recReqFacility(r.seatId)||"—")} · ${n} candidate${n===1?"":"s"}${open?` · ${open} seat${open===1?"":"s"} open`:""}</span></button>`; }).join("");
+  const top=`<div class="rec-top">
+    <div class="rec-reqs">${reqChips||'<span class="hint" style="margin:4px 2px">No open requisitions yet.</span>'}</div>
+    <div class="rec-actions">
+      ${isRecHR()?`<button class="btn sm" id="rec-newreq">＋ Open a requisition</button>`:""}
+      <button class="btn sm ghost" id="rec-add">＋ Add candidate</button>
+    </div></div>`;
+  // --- Board: a column per stage, cards grouped ---
+  const colHtml=st=>{ const list=active.filter(c=>c.stage===st.k);
+    const cards=list.map(c=>{ const r=recReqById(c.reqId);
+      return `<div class="rec-card" data-rec-card="${esc(c._id||c.id)}">
+        <div class="rc-name">${esc(c.name||"(no name)")}</div>
+        <div class="rc-role">${esc((r&&r.title)||c.title||"")}</div>
+        <div class="rc-foot">${c.rating?'★'.repeat(c.rating):""}${c.resumeLink?' <span class="rc-doc">📄</span>':""}</div>
+      </div>`; }).join("");
+    return `<div class="rec-col"><div class="rec-colh">${esc(st.label)} <span class="rec-cnt">${list.length}</span></div>
+      <div class="rec-colbody" data-rec-stage="${st.k}">${cards||'<div class="rec-empty">—</div>'}</div></div>`;
+  };
+  const board=`<div class="rec-board">${REC_STAGES.map(colHtml).join("")}</div>`;
+  const arch=archived.length?`<details class="rec-arch"><summary>Archived &amp; passed (${archived.length})</summary>
+    <input id="rec-search" class="adm-search" placeholder="🔍  Search archived candidates…" style="margin:8px 0">
+    <div id="rec-archlist">${archived.map(c=>`<div class="rec-archrow" data-rec-card="${esc(c._id||c.id)}"><b>${esc(c.name)}</b> <span>${esc(c.title||"")} · ${c.outcome||"not hired"}</span></div>`).join("")}</div></details>`:"";
+  wrap.innerHTML=top+(active.length||reqs.length?board:`<div class="empty"><span class="emoji">🧩</span>Open a requisition, then add candidates.</div>`)+arch;
+  // wire
+  { const b=$("#rec-newreq"); if(b) b.onclick=recOpenReqSheet; }
+  { const b=$("#rec-add"); if(b) b.onclick=()=>recAddCandidate(null); }
+  wrap.querySelectorAll("[data-rec-req]").forEach(b=>b.onclick=()=>recReqSheet(b.dataset.recReq));
+  wrap.querySelectorAll("[data-rec-card]").forEach(el=>el.onclick=()=>recCard(el.dataset.recCard));
+  { const s=$("#rec-search"); if(s) s.oninput=()=>{ const q=s.value.toLowerCase();
+      $("#rec-archlist").querySelectorAll(".rec-archrow").forEach(row=>{ row.style.display=row.textContent.toLowerCase().indexOf(q)>=0?"":"none"; }); }; }
+}
+// Open a requisition against an OPEN seat (one with open capacity). HR only.
+function recOpenReqSheet(){
+  if(!isRecHR()) return;
+  const seats=((data.accountability||{}).seats)||[];
+  const openSeats=seats.filter(s=> isOpenSeat(s) || seatOpenCount(s)>0 );   // fully-open OR has open spots under a cap
+  if(!openSeats.length){ openSheet(`<h2>Open a requisition</h2><div class="hint" style="margin:8px 2px">There are no open seats on the chart yet. Mark a seat open (or set its headcount above its filled count) on the Accountability Chart, then come back.</div><div class="sheet-actions"><button class="btn" id="rq-ok">OK</button></div>`); $("#rq-ok").onclick=closeSheet; return; }
+  const opts=openSeats.map(s=>{ const open=seatOpenCount(s)||(isOpenSeat(s)?1:0); const fac=recReqFacility(s.id);
+    return `<option value="${esc(s.id)}">${esc(s.role||"Seat")}${fac?" · "+esc(fac):""} — ${open} open</option>`; }).join("");
+  openSheet(`<h2>Open a requisition</h2>
+    <div class="hint" style="margin:-4px 2px 12px">A job opening is an <b>open seat</b> — hiring someone fills it. Pick the seat you're hiring for.</div>
+    <div class="field"><label>Open seat</label><select id="rq-seat">${opts}</select></div>
+    <div class="field"><label>Job title <small>(what candidates see / match on)</small></label><input id="rq-title" placeholder="e.g. Admissions Advocate"></div>
+    <div class="sheet-actions"><button class="btn ghost" id="rq-cancel">Cancel</button><button class="btn" id="rq-save">Open requisition</button></div>`);
+  const seatSel=$("#rq-seat"), titleIn=$("#rq-title");
+  const prefill=()=>{ const s=acSeatById(seatSel.value); if(s&&!titleIn.value) titleIn.value=s.role||""; };
+  prefill(); seatSel.onchange=()=>{ titleIn.value=""; prefill(); };
+  $("#rq-cancel").onclick=closeSheet;
+  $("#rq-save").onclick=()=>{ const seatId=seatSel.value, title=(titleIn.value||"").trim()||(acSeatById(seatId)||{}).role||"Open role"; if(!seatId) return;
+    const req={ id:uid(), seatId, title, facility:recReqFacility(seatId), managers:recManagerNames(seatId), openedAt:Date.now(), openedBy:myName()||myEmail(), status:"open" };
+    recInit().reqs.push(req);
+    mergeCompany(comp=>{ comp.recruiting=comp.recruiting||{reqs:[]}; comp.recruiting.reqs=comp.recruiting.reqs||[]; comp.recruiting.reqs.push(JSON.parse(JSON.stringify(req))); });
+    closeSheet(); renderRecruiting(); setSync(`Requisition opened · ${title}`);
+  };
+}
+// A requisition's detail: its managers + a quick "add candidate to this req".
+function recReqSheet(reqId){ const r=recReqById(reqId); if(!r) return; const s=acSeatById(r.seatId); const open=s?seatOpenCount(s):0;
+  const mgrs=recManagerNames(r.seatId);
+  openSheet(`<h2>${esc(r.title)}</h2>
+    <div class="hint" style="margin:-4px 2px 12px">${esc(r.facility||"—")} · open seat “${esc((s&&s.role)||"")}”${open?` · <b>${open}</b> open`:""}</div>
+    <div class="field"><label>Hiring managers (who sees these candidates)</label><div class="who-list">${mgrs.length?mgrs.map(n=>`<span class="chip">${esc(n)}</span>`).join(""):'<span class="hint">No one is in the seat above this opening yet — HR will see them.</span>'}</div></div>
+    <div class="sheet-actions">
+      <button class="btn ghost" id="rqs-close">Close</button>
+      <button class="btn ghost" id="rqs-add">＋ Add candidate</button>
+      ${isRecHR()?`<button class="btn" id="rqs-del" style="background:var(--red)">Close requisition</button>`:""}
+    </div>`);
+  $("#rqs-close").onclick=closeSheet;
+  $("#rqs-add").onclick=()=>{ closeSheet(); recAddCandidate(r.id); };
+  { const b=$("#rqs-del"); if(b) b.onclick=()=>{ if(!confirm(`Close the “${r.title}” requisition? Candidates already added stay on the board.`)) return;
+      recInit().reqs=recInit().reqs.filter(x=>x.id!==r.id);
+      mergeCompany(comp=>{ comp.recruiting=comp.recruiting||{reqs:[]}; comp.recruiting.reqs=(comp.recruiting.reqs||[]).filter(x=>x&&x.id!==r.id); });
+      closeSheet(); renderRecruiting(); setSync("Requisition closed"); }; }
+}
+// Add a candidate (manual intake — the same entry point the email webhook will call in phase 2).
+function recAddCandidate(reqId){
+  const reqs=recMyReqs(); if(!reqs.length){ setSync("Open a requisition first",true); if(isRecHR()) recOpenReqSheet(); return; }
+  const opts=reqs.map(r=>`<option value="${esc(r.id)}" ${r.id===reqId?"selected":""}>${esc(r.title)}${r.facility?" · "+esc(r.facility):""}</option>`).join("");
+  openSheet(`<h2>Add candidate</h2>
+    <div class="field"><label>Requisition</label><select id="rc-req">${opts}</select></div>
+    <div class="field"><label>Name</label><input id="rc-name" placeholder="Candidate's full name"></div>
+    <div class="field"><label>Email</label><input id="rc-email" placeholder="candidate@email.com"></div>
+    <div class="field"><label>Phone <small>(optional)</small></label><input id="rc-phone" placeholder="(555) 555-5555"></div>
+    <div class="field"><label>Résumé link <small>(SharePoint / Drive / Indeed — optional)</small></label><input id="rc-link" placeholder="https://…"></div>
+    <div class="field"><label>Notes from the résumé <small>(optional)</small></label><textarea id="rc-text" rows="3" placeholder="Paste highlights or the résumé text…"></textarea></div>
+    <div class="sheet-actions"><button class="btn ghost" id="rc-cancel">Cancel</button><button class="btn" id="rc-save">Add candidate</button></div>`);
+  $("#rc-cancel").onclick=closeSheet;
+  $("#rc-save").onclick=()=>{ const name=($("#rc-name").value||"").trim(); if(!name){ $("#rc-name").focus(); return; }
+    const req=recReqById($("#rc-req").value); if(!req){ return; }
+    const c={ id:uid(), name, email:($("#rc-email").value||"").trim(), phone:($("#rc-phone").value||"").trim(),
+      resumeLink:($("#rc-link").value||"").trim(), resumeText:($("#rc-text").value||"").slice(0,4000),
+      reqId:req.id, seatId:req.seatId, title:req.title, facility:req.facility,
+      stage: isRecHR()?"inbox":"review", rating:0, notes:[], phoneScreen:{}, interview:{}, arf:{}, outcome:"", archived:false,
+      createdAt:Date.now(), createdBy:myName()||myEmail(), history:[] };
+    recLog(c,"added"); recSaveCandidate(c, ()=>{ recData=null; if(currentView==="recruiting") renderRecruiting(); });
+    closeSheet(); setSync(`Candidate added · ${name}`);
+  };
+}
+function recMove(c, toStage){ if(c.stage===toStage) return; recLog(c, "moved to "+recStageLabel(toStage)); c.stage=toStage;
+  if(toStage==="arf"){ c.arf=c.arf||{}; c.arf.submittedAt=c.arf.submittedAt||Date.now(); }
+  recSaveCandidate(c, ()=>{ recData=null; if(currentView==="recruiting") renderRecruiting(); }); }
+// The candidate card: everything about one applicant + the per-stage actions and the ARF.
+function recCard(candId){
+  const c=(recData||[]).find(x=>(x._id||x.id)===candId); if(!c){ return; }
+  const r=recReqById(c.reqId);
+  const canEdit = isRecHR() || (r && recManagerEmails(r.seatId).indexOf((myEmail()||"").toLowerCase())>=0);
+  const stars=[1,2,3,4,5].map(n=>`<button class="rec-star ${c.rating>=n?"on":""}" data-rec-star="${n}">★</button>`).join("");
+  const stageOpts=REC_STAGES.map(s=>`<option value="${s.k}" ${c.stage===s.k?"selected":""}>${esc(s.label)}</option>`).join("");
+  const notes=(c.notes||[]).slice().reverse().map(n=>`<div class="rec-note"><div>${esc(n.text)}</div><div class="rec-note-m">${esc(n.by||"")} · ${fmtLong(n.at)}</div></div>`).join("");
+  const arfDone=c.arf&&c.arf.submittedAt;
+  openSheet(`<h2>${esc(c.name||"Candidate")}</h2>
+    <div class="hint" style="margin:-4px 2px 10px">${esc(c.title||"")}${c.facility?" · "+esc(c.facility):""} · <b>${esc(recStageLabel(c.stage))}</b></div>
+    <div class="rec-contact">${c.email?`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`:""}${c.phone?` · ${esc(c.phone)}`:""}${c.resumeLink?` · <a href="${esc(c.resumeLink)}" target="_blank" rel="noopener">📄 Résumé</a>`:""}</div>
+    ${c.resumeText?`<div class="rec-resume">${esc(c.resumeText)}</div>`:""}
+    ${canEdit?`<div class="field"><label>Rating</label><div class="rec-stars">${stars}</div></div>
+      <div class="field"><label>Stage</label><select id="rec-stage">${stageOpts}</select></div>
+      ${arfDone?`<div class="rec-arf-done">✓ ARF submitted ${fmtLong(c.arf.submittedAt)}${c.arf.pay?` · pay ${esc(c.arf.pay)}`:""}${c.arf.start?` · start ${esc(c.arf.start)}`:""}</div>`
+        :`<button class="btn ghost sm" id="rec-arf" style="margin:2px 0 10px">📝 Submit ARF (request prehire)</button>`}
+      <div class="field"><label>Add a note</label><textarea id="rec-note" rows="2" placeholder="Résumé review, call outcome, interview notes…"></textarea><button class="btn sm" id="rec-note-add" style="margin-top:6px">Add note</button></div>`:""}
+    ${notes?`<div class="rec-notes">${notes}</div>`:""}
+    <div class="rec-decide">
+      ${canEdit&&c.stage!=="hired"?`<button class="btn" id="rec-hire" style="background:var(--pa-good);color:#fff">✅ Hire → fill seat</button>`:""}
+      ${canEdit&&!c.archived?`<button class="btn ghost" id="rec-reject">Archive — not hired</button>`:""}
+      ${isRecHR()?`<button class="btn ghost sm" id="rec-del" style="color:var(--red)">Delete (hard pass)</button>`:""}
+    </div>
+    <div class="sheet-actions"><button class="btn ghost" id="rec-close">Close</button></div>`);
+  $("#rec-close").onclick=closeSheet;
+  const saveRe=()=>recSaveCandidate(c, ()=>{ recData=null; });
+  document.querySelectorAll("[data-rec-star]").forEach(b=>b.onclick=()=>{ c.rating=+b.dataset.recStar===c.rating?0:+b.dataset.recStar; recLog(c,"rated "+c.rating); saveRe(); recCard(candId); });
+  { const sel=$("#rec-stage"); if(sel) sel.onchange=()=>{ recMove(c, sel.value); closeSheet(); }; }
+  { const b=$("#rec-note-add"); if(b) b.onclick=()=>{ const t=($("#rec-note").value||"").trim(); if(!t) return; c.notes=c.notes||[]; c.notes.push({text:t, by:myName()||myEmail(), at:Date.now()}); recLog(c,"note"); saveRe(); recCard(candId); }; }
+  { const b=$("#rec-arf"); if(b) b.onclick=()=>recARF(c); }
+  { const b=$("#rec-hire"); if(b) b.onclick=()=>recHire(c); }
+  { const b=$("#rec-reject"); if(b) b.onclick=()=>{ const why=(prompt("Reason (optional) — kept & searchable:")||"").trim();
+      c.archived=true; c.stage="rejected"; c.outcome="Not hired"+(why?" · "+why:""); recLog(c,"archived — not hired"+(why?": "+why:"")); saveRe(); closeSheet(); renderRecruiting(); setSync(`${c.name} archived`); }; }
+  { const b=$("#rec-del"); if(b) b.onclick=()=>{ if(!confirm(`Permanently delete ${c.name}? This can't be undone (use Archive to keep a record).`)) return;
+      recDeleteCandidate(c._id||c.id, ()=>{ recData=null; renderRecruiting(); }); closeSheet(); setSync(`${c.name} deleted`); }; }
+}
+function recARF(c){
+  const a=c.arf||{};
+  openSheet(`<h2>ARF — ${esc(c.name)}</h2>
+    <div class="hint" style="margin:-4px 2px 12px">Request HR to start prehire. Submitting moves this candidate to <b>Prehire</b> and notifies HR.</div>
+    <div class="field"><label>Position</label><input id="arf-pos" value="${esc(a.position||c.title||"")}"></div>
+    <div class="field"><label>Proposed pay</label><input id="arf-pay" value="${esc(a.pay||"")}" placeholder="e.g. $22/hr"></div>
+    <div class="field"><label>Proposed start date</label><input id="arf-start" type="date" value="${esc(a.start||"")}"></div>
+    <div class="field"><label>Justification / notes</label><textarea id="arf-note" rows="3">${esc(a.note||"")}</textarea></div>
+    <div class="sheet-actions"><button class="btn ghost" id="arf-cancel">Cancel</button><button class="btn" id="arf-save">Submit ARF → Prehire</button></div>`);
+  $("#arf-cancel").onclick=()=>recCard(c._id||c.id);
+  $("#arf-save").onclick=()=>{ c.arf={ position:($("#arf-pos").value||"").trim(), pay:($("#arf-pay").value||"").trim(), start:($("#arf-start").value||""), note:($("#arf-note").value||"").trim(), submittedAt:Date.now(), submittedBy:myName()||myEmail() };
+    recLog(c,"ARF submitted"); c.stage="prehire"; recSaveCandidate(c, ()=>{ recData=null; if(currentView==="recruiting") renderRecruiting(); });
+    closeSheet(); setSync(`ARF submitted for ${c.name} → HR prehire`); };
+}
+// Hire: fill the open seat with this person, stamp their hire date (drives evals), and offer to send
+// them their HEART.OS invite — closing the loop from "yes we hire" to "they can sign in".
+function recHire(c){
+  const r=recReqById(c.reqId), s=r?acSeatById(r.seatId):null;
+  openSheet(`<h2>Hire ${esc(c.name)}</h2>
+    <div class="hint" style="margin:-4px 2px 12px">This fills the <b>${esc((s&&s.role)||c.title||"open")}</b> seat, records the hire, and sets up their evaluation due date.</div>
+    <div class="field"><label>Hire date</label><input id="hire-date" type="date" value="${esc(todayIso())}"></div>
+    <label style="display:flex;gap:9px;align-items:flex-start;margin:4px 2px;font-size:13px;cursor:pointer"><input type="checkbox" id="hire-invite" checked style="margin-top:2px"><span>Also send their HEART.OS sign-in invite now</span></label>
+    <div class="sheet-actions"><button class="btn ghost" id="hire-cancel">Cancel</button><button class="btn" id="hire-go" style="background:var(--pa-good);color:#fff">Confirm hire</button></div>`);
+  $("#hire-cancel").onclick=()=>recCard(c._id||c.id);
+  $("#hire-go").onclick=()=>{
+    const hd=($("#hire-date").value||todayIso());
+    // Apply locally for instant UI, then persist BOTH company changes in ONE mergeCompany — two separate
+    // merges race against the same server read and clobber each other (that dropped the seat fill).
+    if(s){ s.names=seatNames(s); if(!s.names.some(n=>sameName(n,c.name))) s.names.push(c.name); delete s.open; }   // fill the seat on the chart
+    if(c.name){ data.hireDates=data.hireDates||{}; data.hireDates[evNameKey(c.name)]=hd; }                        // hire date → evaluation due date
+    mergeCompany(comp=>{
+      if(s){ const cs=(((comp.accountability||{}).seats)||[]).find(x=>x&&x.id===s.id); if(cs){ cs.names=seatNames(cs); if(!cs.names.some(n=>sameName(n,c.name))) cs.names.push(c.name); delete cs.open; } }
+      if(c.name){ comp.hireDates=comp.hireDates||{}; comp.hireDates[evNameKey(c.name)]=hd; }
+    });
+    // 3) candidate → Hired
+    c.stage="hired"; c.archived=true; c.outcome="Hired "+hd; recLog(c,"hired"); recSaveCandidate(c, ()=>{ recData=null; });
+    const invite=$("#hire-invite")&&$("#hire-invite").checked;
+    closeSheet(); renderRecruiting(); setSync(`🎉 Hired ${c.name}${s?" · filled "+(s.role||"seat"):""}`);
+    // 4) offer to send their sign-in invite (uses the Add-Member flow you already set up)
+    if(invite){ setTimeout(()=>{ if(typeof addMemberWizard==="function"){ addMemberWizard(); const nm=$("#am-name"), em=$("#am-email"); if(nm) nm.value=c.name; if(em&&c.email) em.value=c.email; } }, 150); }
+  };
+}
 let currentView="scorecard";
 function switchView(v){
   if(v!=="vision") acDraftMode=false;              // draft chart is confined to the chart view — exit it on navigate-away
   if(v==="admin" && !canManagePeople()) v="setup";   // the onboarding permission opens a TRIMMED Admin tab; full admins see everything
   if(v==="health" && !canSeeHealth()) v="vision"; // same for the leadership dashboard
   if(v==="evals" && !canDoEvals() && !canSeeBranchEvals()) v="board";     // supervisors, facility leaders + HR/admins reach evaluations
+  if(v==="recruiting" && !canSeeRecruiting()) v="scorecard";              // HR + hiring managers reach recruiting
   if(v==="planning" && !canSeePlanning()) v="vision"; // planning is Visionary/Integrator/Facility-Leader only
   if(v==="sales" && !canSeeSales()) v="scorecard";  // sales card shows only for teams that have one (+ their leaders)
   if(v!=="people") paPerson=null;                 // don't leave someone's worksheet open behind you
@@ -13737,6 +14031,7 @@ function switchView(v){
                           :(v==="admin")?(isAdmin()?"Owner only · people, teams & access":"Onboarding · add & place people")
                           :(v==="health")?"Leadership only · every team"
                           :(v==="evals")?"Confidential · your direct reports"
+                          :(v==="recruiting")?"Confidential · HR & hiring managers"
                           :(v==="people")?"Core Values & GWC · "+qLabel(paQuarter||curQuarter())
                           :(v==="board")?(myName()?myName()+" · across all your teams":"across all your teams")  /* textContent — do NOT esc() */
                           :(v==="guide")?"How we use this to run the company"
@@ -13759,6 +14054,7 @@ function switchView(v){
   if(v==="board") renderMyBoard();
   if(v==="planning") renderPlanning();
   if(v==="evals") renderEvals();
+  if(v==="recruiting") renderRecruiting();
   if(v==="guide") renderGuide();
   if(v==="l10") startPresence(); else stopPresence();   // "who's on this L10" bar — live only on the L10 view
   refreshNotes();
