@@ -1374,6 +1374,20 @@
   .adm-search{width:100%;box-sizing:border-box;border:1px solid var(--border);background:var(--card);color:var(--text);
     border-radius:11px;padding:10px 13px;font-size:14px;font-family:inherit;outline:none;margin-bottom:10px}
   .adm-search:focus{border-color:var(--accent)}
+  /* Clean-up-people sheet */
+  .cu-list{max-height:52vh;overflow:auto;border:1px solid var(--border);border-radius:11px;margin:0 0 8px}
+  .cu-row{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer}
+  .cu-row:last-child{border-bottom:0}
+  .cu-row.cu-safe{background:var(--accent-soft)}
+  .cu-ck{margin-top:3px;flex:0 0 auto;width:17px;height:17px;accent-color:var(--accent)}
+  .cu-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .cu-name{font-weight:700;font-size:13.5px}
+  .cu-meta{font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .cu-flag{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
+    padding:1px 6px;border-radius:999px;background:var(--border);color:var(--text)}
+  .cu-flag.warn{background:var(--red);color:#fff}
+  .cu-flag.you{background:var(--accent);color:#fff}
+  .cu-owns{font-weight:600;color:var(--text);opacity:.8}
   .adm-group{border:1px solid var(--border);border-radius:12px;margin-bottom:8px;overflow:hidden;background:var(--card)}
   .adm-group-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel-2);
     border:none;color:var(--text);font-family:inherit;font-size:14px;font-weight:800;padding:11px 14px;cursor:pointer;text-align:left}
@@ -5010,7 +5024,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=224;
+const BUILD=225;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -8403,9 +8417,11 @@ function renderAdmin(){
 
     <div class="sec-title" style="margin-top:22px">People (${names.length})</div>
     <div class="hint" style="margin:0 2px 8px">New sign-ins land in the <b>⏳ Waiting room</b> at the top — open it and hit <b>Assign teams</b> to place each person (their self-reported role is shown to help). Everyone else is grouped by team.</div>
+    <button class="btn ghost wide" id="adm-cleanup" style="margin:0 0 8px">🧹 Clean up people — remove first-name-only &amp; duplicate entries</button>
     <input id="adm-psearch" class="adm-search" placeholder="🔍  Search for a name…" autocomplete="off" enterkeyhint="search">
     ${peopleGroups||`<div class="empty"><span class="emoji">👤</span>No people yet.</div>`}`;
   { const b=$("#adm-add-member"); if(b) b.onclick=addMemberWizard; }
+  { const b=$("#adm-cleanup"); if(b) b.onclick=cleanupPeople; }
   { const b=$("#adm-access"); if(b) b.onclick=()=>accessViewer(); }
   wrap.querySelectorAll("#adm-facfilter [data-fac]").forEach(b=>b.onclick=()=>{ admTeamFac=b.dataset.fac; try{localStorage.setItem("eostracker.admfac",admTeamFac);}catch(e){} renderAdmin(); });
   { const b=$("#adm-teamlinks"); if(b) b.onclick=manageTeamLinks; }
@@ -8927,6 +8943,83 @@ function deletePerson(name){
     data.people=(data.people||[]).filter(p=>!(p&&sameName(p.name,name)));
     save(); closeSheet(); renderAdmin(); refreshNotes();
     setSync(`${name} removed${to?" · reassigned to "+to:""}`);
+  };
+}
+/* Bulk cleanup of the people list — the first-name-only / no-login / duplicate junk that piles up from
+   waiting-room sign-ins. Safe by construction: it takes a RESTORE POINT first, pre-ticks only entries that
+   hold nothing and have no login (pure junk), shows what every other entry holds so a real person is never
+   removed by accident, and when a name still has an un-ticked twin it removes only the ticked record (the
+   survivor keeps the seats/teams/items). Owner-only. */
+function cleanupPeople(){
+  if(!isAdmin()) return;
+  const people=(data.people||[]);
+  const rows=[];
+  people.forEach((p,idx)=>rows.push({ key:"p"+idx, name:(p.name||"").trim(), email:(p.email||"").trim().toLowerCase(), ref:p }));
+  const haveName=new Set(rows.map(r=>r.name.toLowerCase()).filter(Boolean));
+  const extra=new Set();
+  const addExtra=n=>{ const v=(n||"").trim(); if(v && !haveName.has(v.toLowerCase())) extra.add(v); };
+  (((data.accountability||{}).seats)||[]).forEach(s=>seatNames(s).forEach(addExtra));
+  (data.teams||[]).forEach(t=>{ (t.members||[]).forEach(m=>m&&addExtra(m.name));
+    (t.rocks||[]).forEach(r=>r&&addExtra(r.owner)); (t.todos||[]).forEach(td=>td&&addExtra(td.owner)); });
+  [...extra].forEach((n,i)=>rows.push({ key:"x"+i, name:n, email:"", ref:null }));   // on the chart/teams but no login
+  const nameCount={}; rows.forEach(r=>{ const k=r.name.toLowerCase(); if(k) nameCount[k]=(nameCount[k]||0)+1; });
+  rows.forEach(r=>{ const h=ownedBy(r.name); r.owns=ownedCount(h);
+    r.onTeams=(data.teams||[]).filter(t=>teamRoster(t).some(x=>sameName(x,r.name))).map(t=>t.name);
+    r.firstOnly=!!r.name && !/\s/.test(r.name);
+    r.dup=nameCount[r.name.toLowerCase()]>1;
+    r.isMe=sameName(r.name, myName());
+    r.safe=!r.email && r.owns===0 && r.onTeams.length===0 && !r.isMe;   // no login + holds nothing + on no team + not you → pure junk, pre-ticked
+  });
+  rows.sort((a,b)=> a.safe===b.safe ? a.name.toLowerCase().localeCompare(b.name.toLowerCase()) : (a.safe?-1:1));
+  const safeN=rows.filter(r=>r.safe).length;
+  const rowHtml=r=>{
+    const flags=[];
+    if(!r.email) flags.push(`<span class="cu-flag">no login</span>`);
+    if(r.firstOnly) flags.push(`<span class="cu-flag">first name only</span>`);
+    if(r.dup) flags.push(`<span class="cu-flag warn">duplicate</span>`);
+    if(r.isMe) flags.push(`<span class="cu-flag you">you</span>`);
+    const owns=r.owns?`<span class="cu-owns">holds ${r.owns} item${r.owns===1?"":"s"}${r.onTeams.length?" · "+esc(r.onTeams.join(", ")):""}</span>`
+      :(r.onTeams.length?`<span class="cu-owns">on ${esc(r.onTeams.join(", "))}</span>`:"");
+    return `<label class="cu-row ${r.safe?"cu-safe":""}">
+      <input type="checkbox" class="cu-ck" data-cu="${r.key}" ${r.safe?"checked":""} ${r.isMe?"disabled":""}>
+      <span class="cu-main"><span class="cu-name">${esc(r.name)||"<i>(blank)</i>"}</span>
+        <span class="cu-meta">${r.email?esc(r.email)+" ":""}${flags.join(" ")} ${owns}</span></span></label>`;
+  };
+  openSheet(`<h2>Clean up people</h2>
+    <div class="hint" style="margin:-4px 2px 12px">Tick the entries to remove. The obvious junk — <b>no login, holds nothing</b> — is pre-ticked (<b>${safeN}</b>). Anyone who holds Rocks, to-dos, a seat or a login is left unticked with what they hold, so you won't remove a real person by accident. A <b>restore point is saved first</b> (undo it under “🕘 Restore points” above).</div>
+    <div class="cu-list">${rows.map(rowHtml).join("")}</div>
+    <div class="sheet-actions" style="position:sticky;bottom:0;background:var(--card);padding:10px 0 2px">
+      <button class="btn ghost" id="cu-cancel">Cancel</button>
+      <button class="btn" id="cu-go" style="background:var(--red)">Remove selected (<span id="cu-count">${safeN}</span>)</button></div>`);
+  const recount=()=>{ const c=$("#cu-count"); if(c) c.textContent=[...document.querySelectorAll(".cu-ck:checked")].length; };
+  document.querySelectorAll(".cu-ck").forEach(ck=>ck.onchange=recount);
+  $("#cu-cancel").onclick=()=>closeSheet();
+  $("#cu-go").onclick=()=>{
+    const picked=new Set([...document.querySelectorAll(".cu-ck:checked")].map(ck=>ck.dataset.cu));
+    const sel=rows.filter(r=>picked.has(r.key) && !r.isMe);
+    if(!sel.length){ closeSheet(); return; }
+    const holding=sel.filter(r=>r.owns>0).length;
+    const msg=`Remove ${sel.length} ${sel.length===1?"entry":"entries"}?`
+      +(holding?`\n\n${holding} of them still hold Rocks / to-dos / seats — those items are left UNASSIGNED (reassign later from each board).`:"")
+      +`\n\nA restore point is saved first, so this is undoable.`;
+    if(!confirm(msg)) return;
+    snapshotNow("before cleaning up people");
+    const selKeys=new Set(sel.map(r=>r.key));
+    const survivorNames=new Set(rows.filter(r=>!selKeys.has(r.key)).map(r=>r.name.toLowerCase()).filter(Boolean));
+    const selRefs=new Set(sel.map(r=>r.ref).filter(Boolean));
+    data.people=(data.people||[]).filter(p=>!(p && selRefs.has(p)));   // drop the exact ticked records
+    // For names with NO surviving (un-ticked) twin, strip every placement and any leftover same-name record.
+    const fully=new Set(); sel.forEach(r=>{ const k=r.name.toLowerCase(); if(k && !survivorNames.has(k)) fully.add(k); });
+    fully.forEach(k=>{ const name=(sel.find(r=>r.name.toLowerCase()===k)||{}).name; if(!name) return;
+      const h=ownedBy(name);
+      h.rocks.forEach(x=>x.ref.owner=""); h.todos.forEach(x=>x.ref.owner=""); h.measurables.forEach(x=>x.ref.owner="");
+      h.issues.forEach(x=>x.ref.owner=""); h.vto.forEach(x=>x.ref.owner="");
+      h.seats.forEach(x=>{ x.ref.names=seatNames(x.ref).filter(n=>!sameName(n,name)); });
+      (data.teams||[]).forEach(t=>{ t.members=(t.members||[]).filter(m=>!sameName(m.name,name)); });
+      data.people=(data.people||[]).filter(p=>!(p&&sameName(p.name,name)));
+    });
+    save(true); closeSheet(); renderAdmin(); refreshNotes();
+    setSync(`Removed ${sel.length} ${sel.length===1?"entry":"entries"} · restore point saved`);
   };
 }
 
