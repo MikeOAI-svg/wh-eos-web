@@ -5024,7 +5024,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=225;
+const BUILD=226;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -9006,8 +9006,15 @@ function cleanupPeople(){
     snapshotNow("before cleaning up people");
     const selKeys=new Set(sel.map(r=>r.key));
     const survivorNames=new Set(rows.filter(r=>!selKeys.has(r.key)).map(r=>r.name.toLowerCase()).filter(Boolean));
-    const selRefs=new Set(sel.map(r=>r.ref).filter(Boolean));
-    data.people=(data.people||[]).filter(p=>!(p && selRefs.has(p)));   // drop the exact ticked records
+    // Match by STABLE keys (email / name), NEVER object identity: a background sync rebuilds `data` between
+    // opening this sheet and clicking Remove, so the row objects we captured are no longer the ones in
+    // data.people — ref-equality would then match nothing and delete no one (the bug this fixes).
+    const selEmails=new Set(sel.filter(r=>r.email).map(r=>r.email));
+    const selNoLoginNames=new Set(sel.filter(r=>!r.email).map(r=>r.name.toLowerCase()).filter(Boolean));
+    data.people=(data.people||[]).filter(p=>{ if(!p) return false;
+      const em=(p.email||"").trim().toLowerCase(), nm=(p.name||"").trim().toLowerCase();
+      return em ? !selEmails.has(em) : !selNoLoginNames.has(nm);   // drop the ticked records by key
+    });
     // For names with NO surviving (un-ticked) twin, strip every placement and any leftover same-name record.
     const fully=new Set(); sel.forEach(r=>{ const k=r.name.toLowerCase(); if(k && !survivorNames.has(k)) fully.add(k); });
     fully.forEach(k=>{ const name=(sel.find(r=>r.name.toLowerCase()===k)||{}).name; if(!name) return;
