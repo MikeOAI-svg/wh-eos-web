@@ -1417,6 +1417,19 @@
   .rec-note{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:13px}
   .rec-note-m{font-size:10.5px;color:var(--muted);font-weight:700;margin-top:3px}
   .rec-arf-done{background:var(--accent-soft);border-radius:9px;padding:8px 11px;font-size:12.5px;font-weight:700;margin:2px 0 10px}
+  .rec-pills{display:flex;gap:8px}
+  .rec-pill{flex:1;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:8px;font-family:inherit;font-weight:700;font-size:13px;color:var(--text);cursor:pointer}
+  .rec-pill.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .rec-approvals{background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:10px 12px;margin:2px 0 12px}
+  .ra-h{font-size:12px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .ra-h small{font-weight:600;text-transform:none;letter-spacing:0}
+  .ra-step{display:flex;align-items:baseline;gap:8px;padding:4px 0;font-size:13px}
+  .ra-ic{flex:0 0 auto;width:16px;text-align:center;font-weight:800;color:var(--muted)}
+  .ra-step.ok .ra-ic{color:var(--pa-good)} .ra-step.no .ra-ic{color:var(--red)}
+  .ra-lbl{font-weight:700;flex:0 0 auto}
+  .ra-meta{font-size:11px;color:var(--muted);font-weight:600}
+  .ra-act{display:flex;gap:8px;margin-top:8px}
+  .ra-denied{margin-top:8px;font-size:12.5px;color:var(--red);font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .rec-decide{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
   .rec-arch{margin-top:18px;border-top:1px solid var(--border);padding-top:10px}
   .rec-arch summary{font-weight:800;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);cursor:pointer}
@@ -5067,7 +5080,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=227;
+const BUILD=228;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -13817,6 +13830,26 @@ function recSaveCandidate(c, cb){
 function recDeleteCandidate(id, cb){ let fs; try{ fs=firebase.firestore(); }catch(e){ fs=null; } if(!fs){ if(cb) cb(); return; }
   fs.doc("recruiting/"+id).delete().then(()=>{ if(cb) cb(); }).catch(e=>console.error("recruiting delete",e)); }
 function recLog(c, action){ c.history=c.history||[]; c.history.push({ t:Date.now(), by:myName()||myEmail(), action }); }
+function recWhen(ms){ if(!ms) return ""; try{ const d=new Date(ms); return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); }catch(e){ return ""; } }   // ms timestamp → "Nov 4, 2:30 PM"
+// ARF approval chain — matches the Warriors Heart Action Request Form: Director → Executive Director → COO,
+// sequential, each approve/deny attributed + timestamped. COO approval advances the candidate to Prehire.
+const REC_APPROVALS=[{k:"director",label:"Director"},{k:"execdir",label:"Executive Director"},{k:"coo",label:"COO"}];
+function recLeadersAbove(seatId){ const out=[]; let s=acSeatById(seatId), guard=0; while(s&&s.parent&&guard++<60){ s=acSeatById(s.parent); if(s) seatNames(s).forEach(n=>out.push(n)); } return out; }
+function recCanApprove(c){ if(isRecHR()) return true; const me=myName(); return !!me && recLeadersAbove(c.seatId).some(n=>sameName(n,me)); }   // HR, or anyone above this seat in the chart
+function recCanEditCand(c){ const r=recReqById(c.reqId); return isRecHR() || (r && recManagerEmails(r.seatId).indexOf((myEmail()||"").toLowerCase())>=0); }
+function recApprovalBlock(c){
+  const ap=(c.arf&&c.arf.approvals)||{};
+  let currentIdx=-1; for(let i=0;i<REC_APPROVALS.length;i++){ if((ap[REC_APPROVALS[i].k]||{}).status==="approved") continue; currentIdx=i; break; }
+  const denied=REC_APPROVALS.some(s=>(ap[s.k]||{}).status==="denied");
+  const rows=REC_APPROVALS.map((s,i)=>{ const a=ap[s.k]||{}; const ic=a.status==="approved"?"✓":a.status==="denied"?"✕":(i===currentIdx&&!denied?"…":"○");
+    const cls=a.status==="approved"?"ok":a.status==="denied"?"no":"";
+    const meta=a.status?`<span class="ra-meta">${esc(a.by||"")}${a.at?" · "+recWhen(a.at):""}${a.comment?" · “"+esc(a.comment)+"”":""}</span>`:"";
+    return `<div class="ra-step ${cls}"><span class="ra-ic">${ic}</span><span class="ra-lbl">${esc(s.label)}</span>${meta}</div>`; }).join("");
+  const actStep=(recCanApprove(c) && currentIdx>=0 && !denied)?REC_APPROVALS[currentIdx]:null;
+  return `<div class="rec-approvals"><div class="ra-h">ARF · New Hire <small>submitted ${c.arf.submittedAt?recWhen(c.arf.submittedAt):""} by ${esc(c.arf.submittedBy||"")}</small></div>${rows}
+    ${actStep?`<div class="ra-act"><button class="btn sm" id="ra-approve" data-step="${actStep.k}">Approve · ${esc(actStep.label)}</button><button class="btn sm ghost" id="ra-deny" data-step="${actStep.k}">Deny</button></div>`:""}
+    ${denied?`<div class="ra-denied">Denied — revise &amp; resubmit.${recCanEditCand(c)?` <button class="btn sm ghost" id="ra-revise">Revise ARF</button>`:""}</div>`:""}</div>`;
+}
 
 function renderRecruiting(){
   const wrap=$("#recruitingWrap"); if(!wrap) return;
@@ -13923,29 +13956,31 @@ function recAddCandidate(reqId){
       reqId:req.id, seatId:req.seatId, title:req.title, facility:req.facility,
       stage: isRecHR()?"inbox":"review", rating:0, notes:[], phoneScreen:{}, interview:{}, arf:{}, outcome:"", archived:false,
       createdAt:Date.now(), createdBy:myName()||myEmail(), history:[] };
-    recLog(c,"added"); recSaveCandidate(c, ()=>{ recData=null; if(currentView==="recruiting") renderRecruiting(); });
+    recLog(c,"added"); c._id=c.id; recSaveCandidate(c); if(Array.isArray(recData)) recData.push(c); else recData=[c]; renderRecruiting();
     closeSheet(); setSync(`Candidate added · ${name}`);
   };
 }
 function recMove(c, toStage){ if(c.stage===toStage) return; recLog(c, "moved to "+recStageLabel(toStage)); c.stage=toStage;
-  if(toStage==="arf"){ c.arf=c.arf||{}; c.arf.submittedAt=c.arf.submittedAt||Date.now(); }
-  recSaveCandidate(c, ()=>{ recData=null; if(currentView==="recruiting") renderRecruiting(); }); }
+  recSaveCandidate(c); if(currentView==="recruiting") renderRecruiting(); }   // c is live in recData — just re-render
 // The candidate card: everything about one applicant + the per-stage actions and the ARF.
-function recCard(candId){
-  const c=(recData||[]).find(x=>(x._id||x.id)===candId); if(!c){ return; }
+function recCard(ref){
+  // Accept the candidate object OR its id — re-rendering off the live object keeps working even after a
+  // save refreshes the cache (looking it up by id from a just-cleared recData was going stale).
+  const c=(ref && typeof ref==="object") ? ref : (recData||[]).find(x=>(x._id||x.id)===ref); if(!c){ return; }
+  const candId=c._id||c.id;
   const r=recReqById(c.reqId);
   const canEdit = isRecHR() || (r && recManagerEmails(r.seatId).indexOf((myEmail()||"").toLowerCase())>=0);
   const stars=[1,2,3,4,5].map(n=>`<button class="rec-star ${c.rating>=n?"on":""}" data-rec-star="${n}">★</button>`).join("");
   const stageOpts=REC_STAGES.map(s=>`<option value="${s.k}" ${c.stage===s.k?"selected":""}>${esc(s.label)}</option>`).join("");
-  const notes=(c.notes||[]).slice().reverse().map(n=>`<div class="rec-note"><div>${esc(n.text)}</div><div class="rec-note-m">${esc(n.by||"")} · ${fmtLong(n.at)}</div></div>`).join("");
-  const arfDone=c.arf&&c.arf.submittedAt;
+  const notes=(c.notes||[]).slice().reverse().map(n=>`<div class="rec-note"><div>${esc(n.text)}</div><div class="rec-note-m">${esc(n.by||"")} · ${recWhen(n.at)}</div></div>`).join("");
+  const arfSubmitted=c.arf&&c.arf.submittedAt;
   openSheet(`<h2>${esc(c.name||"Candidate")}</h2>
     <div class="hint" style="margin:-4px 2px 10px">${esc(c.title||"")}${c.facility?" · "+esc(c.facility):""} · <b>${esc(recStageLabel(c.stage))}</b></div>
     <div class="rec-contact">${c.email?`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`:""}${c.phone?` · ${esc(c.phone)}`:""}${c.resumeLink?` · <a href="${esc(c.resumeLink)}" target="_blank" rel="noopener">📄 Résumé</a>`:""}</div>
     ${c.resumeText?`<div class="rec-resume">${esc(c.resumeText)}</div>`:""}
     ${canEdit?`<div class="field"><label>Rating</label><div class="rec-stars">${stars}</div></div>
       <div class="field"><label>Stage</label><select id="rec-stage">${stageOpts}</select></div>
-      ${arfDone?`<div class="rec-arf-done">✓ ARF submitted ${fmtLong(c.arf.submittedAt)}${c.arf.pay?` · pay ${esc(c.arf.pay)}`:""}${c.arf.start?` · start ${esc(c.arf.start)}`:""}</div>`
+      ${arfSubmitted?recApprovalBlock(c)
         :`<button class="btn ghost sm" id="rec-arf" style="margin:2px 0 10px">📝 Submit ARF (request prehire)</button>`}
       <div class="field"><label>Add a note</label><textarea id="rec-note" rows="2" placeholder="Résumé review, call outcome, interview notes…"></textarea><button class="btn sm" id="rec-note-add" style="margin-top:6px">Add note</button></div>`:""}
     ${notes?`<div class="rec-notes">${notes}</div>`:""}
@@ -13956,30 +13991,50 @@ function recCard(candId){
     </div>
     <div class="sheet-actions"><button class="btn ghost" id="rec-close">Close</button></div>`);
   $("#rec-close").onclick=closeSheet;
-  const saveRe=()=>recSaveCandidate(c, ()=>{ recData=null; });
-  document.querySelectorAll("[data-rec-star]").forEach(b=>b.onclick=()=>{ c.rating=+b.dataset.recStar===c.rating?0:+b.dataset.recStar; recLog(c,"rated "+c.rating); saveRe(); recCard(candId); });
+  const saveRe=()=>recSaveCandidate(c);   // c is mutated in place (still the same object in recData), so no reload needed
+  document.querySelectorAll("[data-rec-star]").forEach(b=>b.onclick=()=>{ c.rating=+b.dataset.recStar===c.rating?0:+b.dataset.recStar; recLog(c,"rated "+c.rating); saveRe(); recCard(c); });
   { const sel=$("#rec-stage"); if(sel) sel.onchange=()=>{ recMove(c, sel.value); closeSheet(); }; }
-  { const b=$("#rec-note-add"); if(b) b.onclick=()=>{ const t=($("#rec-note").value||"").trim(); if(!t) return; c.notes=c.notes||[]; c.notes.push({text:t, by:myName()||myEmail(), at:Date.now()}); recLog(c,"note"); saveRe(); recCard(candId); }; }
+  { const b=$("#rec-note-add"); if(b) b.onclick=()=>{ const t=($("#rec-note").value||"").trim(); if(!t) return; c.notes=c.notes||[]; c.notes.push({text:t, by:myName()||myEmail(), at:Date.now()}); recLog(c,"note"); saveRe(); recCard(c); }; }
   { const b=$("#rec-arf"); if(b) b.onclick=()=>recARF(c); }
+  { const b=$("#ra-approve"); if(b) b.onclick=()=>{ const k=b.dataset.step; c.arf.approvals[k]={status:"approved", by:myName()||myEmail(), at:Date.now()};
+      recLog(c,"ARF approved · "+(REC_APPROVALS.find(s=>s.k===k)||{}).label); if(k==="coo"){ c.stage="prehire"; } saveRe(); recCard(c); setSync(k==="coo"?`Approved · ${c.name} → Prehire`:"Approved"); }; }
+  { const b=$("#ra-deny"); if(b) b.onclick=()=>{ const k=b.dataset.step; const cm=(prompt("Reason for denial:")||"").trim();
+      c.arf.approvals[k]={status:"denied", by:myName()||myEmail(), at:Date.now(), comment:cm}; recLog(c,"ARF denied · "+(REC_APPROVALS.find(s=>s.k===k)||{}).label+(cm?": "+cm:"")); saveRe(); recCard(c); setSync("ARF denied"); }; }
+  { const b=$("#ra-revise"); if(b) b.onclick=()=>recARF(c); }
   { const b=$("#rec-hire"); if(b) b.onclick=()=>recHire(c); }
   { const b=$("#rec-reject"); if(b) b.onclick=()=>{ const why=(prompt("Reason (optional) — kept & searchable:")||"").trim();
       c.archived=true; c.stage="rejected"; c.outcome="Not hired"+(why?" · "+why:""); recLog(c,"archived — not hired"+(why?": "+why:"")); saveRe(); closeSheet(); renderRecruiting(); setSync(`${c.name} archived`); }; }
   { const b=$("#rec-del"); if(b) b.onclick=()=>{ if(!confirm(`Permanently delete ${c.name}? This can't be undone (use Archive to keep a record).`)) return;
-      recDeleteCandidate(c._id||c.id, ()=>{ recData=null; renderRecruiting(); }); closeSheet(); setSync(`${c.name} deleted`); }; }
+      if(Array.isArray(recData)) recData=recData.filter(x=>x!==c); recDeleteCandidate(c._id||c.id); closeSheet(); renderRecruiting(); setSync(`${c.name} deleted`); }; }
 }
+// The ARF — Warriors Heart Action Request Form, New-Hire path. Fields mirror the paper form; submitting
+// starts the Director → Executive Director → COO approval chain (no pay here — pay is a "Raise" action on
+// the real form). Candidate moves to Prehire only once the COO approves.
 function recARF(c){
   const a=c.arf||{};
-  openSheet(`<h2>ARF — ${esc(c.name)}</h2>
-    <div class="hint" style="margin:-4px 2px 12px">Request HR to start prehire. Submitting moves this candidate to <b>Prehire</b> and notifies HR.</div>
-    <div class="field"><label>Position</label><input id="arf-pos" value="${esc(a.position||c.title||"")}"></div>
-    <div class="field"><label>Proposed pay</label><input id="arf-pay" value="${esc(a.pay||"")}" placeholder="e.g. $22/hr"></div>
-    <div class="field"><label>Proposed start date</label><input id="arf-start" type="date" value="${esc(a.start||"")}"></div>
-    <div class="field"><label>Justification / notes</label><textarea id="arf-note" rows="3">${esc(a.note||"")}</textarea></div>
-    <div class="sheet-actions"><button class="btn ghost" id="arf-cancel">Cancel</button><button class="btn" id="arf-save">Submit ARF → Prehire</button></div>`);
+  const loc=a.location||(/virginia/i.test(c.facility||"")?"WH Virginia":/texas|^tx/i.test(c.facility||"")?"WH Texas":"WH Headquarters");
+  let etype=a.type||"FT";
+  openSheet(`<h2>Action Request Form — New Hire</h2>
+    <div class="hint" style="margin:-4px 2px 12px">Position Vacancy / New Hire. Submitting starts the <b>Director → Executive Director → COO</b> approvals; the candidate advances to <b>Prehire</b> once the COO approves.</div>
+    <div class="field"><label>Supervisor</label><input id="arf-sup" value="${esc(a.supervisor||myName()||myEmail())}"></div>
+    <div class="field"><label>Location</label><select id="arf-loc"><option ${loc==="WH Texas"?"selected":""}>WH Texas</option><option ${loc==="WH Virginia"?"selected":""}>WH Virginia</option><option ${loc==="WH Headquarters"?"selected":""}>WH Headquarters</option></select></div>
+    <div class="field"><label>Name</label><input id="arf-name" value="${esc(a.name||c.name||"")}"></div>
+    <div class="field"><label>Department</label><input id="arf-dept" value="${esc(a.department||"")}" placeholder="e.g. Admissions"></div>
+    <div class="field"><label>Title</label><input id="arf-title" value="${esc(a.title||c.title||"")}"></div>
+    <div class="field"><label>Employment type</label><div class="rec-pills"><button type="button" class="rec-pill ${etype!=="PT"?"on":""}" data-arf-type="FT">Full-time</button><button type="button" class="rec-pill ${etype==="PT"?"on":""}" data-arf-type="PT">Part-time</button></div></div>
+    <div class="field"><label>Effective / start date</label><input id="arf-start" type="date" value="${esc(a.effective||"")}"></div>
+    <div class="field"><label>Notes <small>(optional)</small></label><textarea id="arf-note" rows="2">${esc(a.note||"")}</textarea></div>
+    <div class="sheet-actions"><button class="btn ghost" id="arf-cancel">Cancel</button><button class="btn" id="arf-save">Submit ARF for approval</button></div>`);
+  document.querySelectorAll("[data-arf-type]").forEach(b=>b.onclick=()=>{ etype=b.dataset.arfType; document.querySelectorAll("[data-arf-type]").forEach(x=>x.classList.toggle("on",x===b)); });
   $("#arf-cancel").onclick=()=>recCard(c._id||c.id);
-  $("#arf-save").onclick=()=>{ c.arf={ position:($("#arf-pos").value||"").trim(), pay:($("#arf-pay").value||"").trim(), start:($("#arf-start").value||""), note:($("#arf-note").value||"").trim(), submittedAt:Date.now(), submittedBy:myName()||myEmail() };
-    recLog(c,"ARF submitted"); c.stage="prehire"; recSaveCandidate(c, ()=>{ recData=null; if(currentView==="recruiting") renderRecruiting(); });
-    closeSheet(); setSync(`ARF submitted for ${c.name} → HR prehire`); };
+  $("#arf-save").onclick=()=>{
+    c.arf={ supervisor:($("#arf-sup").value||"").trim(), location:$("#arf-loc").value, name:($("#arf-name").value||"").trim()||c.name,
+      department:($("#arf-dept").value||"").trim(), title:($("#arf-title").value||"").trim()||c.title, type:etype, effective:$("#arf-start").value||"",
+      note:($("#arf-note").value||"").trim(), submittedAt:Date.now(), submittedBy:myName()||myEmail(),
+      approvals:{ director:{status:""}, execdir:{status:""}, coo:{status:""} } };
+    recLog(c,"ARF submitted for approval"); c.stage="arf"; recSaveCandidate(c); if(currentView==="recruiting") renderRecruiting();
+    closeSheet(); setSync(`ARF submitted for ${c.name} → awaiting Director / ED / COO`);
+  };
 }
 // Hire: fill the open seat with this person, stamp their hire date (drives evals), and offer to send
 // them their HEART.OS invite — closing the loop from "yes we hire" to "they can sign in".
@@ -14002,7 +14057,7 @@ function recHire(c){
       if(c.name){ comp.hireDates=comp.hireDates||{}; comp.hireDates[evNameKey(c.name)]=hd; }
     });
     // 3) candidate → Hired
-    c.stage="hired"; c.archived=true; c.outcome="Hired "+hd; recLog(c,"hired"); recSaveCandidate(c, ()=>{ recData=null; });
+    c.stage="hired"; c.archived=true; c.outcome="Hired "+hd; recLog(c,"hired"); recSaveCandidate(c);
     const invite=$("#hire-invite")&&$("#hire-invite").checked;
     closeSheet(); renderRecruiting(); setSync(`🎉 Hired ${c.name}${s?" · filled "+(s.role||"seat"):""}`);
     // 4) offer to send their sign-in invite (uses the Add-Member flow you already set up)
