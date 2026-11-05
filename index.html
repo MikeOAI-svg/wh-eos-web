@@ -1165,6 +1165,41 @@
   .pa-legend b{font-size:10px;letter-spacing:.5px;text-transform:uppercase}
   .pa-legend .bar-key{color:var(--pa-bad);font-weight:700}
   .pa-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+  /* People tab toolbar: quarter switcher + company report */
+  .pa-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:2px 2px 12px}
+  .pa-qlabel{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
+  .qc-qsel{font:inherit;font-size:13px;font-weight:600;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:9px;padding:7px 10px;text-transform:none;letter-spacing:0}
+  .pa-archived{font-size:12.5px;line-height:1.5;color:var(--text);background:var(--amber-soft,rgba(217,119,6,.12));border:1px solid var(--amber,#d97706);border-radius:11px;padding:10px 13px;margin:0 2px 12px}
+  /* Company Core Values report */
+  .cvr-tiles{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 2px}
+  .cvr-tile{flex:1;min-width:140px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px}
+  .cvr-tile.warn{border-color:var(--pa-bad);background:var(--red-soft,rgba(206,75,62,.08))}
+  .cvr-n{font-size:30px;font-weight:800;line-height:1;color:var(--text);font-variant-numeric:tabular-nums}
+  .cvr-n small{font-size:15px;font-weight:700;color:var(--muted)}
+  .cvr-t{font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-top:7px}
+  .cvr-sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .cvr-list{display:flex;flex-direction:column;gap:9px}
+  .cvr-row{display:flex;align-items:center;gap:12px}
+  .cvr-lbl{flex:0 0 150px;font-size:13px;font-weight:700;color:var(--text);line-height:1.25}
+  .cvr-lbl small{display:block;font-size:10.5px;font-weight:600;color:var(--muted)}
+  .cvr-bar{flex:1;display:flex;height:26px;border-radius:7px;overflow:hidden;background:var(--border);min-width:0}
+  .cvr-bar.empty{align-items:center;justify-content:center;background:var(--card);border:1px dashed var(--border)}
+  .cvr-none{font-size:11px;color:var(--muted)}
+  .cvr-seg{display:flex;align-items:center;justify-content:center;min-width:18px}
+  .cvr-seg span{font-size:11px;font-weight:800;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.25)}
+  .cvr-seg.good{background:var(--pa-on)} .cvr-seg.mid{background:var(--pa-mid,#d9a417)} .cvr-seg.bad{background:var(--pa-bad)}
+  .cvr-pct{flex:0 0 46px;text-align:right;font-size:14px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums}
+  .cvr-key{font-weight:700;padding:0 2px}
+  .cvr-key.good{color:var(--pa-on)} .cvr-key.mid{color:var(--pa-mid,#b5860b)} .cvr-key.bad{color:var(--pa-bad)}
+  .cvr-below{display:flex;flex-direction:column;gap:7px}
+  .cvr-belowrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px}
+  .cvr-belowrow>span{display:flex;gap:5px;flex-wrap:wrap}
+  .cvr-trend{display:flex;align-items:flex-end;gap:10px;height:150px;padding:10px 4px 0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow-x:auto}
+  .cvr-tcol{flex:1;min-width:48px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+  .cvr-tbar{width:60%;max-width:46px;background:var(--accent);border-radius:6px 6px 0 0;min-height:4px}
+  .cvr-tnum{font-size:12px;font-weight:800;color:var(--text);margin-top:5px;font-variant-numeric:tabular-nums}
+  .cvr-tq{font-size:10.5px;color:var(--muted);margin-top:1px;white-space:nowrap}
+  @media (max-width:560px){ .cvr-lbl{flex-basis:108px} }
   .recon{background:var(--amber-soft);border:1px solid var(--amber);border-radius:12px;padding:11px 13px}
   .recon>b{font-size:12.5px}
   .recon-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-top:1px dashed var(--border)}
@@ -5080,7 +5115,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=230;
+const BUILD=231;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -13212,7 +13247,142 @@ function renderMyBoard(){
 
 /* ================= PEOPLE (PA + Quarterly Conversations) ================= */
 let paPerson=null;              // whose worksheet is open (supervisor view)
-let paQuarter=null;
+let paQuarter=null;             // null = current quarter; "YYYY-Qn" = a specific (possibly archived) quarter
+let paReport=false;             // true = show the company-wide Core Values rollup instead of the people list
+
+// The official rating that STANDS for a person in a quarter: the final if it's complete, else the leader's
+// read if that's complete, else none. (Self-assessments are private and never feed a roll-up.) Mirrors the
+// history/track-record logic so the report and the archive agree.
+function paShownRating(r){ if(!r) return null; const s=rateDone(r.final)?r.final:r.sup; return rateDone(s)?s:null; }
+
+// Every quarter we actually have a record for (that this viewer may see), newest first, with the current
+// quarter always included so you can jump back to "now".
+function paQuartersList(){
+  const set=new Set([curQuarter()]);
+  (data.pa||[]).forEach(r=>{ if(r&&r.quarter&&(sameName(r.person,myName())||canSeeRatingsFor(r.person))) set.add(r.quarter); });
+  return [...set].sort((a,b)=>String(b).localeCompare(String(a)));
+}
+// Who a company report covers for THIS viewer — exactly the people whose ratings they may see (HR/owner =
+// everyone; a leader = their whole branch). Keeps the roll-up inside each person's visibility.
+function paReportPeople(){
+  const me=myName(); if(!me) return [];
+  const m=new Map();
+  const add=n=>{ n=(n||"").trim(); if(n) m.set(n.toLowerCase(),n); };
+  if(isEvalAdmin()){
+    (((data.accountability||{}).seats)||[]).forEach(s=>seatNames(s).forEach(add));   // everyone on the chart
+    (data.pa||[]).forEach(r=>{ if(r&&r.person) add(r.person); });                     // plus anyone with a record but no seat
+  } else {
+    peopleBelowMe(me).forEach(add);
+  }
+  m.delete(me.toLowerCase());   // your own rating is your leader's to share, never in your own roll-up
+  return [...m.values()].sort((a,b)=>a.localeCompare(b));
+}
+// Aggregate the quarter's standing on every Core Value + GWC across the visible population.
+function coreValuesReport(q, people){
+  const cv={}; CORE_VALUES.forEach(c=>cv[c.k]={"+":0,"+/-":0,"-":0});
+  const gwc={}; GWC_KEYS.forEach(g=>gwc[g.k]={Y:0,N:0});
+  let rated=0, atAbove=0, held=0; const below=[];
+  people.forEach(p=>{ const r=paRec(p,q,false); if(!r) return;
+    if(r.status==="complete" || (r.qc&&r.qc.held)) held++;
+    const s=paShownRating(r); if(!s) return;
+    rated++;
+    CORE_VALUES.forEach(c=>{ const v=s.v&&s.v[c.k]; if(v&&cv[c.k][v]!==undefined) cv[c.k][v]++; });
+    GWC_KEYS.forEach(g=>{ const v=s[g.k]; if(v==="Y")gwc[g.k].Y++; else if(v==="N")gwc[g.k].N++; });
+    if(belowBar(s)) below.push({name:p, breaches:barBreaches(s)}); else atAbove++;
+  });
+  return {q, total:people.length, rated, held, atAbove, below, cv, gwc};
+}
+// A simple segmented bar (green + / amber +/− / red −) with counts — the visual heart of the report.
+function cvrBar(counts){
+  const total=(counts["+"]||0)+(counts["+/-"]||0)+(counts["-"]||0);
+  if(!total) return `<div class="cvr-bar empty"><span class="cvr-none">no ratings yet</span></div>`;
+  const seg=(n,cls,lbl)=>n?`<div class="cvr-seg ${cls}" style="flex:${n}" title="${lbl}: ${n}"><span>${n}</span></div>`:"";
+  return `<div class="cvr-bar">${seg(counts["+"],"good","All the time")}${seg(counts["+/-"],"mid","Part of the time")}${seg(counts["-"],"bad","Never")}</div>`;
+}
+function cvrYNBar(c){
+  const total=(c.Y||0)+(c.N||0); if(!total) return `<div class="cvr-bar empty"><span class="cvr-none">no ratings yet</span></div>`;
+  const seg=(n,cls,lbl)=>n?`<div class="cvr-seg ${cls}" style="flex:${n}" title="${lbl}: ${n}"><span>${n}</span></div>`:"";
+  return `<div class="cvr-bar">${seg(c.Y,"good","Yes")}${seg(c.N,"bad","No")}</div>`;
+}
+function pct(n,d){ return d?Math.round(100*n/d):0; }
+
+/* ===== Company-wide Core Values report — where the whole company (or your branch) stands this quarter ===== */
+function renderPaReport(){
+  const wrap=$("#peopleWrap"), q=paQuarter||curQuarter();
+  const people=paReportPeople();
+  const scope=isEvalAdmin()?"the whole company":"your branch";
+  if(!people.length){
+    wrap.innerHTML=`<button class="btn ghost sm" id="rep-back">‹ Back to my people</button>
+      <div class="empty" style="margin-top:14px"><span class="emoji">📊</span>There's no one for a report yet — you don't oversee anyone on the Accountability Chart${isEvalAdmin()?", and no conversations are on record":""}.</div>`;
+    $("#rep-back").onclick=()=>{ paReport=false; renderPeople(); }; return;
+  }
+  const rep=coreValuesReport(q, people);
+  const quarters=paQuartersList();
+  const qSel=`<select id="rep-quarter" class="qc-qsel">${quarters.map(qq=>`<option value="${esc(qq)}" ${qq===q?"selected":""}>${esc(qLabel(qq))}</option>`).join("")}</select>`;
+  // Trend: % at/above the bar across the quarters we have, oldest→newest, so movement reads left to right.
+  const trend=quarters.slice().sort((a,b)=>String(a).localeCompare(String(b))).map(qq=>{ const rr=coreValuesReport(qq,people); return {q:qq, pct:pct(rr.atAbove,rr.rated), rated:rr.rated}; }).filter(x=>x.rated);
+
+  const cvRows=CORE_VALUES.map(c=>{ const cc=rep.cv[c.k]; const atAb=(cc["+"]||0)+(cc["+/-"]||0);
+    return `<div class="cvr-row"><div class="cvr-lbl">${esc(c.label)}${c.tagline?`<small>${esc(c.tagline)}</small>`:""}</div>
+      ${cvrBar(cc)}<div class="cvr-pct">${pct(atAb, (cc["+"]||0)+(cc["+/-"]||0)+(cc["-"]||0))}%</div></div>`; }).join("");
+  const gwcRows=GWC_KEYS.map(g=>{ const cc=rep.gwc[g.k]; return `<div class="cvr-row"><div class="cvr-lbl">${esc(g.label)}</div>
+      ${cvrYNBar(cc)}<div class="cvr-pct">${pct(cc.Y||0,(cc.Y||0)+(cc.N||0))}%</div></div>`; }).join("");
+
+  wrap.innerHTML=`
+    <button class="btn ghost sm" id="rep-back">‹ Back to my people</button>
+    <div class="pa-head" style="margin-top:8px"><div>
+      <h2 style="margin:6px 0 2px">Company Core Values</h2>
+      <div class="hint">Where ${esc(scope)} stands · ${esc(qLabel(q))}</div></div>
+      <div style="display:flex;gap:8px;align-items:center">${qSel}<button class="btn ghost sm" id="rep-print">⎙ Print / PDF</button></div></div>
+
+    <div class="cvr-tiles">
+      <div class="cvr-tile"><div class="cvr-n">${rep.held}<small> / ${rep.total}</small></div><div class="cvr-t">Conversations held</div></div>
+      <div class="cvr-tile"><div class="cvr-n">${pct(rep.atAbove,rep.rated)}<small>%</small></div><div class="cvr-t">At / above the bar</div><div class="cvr-sub">${rep.atAbove} of ${rep.rated} rated</div></div>
+      <div class="cvr-tile ${rep.below.length?"warn":""}"><div class="cvr-n">${rep.below.length}</div><div class="cvr-t">Below the bar</div></div>
+    </div>
+
+    <div class="sec-title" style="margin-top:20px">Core Values — how the ${rep.rated} rated ${rep.rated===1?"person is":"people are"} living each one</div>
+    <div class="hint" style="margin:0 2px 10px">Each bar: <span class="cvr-key good">+ all the time</span> · <span class="cvr-key mid">+/− part</span> · <span class="cvr-key bad">− never</span>. The % is at/above the bar on that value.</div>
+    <div class="cvr-list">${cvRows}</div>
+
+    <div class="sec-title" style="margin-top:20px">GWC — right person, right seat</div>
+    <div class="cvr-list">${gwcRows}</div>
+
+    <div class="sec-title" style="margin-top:20px">Below the bar <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">— ${rep.below.length} ${rep.below.length===1?"person":"people"}</small></div>
+    ${rep.below.length
+      ? `<div class="cvr-below">${rep.below.map(b=>`<div class="cvr-belowrow"><b>${esc(b.name)}</b><span>${b.breaches.map(x=>`<span class="pill red">${esc(x.label)}</span>`).join("")}</span></div>`).join("")}</div>`
+      : `<div class="aligned">✓ Everyone rated is at or above the bar this quarter.</div>`}
+
+    ${trend.length>1?`<div class="sec-title" style="margin-top:20px">Trend — % at/above the bar</div>
+      <div class="cvr-trend">${trend.map(t=>`<div class="cvr-tcol"><div class="cvr-tbar" style="height:${Math.max(4,t.pct)}%" title="${t.pct}% of ${t.rated}"></div><div class="cvr-tnum">${t.pct}%</div><div class="cvr-tq">${esc(qLabel(t.q))}</div></div>`).join("")}</div>`:""}
+    <div style="margin-bottom:30px"></div>`;
+
+  $("#rep-back").onclick=()=>{ paReport=false; renderPeople(); };
+  { const s=$("#rep-quarter"); if(s) s.onchange=()=>{ paQuarter=s.value; renderPaReport(); }; }
+  { const p=$("#rep-print"); if(p) p.onclick=()=>printPaReport(q, people, rep, scope); }
+}
+function printPaReport(q, people, rep, scope){
+  const doc=$("#printDoc"); if(!doc) return;
+  const cvRows=CORE_VALUES.map(c=>{ const cc=rep.cv[c.k]; const tot=(cc["+"]||0)+(cc["+/-"]||0)+(cc["-"]||0), atAb=(cc["+"]||0)+(cc["+/-"]||0);
+    return `<tr><td>${esc(c.label)}</td><td style="text-align:center">${cc["+"]||0}</td><td style="text-align:center">${cc["+/-"]||0}</td><td style="text-align:center">${cc["-"]||0}</td><td style="text-align:center"><b>${pct(atAb,tot)}%</b></td></tr>`; }).join("");
+  const gwcRows=GWC_KEYS.map(g=>{ const cc=rep.gwc[g.k]; return `<tr><td>${esc(g.label)}</td><td style="text-align:center">${cc.Y||0}</td><td style="text-align:center">${cc.N||0}</td><td style="text-align:center"><b>${pct(cc.Y||0,(cc.Y||0)+(cc.N||0))}%</b></td></tr>`; }).join("");
+  doc.innerHTML=`<div class="p-vto-head"><img class="p-vto-logo" src="${MARK_LIGHT}" alt="Warriors Heart">
+      <div><div class="p-vto-title">Core Values Report</div>
+        <div class="p-vto-sub">${esc(scope.charAt(0).toUpperCase()+scope.slice(1))} · ${esc(qLabel(q))} · ${rep.held}/${rep.total} conversations held · ${pct(rep.atAbove,rep.rated)}% at/above the bar</div></div></div>
+    <div class="min-print">
+      <h3>Core Values (count of ${rep.rated} rated)</h3>
+      <table class="p-tbl"><thead><tr><th>Value</th><th>+ All</th><th>+/− Part</th><th>− Never</th><th>At/above</th></tr></thead><tbody>${cvRows}</tbody></table>
+      <h3 style="margin-top:14px">GWC — right person, right seat</h3>
+      <table class="p-tbl"><thead><tr><th>Test</th><th>Yes</th><th>No</th><th>Pass</th></tr></thead><tbody>${gwcRows}</tbody></table>
+      <h3 style="margin-top:14px">Below the bar — ${rep.below.length}</h3>
+      ${rep.below.length?`<ul>${rep.below.map(b=>`<li><b>${esc(b.name)}</b> — ${b.breaches.map(x=>esc(x.label)).join(", ")}</li>`).join("")}</ul>`:`<p>Everyone rated is at or above the bar.</p>`}
+    </div>`;
+  let st=document.getElementById("repDynPage"); if(!st){ st=document.createElement("style"); st.id="repDynPage"; document.head.appendChild(st); }
+  st.textContent=`@media print{@page{size:portrait; margin:14mm}}`;
+  const cleanup=()=>{ const s=document.getElementById("repDynPage"); if(s) s.remove(); window.removeEventListener("afterprint",cleanup); };
+  window.addEventListener("afterprint",cleanup);
+  setTimeout(()=>{ window.print(); setTimeout(cleanup,1500); },40);
+}
 
 const rateBtns=(val,cb)=>RATE.map(r=>`<button class="rt ${val===r?"on r"+r.replace("/","")+"":""}" data-rate="${esc(r)}" title="${RATE_LABEL[r]}">${r}</button>`).join("");
 const ynBtns=v=>["Y","N"].map(x=>`<button class="rt ${v===x?"on "+(x==="Y"?"ry":"rn"):""}" data-yn="${x}">${x==="Y"?"Yes":"No"}</button>`).join("");
@@ -13223,23 +13393,35 @@ function renderPeople(){
     <button class="btn" style="margin-top:12px" onclick="void 0" id="pp-who">Set your name</button></div>`;
     const b=$("#pp-who"); if(b) b.onclick=()=>askWhoAmI(); return; }
   if(paPerson){ renderPAWorksheet(); return; }
-  const q=paQuarter||curQuarter();
+  if(paReport){ renderPaReport(); return; }
+  const q=paQuarter||curQuarter(), archived=(q!==curQuarter());
   const mine=paRec(me,q,false);
   const reports=directReportsOf(me);
+  const canReport=isEvalAdmin()||reports.length>0;
+
+  // ── toolbar: jump to any quarter (archived conversations are read-only) + open the company report
+  const quarters=paQuartersList();
+  let html=`<div class="pa-toolbar">
+      <label class="pa-qlabel">Quarter
+        <select id="pa-quarter" class="qc-qsel">${quarters.map(qq=>`<option value="${esc(qq)}" ${qq===q?"selected":""}>${esc(qLabel(qq))}${qq===curQuarter()?" · current":""}</option>`).join("")}</select>
+      </label>
+      ${canReport?`<button class="btn ghost sm" id="pa-report-btn">📊 Company report</button>`:""}
+    </div>
+    ${archived?`<div class="pa-archived">🗄 <b>${esc(qLabel(q))} — archived.</b> This is a read-only record of a past quarter. Switch to <b>${esc(qLabel(curQuarter()))} · current</b> to make changes.</div>`:""}`;
 
   // ── my own self-assessment (everyone has one; your supervisor's read stays hidden)
   const selfDone=rateDone(mine&&mine.self);
-  let html=`<div class="sec-title">Your Self-Assessment · ${qLabel(q)}</div>
+  html+=`<div class="sec-title">Your Self-Assessment · ${qLabel(q)}</div>
     <div class="hint" style="margin:0 2px 10px">This is not a performance review. It measures how you're living the Core Values and whether you Get it, Want it, and have Capacity for your seat. Your leader rates you separately — you'll compare notes together in the conversation.</div>
     <div class="card pa-self">
-      <div class="pa-selfhead"><div><b>${esc(me)}</b><div class="hint" style="margin:2px 0 0">${selfDone?"Submitted — you can still change it before your conversation":"Not started"}</div></div>
+      <div class="pa-selfhead"><div><b>${esc(me)}</b><div class="hint" style="margin:2px 0 0">${archived?"Archived record":(selfDone?"Submitted — you can still change it before your conversation":"Not started")}</div></div>
         <span class="pill ${selfDone?"green":"amber"}">${selfDone?"Ready":"Incomplete"}</span></div>
-      ${paGrid(mine?mine.self:blankRating(), "self")}
+      ${paGrid(mine?mine.self:blankRating(), "self", archived)}
     </div>`;
 
   // ── supervisor dashboard: every direct report's ratings + GWC at a glance
   if(reports.length){
-    const selfCount=reports.filter(p=>{ const rr=paRec(p,q,false); return rr&&rateDone(rr.self); }).length;
+    const selfCount=archived?0:reports.filter(p=>{ const rr=paRec(p,q,false); return rr&&rateDone(rr.self); }).length;
     html+=`<div class="sec-title" style="margin-top:22px;display:flex;align-items:center;justify-content:space-between;gap:10px">
         <span>Your Direct Reports · ${qLabel(q)}</span>
         ${selfCount?`<button class="btn ghost sm" id="pp-reset-self" style="text-transform:none;letter-spacing:0;font-weight:600">↺ Reset self-assessments</button>`:""}</div>
@@ -13273,7 +13455,12 @@ function renderPeople(){
 
   wrap.innerHTML=html;
 
-  // wire my self-assessment
+  // toolbar: quarter switch + company report
+  { const qs=$("#pa-quarter"); if(qs) qs.onchange=()=>{ paQuarter=(qs.value===curQuarter()?null:qs.value); renderPeople(); }; }
+  { const rb2=$("#pa-report-btn"); if(rb2) rb2.onclick=()=>{ paReport=true; renderPeople(); }; }
+
+  // wire my self-assessment — only for the CURRENT quarter; a past quarter is a read-only archive
+  if(!archived){
   wrap.querySelectorAll('.pa-grid[data-scope="self"] [data-cv]').forEach(cell=>{
     cell.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>{
       const r=paRec(me,q,true); r.self.v[cell.dataset.cv]=b.dataset.rate; r.self.at=todayIso(); r.self.by=myEmail(); savePaRec(r); renderPeople(); });
@@ -13282,8 +13469,9 @@ function renderPeople(){
     cell.querySelectorAll("[data-yn]").forEach(b=>b.onclick=()=>{
       const r=paRec(me,q,true); r.self[cell.dataset.gwc]=b.dataset.yn; r.self.at=todayIso(); r.self.by=myEmail(); savePaRec(r); renderPeople(); });
   });
+  }
   wrap.querySelectorAll("[data-open-pa]").forEach(b=>b.onclick=()=>{ paPerson=b.dataset.openPa; paQuarter=q; renderPeople(); });
-  { const rb=$("#pp-reset-self"); if(rb) rb.onclick=()=>{
+  { const rb=archived?null:$("#pp-reset-self"); if(rb) rb.onclick=()=>{
       const have=reports.filter(p=>{ const rr=paRec(p,q,false); return rr&&rateDone(rr.self); });
       if(!have.length){ alert(`None of your people have a self-assessment to reset for ${qLabel(q)}.`); return; }
       if(!confirm(`Reset the self-assessment for all ${have.length} of your ${have.length===1?"person":"people"} who submitted one this quarter (${qLabel(q)})?\n\nThis clears only what they entered about themselves, so they can start fresh. Your reads, final ratings and notes are untouched.`)) return;
@@ -13306,13 +13494,14 @@ function paHistoryHtml(person, excludeQuarter){
   if(!h.length) return `<div class="hint">No earlier conversations on record yet. From next quarter this becomes their track record.</div>`;
   return `<div class="pa-tablewrap"><table class="pa-table">
     <thead><tr><th class="pn">Quarter</th>${CORE_VALUES.map(c=>`<th title="${esc(c.label)}">${esc(c.abbr)}</th>`).join("")}
-      ${GWC_KEYS.map(g=>`<th title="${esc(g.label)}">${g.k.toUpperCase()}</th>`).join("")}<th>Status</th></tr></thead>
+      ${GWC_KEYS.map(g=>`<th title="${esc(g.label)}">${g.k.toUpperCase()}</th>`).join("")}<th>Status</th><th></th></tr></thead>
     <tbody>${h.map(x=>{
       const s=x.shown, low=belowBar(s);
       const cvs=CORE_VALUES.map(c=>{ const v=s.v[c.k]; return `<td class="rc ${v==="-"?"bad":v==="+/-"?"mid":"good"}">${v||"—"}</td>`; }).join("");
       const gs=GWC_KEYS.map(g=>{ const v=s[g.k]; return `<td class="rc ${v==="N"?"bad":"good"}">${v||"—"}</td>`; }).join("");
       return `<tr><td class="pn">${esc(qLabel(x.r.quarter))}${x.r.qc&&x.r.qc.held?`<span class="self-tick">held ${fmtShort(x.r.qc.held)}</span>`:""}</td>
-        ${cvs}${gs}<td>${low?'<span class="pill red">▲ Below bar</span>':'<span class="pill green">At/above</span>'}</td></tr>`;
+        ${cvs}${gs}<td>${low?'<span class="pill red">▲ Below bar</span>':'<span class="pill green">At/above</span>'}</td>
+        <td><button class="btn ghost sm" data-open-paq="${esc(x.r.quarter)}" title="Read the full ${esc(qLabel(x.r.quarter))} conversation">Open</button></td></tr>`;
     }).join("")}</tbody></table></div>`;
 }
 function paRow(person,q){
@@ -13357,8 +13546,16 @@ function renderPAWorksheet(){
     wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>You can only open the People Analyzer of someone in your branch — your reports and everyone below them.</div>`;
     paPerson=null; return;
   }
-  const r=paRec(person,q,true);
-  const canEdit=canRatePerson(person);     // the DIRECT leader (or HR) edits; higher-ups above them view only
+  const archived=(q!==curQuarter());       // a past quarter is a permanent read-only record — don't create or edit it
+  let r=paRec(person,q,archived?false:true);
+  if(!r){                                   // archived quarter with no conversation on file for this person
+    wrap.innerHTML=`<button class="btn ghost sm" id="pa-back">‹ Back</button>
+      <div class="pa-head" style="margin-top:8px"><div><h2 style="margin:8px 0 2px">${esc(person)}</h2>
+        <div class="hint">Quarterly Conversation · ${qLabel(q)}</div></div></div>
+      <div class="pa-archived" style="margin-top:12px">🗄 No conversation was recorded for ${esc(person)} in ${esc(qLabel(q))}.</div>`;
+    $("#pa-back").onclick=()=>{ paPerson=null; renderPeople(); }; return;
+  }
+  const canEdit=canRatePerson(person) && !archived;   // the DIRECT leader (or HR) edits the CURRENT quarter; past quarters are read-only for everyone
   const seeSelf=canSeeSelfAssessment(person);   // the raw self-rating is private to the person + DIRECT leader only
   const directMgr=managerOf(person);
   const mm=mismatches(r.self,r.sup);
@@ -13380,9 +13577,11 @@ function renderPAWorksheet(){
   wrap.innerHTML=`
     <button class="btn ghost sm" id="pa-back">‹ Back to my people</button>
     <div class="pa-head"><div><h2 style="margin:8px 0 2px">${esc(person)}</h2>
-      <div class="hint">Quarterly Conversation · ${qLabel(q)}</div></div>
+      <div class="hint">Quarterly Conversation · ${qLabel(q)}${(r.qc&&r.qc.held)?` · held ${fmtShort(r.qc.held)}`:""}</div></div>
       ${low?`<span class="pill red">▲ Below the bar</span>`:rateDone(r.sup)?`<span class="pill green">At/above bar</span>`:`<span class="pill amber">Not rated yet</span>`}</div>
-    ${!canEdit?`<div class="hint" style="margin:8px 2px 0;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)">👁 <b>Read-only.</b> ${esc(person)} is in your branch${directMgr?` — their direct leader is <b>${esc(directMgr)}</b>`:""}. You can see everything; only their direct leader${isEvalAdmin()?" (or HR)":""} changes the ratings, notes and status.</div>`:""}
+    ${archived
+      ? `<div class="pa-archived" style="margin:8px 2px 0">🗄 <b>${esc(qLabel(q))} — archived.</b> The full conversation is here to read. It's a locked record of a past quarter; switch to <b>${esc(qLabel(curQuarter()))}</b> on the people list to make changes.</div>`
+      : (!canEdit?`<div class="hint" style="margin:8px 2px 0;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)">👁 <b>Read-only.</b> ${esc(person)} is in your branch${directMgr?` — their direct leader is <b>${esc(directMgr)}</b>`:""}. You can see everything; only their direct leader${isEvalAdmin()?" (or HR)":""} changes the ratings, notes and status.</div>`:"")}
 
     <div class="sec-title" style="margin-top:16px">Track record</div>
     <div class="hint" style="margin:0 2px 8px">Where ${esc(person)} has landed in past quarters — look for movement, not one bad line.</div>
@@ -13451,6 +13650,8 @@ function renderPAWorksheet(){
 
   const back=()=>{ paPerson=null; renderPeople(); };
   $("#pa-back").onclick=back; $("#pa-back2").onclick=back;
+  // Open a PAST quarter's full conversation straight from the track record (read-only archive).
+  wrap.querySelectorAll("[data-open-paq]").forEach(b=>b.onclick=()=>{ paQuarter=b.dataset.openPaq; renderPAWorksheet(); });
   if(canEdit){   // only the direct leader (or HR) gets the interactive handlers; higher-ups view read-only
   wrap.querySelectorAll('.pa-grid[data-scope="sup"] [data-cv]').forEach(c=>c.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>{
     r.sup.v[c.dataset.cv]=b.dataset.rate; r.sup.at=todayIso(); r.sup.by=myEmail(); savePaRec(r); renderPAWorksheet(); }));
