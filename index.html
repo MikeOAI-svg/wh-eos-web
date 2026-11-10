@@ -5115,7 +5115,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=233;
+const BUILD=234;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5311,13 +5311,17 @@ function livePatchSharedText(team){
     const k=el.getAttribute("data-lock"); if(!k) return;
     if((nowT-(_fieldEditAt[k]||0)) < 2500) return;                       // I typed here a moment ago — my value wins until my own write echoes back
     let v, seg, person;
-    if(k.indexOf("by:")===0){ const rest=k.slice(3), si=rest.indexOf(":"); seg=rest.slice(0,si); person=rest.slice(si+1); v=((lm.byPerson||{})[seg]||{})[person]; }
+    if(k.indexOf("by:")===0){ const rest=k.slice(3), si=rest.indexOf(":"); seg=rest.slice(0,si); person=rest.slice(si+1);
+      const svt=((lm.byPersonAt||{})[seg]||{})[person]||0, lvt=((meeting.byPersonAt||{})[seg]||{})[person]||0;
+      if(lvt>=svt) return;                                               // my copy of this box is at least as new — don't let a stale stream revert it (LWW, no fragile time window)
+      v=((lm.byPerson||{})[seg]||{})[person]; }
     else if(k.indexOf("note:")===0){ const f=k.slice(5); v=(lm.notes||{})[f]; }
     else if(k.indexOf("ids:")===0){ const rest=k.slice(4), si=rest.indexOf(":"); const iid=rest.slice(0,si), f=rest.slice(si+1); const iss=(team.issues||[]).find(x=>x&&x.id===iid); v=iss&&iss.ids?iss.ids[f]:undefined; }
     else return;
     if(v===undefined) v="";
     if(el.value!==v){ el.value=v;                                        // stream it in
-      if(k.indexOf("by:")===0){ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[seg]=meeting.byPerson[seg]||{}; meeting.byPerson[seg][person]=v; }   // keep local model in sync so Next/save carries it
+      if(k.indexOf("by:")===0){ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[seg]=meeting.byPerson[seg]||{}; meeting.byPerson[seg][person]=v;   // keep local model in sync so Next/save carries it
+        const svt=((lm.byPersonAt||{})[seg]||{})[person]||0; meeting.byPersonAt=meeting.byPersonAt||{}; meeting.byPersonAt[seg]=meeting.byPersonAt[seg]||{}; meeting.byPersonAt[seg][person]=svt; }   // adopt their stamp so we don't re-win with the old value
       else if(k.indexOf("note:")===0){ meeting.notes=meeting.notes||{}; meeting.notes[k.slice(5)]=v; }
       // IDS text lives on the issue record; the full adopt updates TEAM().issues, so no extra local write needed here
     }
@@ -5401,24 +5405,26 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
       // ---- PER-FIELD note merge: write ONLY the boxes this client holds a live lock on, so a teammate
       // editing a different box at the same instant is never overwritten (that was the old same-box chaos). ----
       merged.notes=Object.assign({}, st.liveMeeting.notes||{});
-      merged.byPerson=JSON.parse(JSON.stringify(st.liveMeeting.byPerson||{}));
       Object.keys(loc.locks||{}).forEach(k=>{ const l=loc.locks[k]; if(!lockMine(l)||!lockActive(l)) return;
         if(k.indexOf("note:")===0){ const f=k.slice(5); if(loc.notes && (f in loc.notes)) merged.notes[f]=loc.notes[f]; }
-        else if(k.indexOf("by:")===0){ const rest=k.slice(3), si=rest.indexOf(":"); const seg=rest.slice(0,si), person=rest.slice(si+1);
-          const v=((loc.byPerson||{})[seg]||{})[person]; if(v!==undefined){ merged.byPerson[seg]=merged.byPerson[seg]||{}; merged.byPerson[seg][person]=v; } }
       });
+      // ---- WIFLS / per-person boxes = a LAST-WRITER-WINS register per (segment, person). Every box carries its
+      // own monotonic stamp (byPersonAt); the newer stamp wins, union of all boxes. THIS is the durable fix for
+      // "my WIFLS vanished / a teammate's words landed in my box": a stale save can no longer overwrite a box
+      // that holds a newer value, and correctness no longer rides on lock timing or the _touchedBy set surviving.
+      merged.byPerson={}; merged.byPersonAt={};
+      { const sBP=st.liveMeeting.byPerson||{}, sAt=st.liveMeeting.byPersonAt||{}, lBP=loc.byPerson||{}, lAt=loc.byPersonAt||{};
+        new Set(Object.keys(sBP).concat(Object.keys(lBP))).forEach(sg=>{ merged.byPerson[sg]={}; merged.byPersonAt[sg]={};
+          new Set(Object.keys(sBP[sg]||{}).concat(Object.keys(lBP[sg]||{}))).forEach(pn=>{
+            const svt=(sAt[sg]||{})[pn]||0, lvt=(lAt[sg]||{})[pn]||0;
+            if(lvt>svt){ merged.byPerson[sg][pn]=(lBP[sg]||{})[pn]; merged.byPersonAt[sg][pn]=lvt; }
+            else { const sv=(sBP[sg]||{})[pn]; if(sv!==undefined) merged.byPerson[sg][pn]=sv; merged.byPersonAt[sg][pn]=svt; } }); });
+      }
       // AI-drafted (lockless) note fields: write them too, unless someone else is actively holding that box.
       _progNotes.forEach(f=>{ const sl=(st.liveMeeting.locks||{})["note:"+f]; if(lockActive(sl)&&!lockMine(sl)) return;
         if(loc.notes && (f in loc.notes)) merged.notes[f]=loc.notes[f]; });
-      // WIFLS / per-person boxes this client TYPED in: persist them even after the box's lock has been released.
-      // Blur calls releaseLock (deletes the lock) and THEN saves, so a value typed in the last moment — or when
-      // the facilitator advances the segment quickly — never reached the server under the lock-only rule above;
-      // it lived only in this client's local model, which is what builds the concluded minutes. That is exactly
-      // "the WIFLS showed as deleted / not saved, but they were in the archived minutes." Write every box I
-      // touched, letting the server win only where someone ELSE is actively holding that box's lock right now.
-      _touchedBy.forEach(sp=>{ const ci=sp.indexOf(":"); if(ci<0) return; const bseg=sp.slice(0,ci), person=sp.slice(ci+1);
-        const sl=(st.liveMeeting.locks||{})["by:"+bseg+":"+person]; if(lockActive(sl)&&!lockMine(sl)) return;
-        const v=((loc.byPerson||{})[bseg]||{})[person]; if(v!==undefined){ merged.byPerson[bseg]=merged.byPerson[bseg]||{}; merged.byPerson[bseg][person]=v; } });
+      // (WIFLS boxes typed in the last moment before a lock released — the old "_touchedBy" rescue — are now
+      // covered by the byPersonAt stamp above: a box you touched carries a newer stamp, so it always persists.)
       // ratings: per-member, only the members this client actually entered
       merged.ratings=Object.assign({}, st.liveMeeting.ratings||{});
       _touchedRate.forEach(id=>{ if(loc.ratings && (id in loc.ratings)) merged.ratings[id]=loc.ratings[id]; });
@@ -5567,6 +5573,21 @@ function pickSolved(dst,src){ if(dst&&src&&(src.solvedAt||0)>(dst.solvedAt||0)){
 function reconcileSolved(next, prev){ if(!next||!prev) return;
   const pi={}; (prev.teams||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pi[x.id]=x; }));
   (next.teams||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pickSolved(x, pi[x.id]); })); }
+// ===== WIFLS / per-person boxes = last-writer-wins too (same rationale as solved) =====
+// Each box (meeting.byPerson[seg][person]) carries a monotonic stamp in meeting.byPersonAt[seg][person],
+// set on EVERY keystroke. The save-merge resolves boxes by newest stamp; livePatchSharedText only streams a
+// teammate's value in when THEIRS is newer than mine; and reconcileBy keeps a locally-newer box across a
+// wholesale remote rebuild. Together a stale write/snapshot can never wipe a WIFLS line you just typed.
+function stampBy(seg,person){ if(!meeting) return; meeting.byPersonAt=meeting.byPersonAt||{}; meeting.byPersonAt[seg]=meeting.byPersonAt[seg]||{};
+  meeting.byPersonAt[seg][person]=Math.max(Date.now(),(meeting.byPersonAt[seg][person]||0)+1); }
+function reconcileBy(next, prev){ if(!next||!prev) return;
+  const pm={}; (prev.teams||[]).forEach(t=>{ if(t&&t.id&&t.liveMeeting) pm[t.id]=t.liveMeeting; });
+  (next.teams||[]).forEach(t=>{ const nlm=t&&t.liveMeeting, plm=t&&pm[t.id]; if(!nlm||!plm) return;
+    const pBP=plm.byPerson||{}, pAt=plm.byPersonAt||{};
+    Object.keys(pBP).forEach(sg=>Object.keys(pBP[sg]||{}).forEach(pn=>{
+      const pvt=(pAt[sg]||{})[pn]||0, nvt=((nlm.byPersonAt||{})[sg]||{})[pn]||0;
+      if(pvt>nvt){ nlm.byPerson=nlm.byPerson||{}; (nlm.byPerson[sg]=nlm.byPerson[sg]||{})[pn]=pBP[sg][pn];
+        nlm.byPersonAt=nlm.byPersonAt||{}; (nlm.byPersonAt[sg]=nlm.byPersonAt[sg]||{})[pn]=pvt; } })); }); }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -5589,7 +5610,7 @@ function reMergeMeetingTodos(pend){
 function adoptRemote(state){
   const sc=$("main")?$("main").scrollTop:0;      // a teammate's edit must not yank you to the top
   const pend=pendingMeetingTodos();
-  const _next=migrate(state||blank()); reconcileSolved(_next, data);   // keep a locally-newer solve over a stale incoming snapshot
+  const _next=migrate(state||blank()); reconcileSolved(_next, data); reconcileBy(_next, data);   // keep a locally-newer solve / WIFLS box over a stale incoming snapshot
   data=_next; syncMeetingRef();
   if(reMergeMeetingTodos(pend)) saveL10(true);   // a To-Do you just added survived the refresh
   if(booted){ switchView(currentView); if($("main")) $("main").scrollTop=sc; }
@@ -5699,32 +5720,36 @@ function assembleMulti(){
 }
 function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shadowTeams={}; (data.teams||[]).forEach(t=>{ _shadowTeams[t.id]=JSON.stringify(t); }); }
 function adoptMulti(){
-  const merged=assembleMulti(), json=JSON.stringify(merged);
-  if(json===lastAdopted) return;                 // nothing changed since our last adopt
-  // FOLLOW-THE-FACILITATOR fast path: if the live meeting's segment (or the IDS issue being worked)
-  // just changed, jump this screen there IMMEDIATELY instead of waiting behind the "someone's typing"
-  // guard below — that guard is why followers sat on the old segment for seconds while their cursor was
-  // in a notes box. What they were typing is already saved (saveL10 fires on each input), so moving
-  // forward loses nothing. An open dialog (modal) is still never interrupted.
+  // CHEAP GUARD FIRST. During active typing / a click in progress / our own write still confirming we won't
+  // rebuild anyway — so don't assemble + stringify the WHOLE workspace on every incoming snapshot just to find
+  // that out. That full serialize, fired over and over during a busy check-in (everyone saving WIFLS at once),
+  // is what made typing stutter on phones. Detect a facilitator segment jump straight from the current team doc,
+  // stream teammates' text in, and coalesce ONE retry (scheduleAdoptMulti shares a single timer, so a burst of
+  // snapshots can't stack N full assemblies on top of each other).
+  // FOLLOW-THE-FACILITATOR fast path: if the live meeting's segment (or the IDS issue being worked) just
+  // changed, jump this screen there IMMEDIATELY rather than sitting behind the typing guard. What anyone was
+  // typing is already saved (saveL10 on each input), so moving forward loses nothing; an open modal is never cut.
   let _navJump=false;
   if(_multiBooted && currentView==="l10" && meeting){
     const _mdl=$("#modal"), _modalOpen=!!(_mdl&&_mdl.classList.contains("open"));
     if(!_modalOpen){
-      const mt=(merged.teams||[]).find(x=>x&&x.id===curTeamId), lm=mt&&mt.liveMeeting;
+      const lm=(_teamDocs[curTeamId]||{}).liveMeeting;   // read the current team doc directly — no full assemble
       if(!lm) _navJump=true;   // meeting ended elsewhere → leave the dead segment now
       else if((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null)) _navJump=true;
     }
   }
   if(_multiBooted && !_navJump && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
       || (_teamWriteInFlight>0 && (Date.now()-_teamWriteSince)<3000))){
-    if(currentView==="l10" && meeting){ const mt=(merged.teams||[]).find(x=>x&&x.id===curTeamId); livePatchSharedText(mt); }   // can't do a full rebuild yet (someone's typing) — but still STREAM teammates' shared text into their boxes so WIFLS/IDS show live
-    setTimeout(adoptMulti,400); return;   // never rebuild mid-edit, during a click in progress, around a just-committed click, nor while our own team write is still confirming (would revert it)
+    if(currentView==="l10" && meeting) livePatchSharedText(_teamDocs[curTeamId]);   // stream teammates' shared text into their boxes WITHOUT a rebuild or a full serialize
+    scheduleAdoptMulti(); return;   // ONE coalesced retry — never a stack of full-workspace assemblies while someone types
   }
+  const merged=assembleMulti(), json=JSON.stringify(merged);
+  if(json===lastAdopted) return;                 // nothing changed since our last adopt
   lastAdopted=json;
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
   const nextData=migrate(merged);
-  reconcileSolved(nextData, data);   // LWW: a locally-newer solve survives a stale incoming snapshot (so an echo / another team's write can't un-solve what you just clicked). Done before the compares below so they see the resolved state.
+  reconcileSolved(nextData, data); reconcileBy(nextData, data);   // LWW: a locally-newer solve / WIFLS box survives a stale incoming snapshot (echo or another team's write). Done before the compares below so they see the resolved state.
   // Our OWN write echoes back from the server as a fresh snapshot. If the incoming state is byte-identical to
   // what's already on screen, DON'T rebuild the view — a wholesale switchView here is exactly what made buttons
   // need a second click right after you acted. We still rebind data + refresh the merge baselines; we only skip
@@ -12149,7 +12174,7 @@ function renderSegContent(i){
       <div class="wr-list">${combinedRows||'<div class="hint">No one on this team yet.</div>'}</div>
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
       <div class="rate-avg" id="rateAvg">Average: —</div></div>`;
-    c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; _touchedBy.add("wifls_close:"+inp.dataset.wfc); touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
+    c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; stampBy("wifls_close",inp.dataset.wfc); _touchedBy.add("wifls_close:"+inp.dataset.wfc); touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
     c.querySelectorAll("[data-todo-owner]").forEach(inp=>inp.oninput=()=>{ const t=TEAM().todos.find(x=>x.id===inp.dataset.todoOwner); if(t){ t.owner=inp.value; saveL10(); } });
     c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); bumpNav(); saveL10(true); renderSegContent(i); });
     { const g=$("#cc-guest"), ga=$("#cc-guest-add");
@@ -12184,7 +12209,7 @@ function renderSegContent(i){
       <div class="wf-list">${rows}</div>
       <div class="wf-addguest"><input id="wf-guest" placeholder="＋ Add someone attending who isn't on the team…"><button class="btn ghost sm" id="wf-guest-add">Add attendee</button></div>
       <div class="wf-other"><label>Other notes</label><textarea id="seg-note" data-lock="note:${key}" placeholder="Anything not tied to one person…">${esc(meeting.notes[key]||"")}</textarea></div></div>`;
-    c.querySelectorAll(".wf-in").forEach(inp=>inp.oninput=()=>{ meeting.byPerson[key][inp.dataset.person]=inp.value; _touchedBy.add(key+":"+inp.dataset.person); touchLock("by:"+key+":"+inp.dataset.person); saveL10(); });
+    c.querySelectorAll(".wf-in").forEach(inp=>inp.oninput=()=>{ meeting.byPerson[key][inp.dataset.person]=inp.value; stampBy(key,inp.dataset.person); _touchedBy.add(key+":"+inp.dataset.person); touchLock("by:"+key+":"+inp.dataset.person); saveL10(); });
     c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); bumpNav(); saveL10(true); renderSegContent(i); });
     { const g=$("#wf-guest"), ga=$("#wf-guest-add");
       const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; bumpNav(); saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
