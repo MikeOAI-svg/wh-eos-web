@@ -5115,7 +5115,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=231;
+const BUILD=233;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5443,8 +5443,9 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
     st.issues=(st.issues||[]).map(x=>{ if(!x||!x.id) return x;
       const sv=serverIssues[x.id];
       const touched=_touchedIssues.has(x.id) || !!mineIds[x.id];
-      if(!touched) return sv!==undefined?sv:x;                               // untouched existing → server wins; brand-new → keep local
+      if(!touched){ if(sv===undefined) return x; pickSolved(sv, x); return sv; }   // untouched existing → server wins, but a locally-newer solve still carries (LWW); brand-new → keep local
       if(sv && sv.ids){ x.ids=x.ids||{}; const mine=mineIds[x.id]||{}; Object.keys(sv.ids).forEach(f=>{ if(!mine[f]) x.ids[f]=sv.ids[f]; }); }   // keep server's IDS text for fields I'm not editing
+      pickSolved(x, sv);                                                      // and if the SERVER's solve is newer than mine, honor it — the register converges either way
       return x;
     });
     if(_deletedIssues.size) st.issues=(st.issues||[]).filter(x=>!(x&&_deletedIssues.has(x.id)));
@@ -5542,7 +5543,8 @@ function isBusy(){
    so the old reference is stale and MUST be re-bound. */
 function syncMeetingRef(){ const t=TEAM(); let lm=(t&&t.liveMeeting)||null;
   if(lm && _justConcluded && (lm.startedAt||0)===_justConcluded.sa && (Date.now()-_justConcluded.at)<8000) lm=null;   // ignore a meeting we just ended, even if a stale snapshot still carries it
-  meeting=lm; if(meeting) startTick(); else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _touchedBy=new Set(); _fieldEditAt={}; } }
+  meeting=lm; if(meeting){ startTick(); setTimeout(maybeAutoEndStale,1500); }   // a meeting that synced in already past its cap (started & abandoned) gets ended right away, even if we're not on the L10 view
+  else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _touchedBy=new Set(); _fieldEditAt={}; } }
 // Stamp a navigation/action as newer than anything we've seen from the server, WITHOUT trusting the wall clock.
 // navAt gates whose change wins when two clients write the live meeting at once; it used to be a raw Date.now(),
 // so a teammate's device whose clock ran ahead made the facilitator's just-made nav/solve look "older," the gate
@@ -5550,6 +5552,21 @@ function syncMeetingRef(){ const t=TEAM(); let lm=(t&&t.liveMeeting)||null;
 // Monotonic from the last value we hold means our fresh action always beats the state we based it on, while a
 // genuinely newer nav from someone else (seen in the transaction's fresh read) still correctly wins.
 function bumpNav(){ if(meeting) meeting.navAt=Math.max(Date.now(), (meeting.navAt||0)+1); }
+// ===== SOLVED = a last-writer-wins register (CRDT) =====
+// An issue's solved state used to be a bare boolean whose correctness depended on ephemeral per-device
+// bookkeeping (_touchedIssues) and a timing window (_teamWriteInFlight). Any slip — your own write echoing
+// back as an older snapshot, or another team's write triggering an adopt that replaces `data` with a
+// snapshot taken a moment before your click — reverted the flag on screen, so "Mark Solved" needed a second
+// click. We now stamp solvedAt on EVERY flip (monotonic per device, like navAt) and resolve conflicts by the
+// newest stamp everywhere the flag can meet an older copy: the save-merge AND every remote adopt. A stale
+// write can no longer un-solve a newer solve — the decision carries its own time and the older one loses.
+function stampSolved(x,val){ if(!x) return; x.solved=!!val; x.solvedDate=val?todayIso():""; x.solvedAt=Math.max(Date.now(),(x.solvedAt||0)+1); }
+function pickSolved(dst,src){ if(dst&&src&&(src.solvedAt||0)>(dst.solvedAt||0)){ dst.solved=src.solved; dst.solvedDate=src.solvedDate; dst.solvedAt=src.solvedAt; } }   // src wins the solved register iff its stamp is newer
+// Carry a locally-newer solved decision across a wholesale remote adopt, so an echo / other-team snapshot that
+// predates the click can never flip an issue back to unsolved on screen. prev = the data currently on screen.
+function reconcileSolved(next, prev){ if(!next||!prev) return;
+  const pi={}; (prev.teams||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pi[x.id]=x; }));
+  (next.teams||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pickSolved(x, pi[x.id]); })); }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -5572,7 +5589,8 @@ function reMergeMeetingTodos(pend){
 function adoptRemote(state){
   const sc=$("main")?$("main").scrollTop:0;      // a teammate's edit must not yank you to the top
   const pend=pendingMeetingTodos();
-  data=migrate(state||blank()); syncMeetingRef();
+  const _next=migrate(state||blank()); reconcileSolved(_next, data);   // keep a locally-newer solve over a stale incoming snapshot
+  data=_next; syncMeetingRef();
   if(reMergeMeetingTodos(pend)) saveL10(true);   // a To-Do you just added survived the refresh
   if(booted){ switchView(currentView); if($("main")) $("main").scrollTop=sc; }
 }
@@ -5706,6 +5724,7 @@ function adoptMulti(){
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
   const nextData=migrate(merged);
+  reconcileSolved(nextData, data);   // LWW: a locally-newer solve survives a stale incoming snapshot (so an echo / another team's write can't un-solve what you just clicked). Done before the compares below so they see the resolved state.
   // Our OWN write echoes back from the server as a fresh snapshot. If the incoming state is byte-identical to
   // what's already on screen, DON'T rebuild the view — a wholesale switchView here is exactly what made buttons
   // need a second click right after you acted. We still rebind data + refresh the merge baselines; we only skip
@@ -5718,9 +5737,17 @@ function adoptMulti(){
   const singleTeamView=(currentView==="l10"||currentView==="scorecard"||currentView==="lists"||(currentView==="rocks"&&rocksMode==="team"));
   const viewUnaffected = _multiBooted && singleTeamView && !sameAsScreen
      && _teamSlice(nextData)===_teamSlice(data) && JSON.stringify(companyOf(nextData))===JSON.stringify(companyOf(data));
+  // COMPANY-ONLY BLINK GUARD (mirror of the above): these views render purely from the company doc (chart,
+  // people, V/TO, hire dates, evalDone) and have their OWN sync channel where they need one (evals uses the
+  // per-supervisor eval doc listener). They read NOTHING from any team slice, so a team-doc write — e.g. every
+  // few seconds during any other team's live L10 — can't change what they show. Without this, sitting on the
+  // Evaluations tab rebuilt the whole screen on every unrelated team write ("glitches every few seconds").
+  const companyOnlyView=(currentView==="evals"||currentView==="vision"||currentView==="proven"||currentView==="tools"||currentView==="admin"||currentView==="setup"||currentView==="guide");
+  const companyUnaffected = _multiBooted && companyOnlyView && !sameAsScreen
+     && JSON.stringify(companyOf(nextData))===JSON.stringify(companyOf(data));
   data=nextData; syncMeetingRef(); refreshShadows(); _baseAt=Object.assign({},_teamAt); _baseCompany=_companyAt;   // local data now reflects the received team + company versions
   const recovered = reMergeMeetingTodos(pend); if(recovered) saveL10(true);   // a To-Do you just added survived the per-team refresh
-  if(_multiBooted && (!sameAsScreen || recovered) && !(viewUnaffected && !recovered)){
+  if(_multiBooted && (!sameAsScreen || recovered) && !((viewUnaffected||companyUnaffected) && !recovered)){
     // Preserve the caret: if the cursor is in a note/IDS box, put it back after the rebuild so a teammate's
     // edit elsewhere never yanks you out of what you're typing.
     const act=document.activeElement, fk=(act&&act.getAttribute)?act.getAttribute("data-lock"):null;
@@ -11360,9 +11387,9 @@ function renderLists(){
       if(listMode==="issues"){
         if(act==="notes"){ if(expandedIssueNotes.has(id)) expandedIssueNotes.delete(id); else expandedIssueNotes.add(id); renderLists(); return; }   // anyone can open notes to read
         const it=TEAM().issues.find(x=>x.id===id); if(!canEd || !it) return;   // issue changes = team editors
-        if(act==="toggle"){ it.solved=!it.solved; const s=it.solved; _touchedIssues.add(id); mergeTeam(tid, t=>{ const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=s; }); }
+        if(act==="toggle"){ stampSolved(it, !it.solved); _touchedIssues.add(id); const sd=it.solvedDate, sa=it.solvedAt, s=it.solved; mergeTeam(tid, t=>{ const x=(t.issues||[]).find(y=>y&&y.id===id); if(x){ x.solved=s; x.solvedDate=sd; x.solvedAt=sa; } }); }
         if(act==="del"){ if(!confirm(`Delete this issue?\n\n"${(it&&it.text)||""}"`)) return; TEAM().issues=TEAM().issues.filter(x=>x.id!==id); _deletedIssues.add(id); mergeTeam(tid, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); }
-        if(act==="drop"){ const nt={id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); it.solved=true; _touchedIssues.add(id); _touchedTodos.add(nt.id); mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[nt]); const x=(t.issues||[]).find(y=>y&&y.id===id); if(x) x.solved=true; }); }
+        if(act==="drop"){ const nt={id:uid(),text:it.text,owner:it.owner||"",due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; TEAM().todos.unshift(nt); stampSolved(it,true); _touchedIssues.add(id); _touchedTodos.add(nt.id); const sd=it.solvedDate, sa=it.solvedAt; mergeTeam(tid, t=>{ t.todos=upsertById(t.todos,[nt]); const x=(t.issues||[]).find(y=>y&&y.id===id); if(x){ x.solved=true; x.solvedDate=sd; x.solvedAt=sa; } }); }
       }else{
         const it=TEAM().todos.find(x=>x.id===id); if(!it) return;
         if(act==="toggle"){ if(!canEd && !canEditOwn(it.owner)) return; it.done=!it.done; it.doneAt=it.done?new Date().toISOString():""; const d=it.done, da=it.doneAt; _touchedTodos.add(id); mergeTeam(tid, t=>{ const x=(t.todos||[]).find(y=>y&&y.id===id); if(x){ x.done=d; x.doneAt=da; } }); }   // tick your own — stamp doneAt so the L10's "recently done" review still shows it as ✓ Done
@@ -12066,7 +12093,7 @@ function renderSegContent(i){
       $("#ids-back").onclick=back; $("#ids-keep").onclick=back;
       { const bs=$("#ids-solved"); if(bs) bs.onclick=()=>{
         const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;   // re-fetch LIVE at click time — a rebuild must not make this act on a stale, detached issue
-        a.solved=true; a.solvedDate=todayIso(); _touchedIssues.add(a.id);   // claim it so a teammate's stale save can't un-solve it
+        stampSolved(a,true); _touchedIssues.add(a.id);   // LWW stamp + claim it so a teammate's stale save can't un-solve it
         // Snapshot the worksheet into this meeting's minutes. UPSERT by issue id so re-solving a revisited
         // issue doesn't list it twice, and keep the raiser (owner) so the archived minutes show "raised by".
         const snap={issueId:a.id, text:a.text, owner:a.owner||"", ids:Object.assign({},a.ids||{})};
@@ -12077,7 +12104,7 @@ function renderSegContent(i){
       }; }
       { const br=$("#ids-reopen"); if(br) br.onclick=()=>{   // put a solved issue back on the open list (still worked on)
         const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;
-        a.solved=false; a.solvedDate=""; _touchedIssues.add(a.id);   // claim it for the reopen too
+        stampSolved(a,false); _touchedIssues.add(a.id);   // LWW stamp + claim it for the reopen too
         meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===a.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
         bumpNav(); saveL10(true); renderSegContent(i);
       }; }
@@ -12396,6 +12423,56 @@ function commitSegTime(){ if(!meeting||!meeting.segStart) return; const add=(Dat
 // snapshot; guard so we never produce NaN.
 function segLiveSecs(){ if(!meeting) return 0; const base=meeting.segElapsed||0; const s=meeting.segStart; return s?base+(Date.now()-s)/1000:base; }
 function totalLiveSecs(){ if(!meeting) return 0; const base=meeting.totalElapsed||0; const s=meeting.segStart; return s?base+(Date.now()-s)/1000:base; }
+// Recorded meeting length, HARD-CLAMPED to the meeting's own cap (+a few minutes of slack). A meeting
+// physically cannot run past capMin+grace — past that the watchdog ends it — so an accrued value bigger
+// than that can ONLY come from a meeting that sat abandoned (segElapsed = wall-clock since segStart grew
+// for days). Clamping here means filed minutes never show an absurd duration (the 9384-minute bug), even
+// if the watchdog was late. capMin already grows with each "+15 minutes", so legitimate long L10s are fine.
+function meetingDurationMin(){ if(!meeting) return 1; const cap=(meeting.capMin||L10_CAP_MIN)+10;
+  return Math.max(1, Math.min(cap, Math.round(((meeting.totalElapsed||0)+(meeting.segElapsed||0))/60))); }
+// Does this live meeting hold anything worth keeping? An accidental start that was abandoned with nothing
+// in it should just vanish, not file empty minutes. (Past segment 0, or any note/WIFLS/rating/solved
+// issue/created to-do = real content.)
+function meetingHasContent(){ if(!meeting) return false;
+  if((meeting.seg||0)>0) return true;
+  const anyText=o=>o&&Object.keys(o).some(k=>String(o[k]||"").trim());
+  if(anyText(meeting.notes)||anyText(meeting.ratings)) return true;
+  if(meeting.byPerson&&Object.keys(meeting.byPerson).some(sg=>anyText(meeting.byPerson[sg]))) return true;
+  if((meeting.solvedIssues||[]).length||(meeting.createdTodos||[]).length) return true;
+  return false; }
+// Clear an abandoned EMPTY meeting for everyone without filing a minutes record (same surgical merge as
+// concludeMeeting, minus the record). Used only when meetingHasContent() is false.
+function discardLiveMeeting(){ if(!meeting||meeting._concluding) return;
+  meeting._concluding=true;
+  _justConcluded={sa:(meeting.startedAt||0), at:Date.now()};   // a stale snapshot can't flicker it back onto our screen
+  clearTimeout(_l10Timer); _l10Timer=null;
+  const t=TEAM(); if(t) t.liveMeeting=null; const _tid=t&&t.id;
+  const applyClear=(st)=>{ if(st) st.liveMeeting=null; };
+  if(_tid){ if(MULTI) mergeTeamMulti(_tid, applyClear); else mergeSave(state=>{ applyClear((state.teams||[]).find(x=>x&&x.id===_tid)); }); }
+  stopTick(); meeting=null;
+  const cb=$("#l10CapBar"); if(cb) cb.remove();
+  if(currentView==="l10") renderL10();
+  setSync("An L10 was started and left empty — cleared.");
+}
+/* ===== THE WATCHDOG — ends an abandoned L10 even when NO ONE is looking at it =====
+   The old auto-end (checkMeetingCap) only fired while the L10 view was on screen, so a meeting someone
+   started and walked away from ran forever (that's the 9384-minute bug). This runs app-wide — on a timer
+   and the instant a stale meeting syncs in — so any team editor's open app concludes an over-cap L10,
+   files its minutes (or discards it if empty), and ends it for everyone. Followers never write it; the
+   deterministic record id + _concluding guard mean two editors firing at once still file exactly one. */
+function maybeAutoEndStale(){
+  if(!meeting||meeting._concluding) return;
+  if(!canEditTeam()) return;                 // only a team editor ends/writes it
+  if(!meeting.startedAt) return;             // unknown start time → let the on-screen backfill handle it
+  const capSecs=(meeting.capMin||L10_CAP_MIN)*60;
+  const age=(Date.now()-meeting.startedAt)/1000;
+  if(age < capSecs+L10_GRACE_SECS) return;   // still inside its (possibly extended) window
+  endStaleMeeting();
+}
+// One decision for every auto-end path (the watchdog AND the on-screen cap check): a meeting with real
+// work files its minutes; an empty accidental start just clears. Keeps "forgot to stop" and "started by
+// accident" from ever leaving junk minutes behind.
+function endStaleMeeting(){ if(!meeting||meeting._concluding) return; if(meetingHasContent()) concludeMeeting(true); else discardLiveMeeting(); }
 function paintTimer(){
   if(!meeting) return; checkMeetingCap(); if(!meeting) return;   // checkMeetingCap may auto-conclude at the cap, nulling `meeting` — re-check before using it
   const hero=$(".l10-hero"); if(!hero) return;
@@ -12424,7 +12501,7 @@ function checkMeetingCap(){
   if(age >= capSecs+L10_GRACE_SECS){                     // window elapsed with no extension → end it
     if(bar) bar.remove();
     const veryStale = age >= capSecs+L10_GRACE_SECS+45;  // facilitator ends it first; another editor cleans up a stale one
-    if(isFacilitator() || (veryStale && canEditTeam())) concludeMeeting(true);
+    if(isFacilitator() || (veryStale && canEditTeam())) endStaleMeeting();   // files minutes if there's work, discards an empty accidental start
     return;
   }
   // Inside the [cap, cap+grace) window: show the "more time?" prompt with a live countdown.
@@ -12448,8 +12525,11 @@ function checkMeetingCap(){
 }
 function startTick(){ stopTick(); paintTimer(); tick=setInterval(paintTimer,1000); }
 function stopTick(){ if(tick){ clearInterval(tick); tick=null; } }
-// keep totalElapsed roughly current
-setInterval(()=>{ if(meeting){ /* no-op; total computed live */ } },1000);
+// WATCHDOG, app-wide: every 30s, whatever view we're on, end an L10 that's blown past its cap. This is the
+// net that catches "someone started it and forgot to stop it" — the per-second screen timer only runs while
+// the L10 view is open, so it could never end an abandoned meeting on its own. isBusy() defers it while
+// someone is actively typing (a meeting in active use isn't abandoned), so we never yank a live screen.
+setInterval(()=>{ if(booted && meeting && !isBusy()) maybeAutoEndStale(); },30000);
 // Build the minutes record from the CURRENT live meeting (pure snapshot, no side effects). Shared by the
 // normal conclude and by Cancel-saves-a-draft, so a canceled/accidentally-ended meeting keeps everything.
 // opts.draft=true marks it finalized:false so it files as an editable DRAFT.
@@ -12458,7 +12538,7 @@ function buildMeetingRec(opts){
   const members=meetingRoster().length?meetingRoster():[{id:"me",name:"Me"}];   // includes meeting guests
   const vals=members.map(m=>parseFloat(meeting.ratings[m.id])).filter(v=>!isNaN(v));
   const avg=vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):0;
-  const durationMin=Math.max(1,Math.round((meeting.totalElapsed+meeting.segElapsed)/60));
+  const durationMin=meetingDurationMin();
   const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
   const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(TEAM());
   const reviewedTodos=TEAM().todos
@@ -12516,7 +12596,7 @@ function concludeMeeting(auto){
   const members=meetingRoster().length?meetingRoster():[{id:"me",name:"Me"}];   // includes any meeting guests, so their rating counts
   const vals=members.map(m=>parseFloat(meeting.ratings[m.id])).filter(v=>!isNaN(v));
   const avg=vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):0;
-  const durationMin=Math.max(1,Math.round((meeting.totalElapsed+meeting.segElapsed)/60));
+  const durationMin=meetingDurationMin();
   const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
   // Snapshot last week's reviewed TDL (done + not done, excluding ones created this meeting) so the
   // minutes report what got completed vs. carried over.
