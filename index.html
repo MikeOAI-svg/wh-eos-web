@@ -5282,7 +5282,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=235;
+const BUILD=236;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5354,7 +5354,9 @@ function save(immediate){
 // On tab-hide / close, flush a pending edit — but THROUGH the guarded writeNow, never a blind
 // overwrite. If a teammate update is still un-merged, writeNow refuses rather than clobber it.
 function flushPendingWrite(){
-  if(!wsRef || !saveTimer) return;
+  if(!wsRef) return;
+  flushL10Pending();                                  // force out any queued WIFLS/notes/issue edit (its own debounce)
+  if(!saveTimer) return;
   clearTimeout(saveTimer); saveTimer=null;
   try{ writeNow(); }catch(e){}
 }
@@ -5457,7 +5459,7 @@ function mergeSave(applyState){   // apply a change to the freshly-read SERVER s
     tx.set(wsRef,{ state:state, updatedAt:Date.now(), updatedBy:email });
   })).then(()=>setSync("Saved")).catch(e=>{ console.error("mergeSave tx failed — falling back",e); save(); });
 }
-let _l10Timer=null;
+let _l10Timer=null, _l10PendingFire=null;
 // key -> last time THIS client typed in that box (WIFLS/notes/IDS). Lets the live-text patch stream a
 // teammate's typing into their box without a full rebuild, while NEVER reverting a box you just touched.
 let _fieldEditAt={};
@@ -5623,11 +5625,14 @@ function saveL10(immediate, ending){   // persist the current meeting (team L10 
     });
     if(_deletedIssues.size) st.issues=(st.issues||[]).filter(x=>!(x&&_deletedIssues.has(x.id)));
   };
-  const fire=()=> MULTI ? mergeTeamMulti(teamId, apply)
-                        : mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) apply(st); });
+  const fire=()=>{ _l10PendingFire=null; return MULTI ? mergeTeamMulti(teamId, apply)
+                        : mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===teamId); if(st) apply(st); }); };
   clearTimeout(_l10Timer);
-  if(immediate) fire(); else _l10Timer=setTimeout(fire, 650);
+  if(immediate){ fire(); } else { _l10PendingFire=fire; _l10Timer=setTimeout(fire, 650); }   // remember the pending write so a tab-close flush can force it out (no lost WIFLS/issue edits)
 }
+// Force any queued live-meeting (WIFLS/notes/issue) write out NOW — used by the tab-hide/close flush so an
+// edit made inside the 650ms debounce window isn't lost when the app is backgrounded or closed.
+function flushL10Pending(){ if(_l10PendingFire){ clearTimeout(_l10Timer); _l10Timer=null; const f=_l10PendingFire; _l10PendingFire=null; try{ f(); }catch(e){} } }
 // Add a To-Do created DURING the L10. Persists the to-do AND its meeting link SURGICALLY onto the latest
 // server team doc (mergeTeam + upsertById) — so a teammate's sync landing in the split second after you click
 // Add can never drop it. (The old path leaned on saveL10's role-merge, where a non-scribe's createdTodos link
@@ -5716,7 +5721,7 @@ function isBusy(){
    so the old reference is stale and MUST be re-bound. */
 function syncMeetingRef(){ const t=mtgTeam(); let lm=(t&&t.liveMeeting)||null;
   if(lm && _justConcluded && (lm.startedAt||0)===_justConcluded.sa && (Date.now()-_justConcluded.at)<8000) lm=null;   // ignore a meeting we just ended, even if a stale snapshot still carries it
-  meeting=lm; if(meeting){ startTick(); setTimeout(maybeAutoEndStale,1500); }   // a meeting that synced in already past its cap (started & abandoned) gets ended right away, even if we're not on the L10 view
+  meeting=lm; if(meeting){ if(meeting.phase!=="open"){ startTick(); setTimeout(maybeAutoEndStale,1500); } else { stopTick(); } }   // a LIVE meeting past its cap gets ended; a huddle PREP board has no clock/cap and must never auto-end or backfill a start time
   else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _touchedBy=new Set(); _fieldEditAt={}; } }
 // Stamp a navigation/action as newer than anything we've seen from the server, WITHOUT trusting the wall clock.
 // navAt gates whose change wins when two clients write the live meeting at once; it used to be a raw Date.now(),
@@ -12236,18 +12241,19 @@ function renderMeetingRunner(wrap){
           <button class="btn ghost sm" id="nextSeg" ${meeting.seg>=last?"disabled style=opacity:.4":""}>›</button>
         </div>
         ${canStart?`<button class="btn wide" id="startHuddleBtn" style="margin-top:12px">▶ Start Huddle</button>`:`<div class="hint" style="margin-top:10px">Add your items above — a huddle leader will start it.</div>`}
+        <div class="prep-saved" style="margin-top:10px;font-size:12px;color:var(--muted)">✓ Saved automatically — you can leave and come back anytime; your items stay.</div>
       </div>
       ${scribeBar}
       <div id="segContent"></div>
       <div class="agenda">${agenda}</div>
-      ${canStart?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px">Discard this prep board</button>`:""}`;
+      ${canStart?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px;opacity:.75">🗑 Delete this prep board (clears everyone's items)</button>`:""}`;
     renderSegContent(meeting.seg);
     const goTo=j=>{ if(j<0||j>last) return; meeting.seg=j; bumpNav(); saveL10(true); renderActiveMeeting(); };
     { const p=wrap.querySelector("#prevSeg"); if(p) p.onclick=()=>goTo(meeting.seg-1); }
     { const n=wrap.querySelector("#nextSeg"); if(n) n.onclick=()=>goTo(meeting.seg+1); }
     wrap.querySelectorAll(".ag-item").forEach(a=>a.onclick=()=>goTo(+a.dataset.seg));
     { const s=wrap.querySelector("#startHuddleBtn"); if(s) s.onclick=startHuddle; }
-    { const c=wrap.querySelector("#cancelMeeting"); if(c) c.onclick=()=>{ if(confirm("Discard this prep board? The items people added here won't be saved to minutes.")) discardMeeting(); }; }
+    { const c=wrap.querySelector("#cancelMeeting"); if(c) c.onclick=()=>{ if(confirm("Delete this prep board?\n\nThe WIFLS and headlines added here are cleared for everyone (issues already on the list stay). You don't need to do this just to leave — the board auto-saves, so you can close it and come back anytime.\n\nDelete anyway?")) discardMeeting(); }; }
     return;
   }
   const elapsed=Math.floor(segLiveSecs());          // live time, so a re-render doesn't snap the clock back
@@ -12810,7 +12816,8 @@ function discardLiveMeeting(){ if(!meeting||meeting._concluding) return;
    deterministic record id + _concluding guard mean two editors firing at once still file exactly one. */
 function maybeAutoEndStale(){
   if(!meeting||meeting._concluding) return;
-  if(!canEditTeam()) return;                 // only a team editor ends/writes it
+  if(meeting.phase==="open") return;         // a huddle prep board never auto-ends — there's no started clock
+  if(!canRunMeeting()) return;               // only an editor of THIS meeting (team L10 or huddle) ends/writes it
   if(!meeting.startedAt) return;             // unknown start time → let the on-screen backfill handle it
   const capSecs=(meeting.capMin||L10_CAP_MIN)*60;
   const age=(Date.now()-meeting.startedAt)/1000;
@@ -12822,9 +12829,10 @@ function maybeAutoEndStale(){
 // accident" from ever leaving junk minutes behind.
 function endStaleMeeting(){ if(!meeting||meeting._concluding) return; if(meetingHasContent()) concludeMeeting(true); else discardLiveMeeting(); }
 function paintTimer(){
-  if(!meeting) return; checkMeetingCap(); if(!meeting) return;   // checkMeetingCap may auto-conclude at the cap, nulling `meeting` — re-check before using it
+  if(!meeting || meeting.phase==="open") return;   // prep board has no running clock
+  checkMeetingCap(); if(!meeting) return;   // checkMeetingCap may auto-conclude at the cap, nulling `meeting` — re-check before using it
   const hero=$(".l10-hero"); if(!hero) return;
-  const seg=SEGMENTS[meeting.seg]; const elapsed=Math.floor(segLiveSecs()); const allot=seg.min*60;
+  const seg=curSegs()[meeting.seg]; if(!seg) return; const elapsed=Math.floor(segLiveSecs()); const allot=seg.min*60;
   const big=hero.querySelector(".big"); if(big) big.textContent=String(Math.floor(elapsed/60)).padStart(2,"0")+":"+String(elapsed%60).padStart(2,"0");
   hero.classList.toggle("over",elapsed>allot);
   const alloc=hero.querySelector(".alloc");
@@ -12840,8 +12848,8 @@ const L10_CAP_MIN=90;               // default meeting length; "＋15 minutes" b
 const HUDDLE_CAP_MIN=40;            // a huddle is shorter than an L10
 const L10_GRACE_SECS=5*60;          // once over the cap, this long to add time before it auto-concludes
 function checkMeetingCap(){
-  if(!meeting) return;
-  const wrap=$("#l10Wrap"); if(!wrap){ return; }         // only act while the L10 view is actually on screen
+  if(!meeting || meeting.phase==="open") return;         // a huddle PREP board has no timer/cap and must never backfill a start time
+  const wrap=$(currentView==="huddle"?"#huddleWrap":"#l10Wrap"); if(!wrap){ return; }         // only act while the meeting view is actually on screen
   if(!meeting.startedAt){ meeting.startedAt=Date.now()-Math.round(totalLiveSecs()*1000); if(isFacilitator()) saveL10(true); }  // backfill meetings started before this build
   const capMin=meeting.capMin||L10_CAP_MIN, capSecs=capMin*60;
   const age=(Date.now()-meeting.startedAt)/1000;
