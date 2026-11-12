@@ -614,6 +614,9 @@
   /* ---------- L10 MEETING ---------- */
   .l10-hero{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:20px;text-align:center;
     box-shadow:var(--shadow);margin-bottom:14px}
+  .l10-hero.prep{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),var(--card) 60%)}
+  .prep-tag{display:inline-block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);
+    background:var(--accent-soft);border:1px solid var(--accent);border-radius:20px;padding:4px 11px;margin-bottom:8px}
   .l10-brand{height:44px;width:auto;margin:0 auto 12px;display:block;filter:drop-shadow(0 4px 12px rgba(216,94,22,.2))}
   .l10-hero .big{font-size:42px;font-weight:560;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.04em}
   .l10-hero .seg-name{font-size:18px;font-weight:800;margin-top:4px}
@@ -1966,6 +1969,16 @@
       <div id="l10Wrap"></div>
     </section>
 
+    <!-- ============ HUDDLE ============ -->
+    <section class="view" id="view-huddle">
+      <div class="subtabs">
+        <button class="active" data-huddle="run">Huddle</button>
+        <button data-huddle="archive">Archive · Minutes</button>
+      </div>
+      <div id="huddlePresence" class="l10-presence hide"></div>
+      <div id="huddleWrap"></div>
+    </section>
+
     <!-- ============ LISTS ============ -->
     <section class="view" id="view-lists">
       <div class="subtabs">
@@ -2058,6 +2071,7 @@
     <button data-view="rocks"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 1.8v4.2M12 18v4.2M1.8 12h4.2M18 12h4.2"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg></span>Rocks</button>
     <button data-view="scorecard"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5h17"/><path d="M7 20.5v-5.2M12 20.5v-9.4M17 20.5v-13.6"/></svg></span>Scorecard</button>
     <button data-view="l10"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.6" r="7.9"/><path d="M12 9.4v4.2l2.6 2"/><path d="M9.2 2.2h5.6M12 2.2v3.5"/><path d="M18.8 6.4l1.6-1.6"/></svg></span>L10</button>
+    <button data-view="huddle" id="navHuddle" style="display:none"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 15.5a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/><path d="M15.5 13.5a3.3 3.3 0 1 0 0-6.6"/><path d="M1.8 21c0-2.9 2.6-5 5.7-5s5.7 2.1 5.7 5"/><path d="M16 16.4c2.7.2 4.7 2.1 4.7 4.6"/></svg></span>Huddle</button>
     <button data-view="sales" id="navSales" style="display:none"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2.2"/><path d="M3.2 9h17.6M3.2 14.6h17.6M9 3.2v17.6"/></svg></span>Sales Card</button>
     <button data-view="planning" id="navPlanning" style="display:none"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="4.6" width="17.6" height="16" rx="2.2"/><path d="M3.2 9.2h17.6M8 2.4v4M16 2.4v4"/><path d="M7.4 13.2l1.6 1.6 3-3.2"/></svg></span>Planning</button>
     <button data-view="lists"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 7.4l1.9 1.9 3.3-3.6"/><path d="M3.2 16.4l1.9 1.9 3.3-3.6"/><path d="M12 7.2h8.8M12 16.2h8.8"/></svg></span>Lists</button>
@@ -4982,7 +4996,42 @@ function migrate(d){
     if("name" in s) delete s.name;
   });
   ensureFunctions(d.accountability);
+  // ===== Huddle groups =====
+  // Lightweight CROSS-TEAM meeting rosters (e.g. "Medical Providers") that are NOT EOS teams: they carry
+  // no scorecard/rocks/accountability seat and never appear in a roll-up. They ride the same synced
+  // collection as teams (tagged kind:"huddle") so they inherit all the live-meeting merge/anti-flicker
+  // work, and assembleMulti() splits them out of data.teams into data.huddles so every operational team
+  // enumeration excludes them automatically. Their live meeting runs the same engine on a shorter agenda.
+  if(!Array.isArray(d.huddles)) d.huddles=[];
+  d.huddles.forEach(migrateHuddle);
   return d;
+}
+// A huddle group doc. Members are a plain hand-picked list of names (cross-team), like a team's custom
+// members — so teamMembers()/teamRoster() return them with no chart involvement (no seatId → not chart-driven).
+function newHuddle(name, creatorName){
+  return { id:uid(), kind:"huddle", name:name||"New Huddle", createdBy:creatorName||"", createdAt:Date.now(),
+    week1Start:firstMondayOfQuarter(), leader:"", parent:"", seatId:"", facility:"",
+    members:[], departments:[], measurables:[], rocks:[], nextRocks:[], issues:[], headlines:[], todos:[],
+    meetings:[], planning:[], scorecardArchive:[], rockArchive:[], minutesCc:[], editors:[], autoIssued:{},
+    liveMeeting:null };
+}
+function migrateHuddle(h){
+  if(!h) return h;
+  h.kind="huddle";                      // always, even if an older write dropped it
+  if(!h.id) h.id=uid();
+  if(!h.name) h.name="Huddle";
+  h.seatId=""; h.seatIds=undefined; delete h.seatIds;   // a huddle is NEVER chart-driven or custom-seat driven
+  if(typeof h.createdBy!=="string") h.createdBy="";
+  ["members","departments","measurables","rocks","nextRocks","issues","headlines","todos","meetings","planning","scorecardArchive","rockArchive","minutesCc","editors"]
+    .forEach(k=>{ if(!Array.isArray(h[k])) h[k]=[]; });
+  if(!h.autoIssued || typeof h.autoIssued!=="object" || Array.isArray(h.autoIssued)) h.autoIssued={};
+  if(!h.week1Start) h.week1Start=firstMondayOfQuarter();
+  if(h.leader===undefined) h.leader="";
+  if(h.liveMeeting===undefined) h.liveMeeting=null;
+  // members: accept bare strings or {name} and normalize to {id,name}
+  h.members=h.members.map(m=>{ const nm=(m&&typeof m==="object")?(m.name||""):String(m||""); const name=nm.trim();
+    return name?{id:(m&&m.id)||("hm_"+name.toLowerCase().replace(/[^a-z0-9]/g,"")), name}:null; }).filter(Boolean);
+  return h;
 }
 /* Ensure the Integrator has the three function seats the company is split into. Non-destructive:
    reuses an existing head seat if one already represents the function (renaming just its label
@@ -5086,6 +5135,7 @@ function enforceTeamPin(){   // never leave someone parked on a team they're not
 }
 function renderTeamPicker(){
   const wrap=$("#teamPick"); if(!wrap) return;
+  if(currentView==="huddle"){ renderHuddlePicker(wrap); return; }   // the Huddle view has its OWN group picker (cross-team groups, not teams)
   const allowed=teamsForUser();     // only the teams this person is assigned to (all, for leadership)
   // hide on company-wide views, and whenever there's nothing to switch between (0 or 1 team)
   const hide=allowed.length<=1
@@ -5097,6 +5147,123 @@ function renderTeamPicker(){
   wrap.innerHTML=`<select id="teamSel" title="Which team's board you're viewing">${
     allowed.map(t=>`<option value="${t.id}" ${t.id===TEAM().id?"selected":""}>${esc(t.name)}</option>`).join("")}</select>`;
   const sel=$("#teamSel"); if(sel) sel.onchange=()=>setTeam(sel.value);
+}
+
+/* ===================== HUDDLE GROUPS =====================
+   Cross-team rosters that run a lightweight structured meeting. A huddle lives in data.huddles (split out
+   of data.teams by assembleMulti), so it never touches the org chart, Scorecard, Rocks or any roll-up.
+   The live meeting rides the SAME engine as the L10 via mtgTeam(): on the Huddle view mtgTeam() returns
+   the selected huddle, everywhere else it's TEAM(), so the hardened sync is reused with no L10 change. */
+let curHuddleId=null;
+try{ curHuddleId=localStorage.getItem("eostracker.huddle")||null; }catch(e){}
+function allHuddles(){ return (data&&data.huddles)||[]; }
+// A huddle you can see = you're a member, its creator, an admin/leadership, or a supervisor of a member.
+function canSeeHuddle(h){ if(!h) return false;
+  if(isLeadership()) return true;
+  const me=myName(); if(!me) return false;
+  if(sameName(h.createdBy,me)) return true;
+  if(huddleRoster(h).some(n=>sameName(n,me))) return true;
+  // a supervisor sees a huddle that includes any of their reports (so a manager can sit in / run it)
+  const below=peopleBelowMe(me); if(below.length && huddleRoster(h).some(n=>below.some(b=>sameName(b,n)))) return true;
+  return false;
+}
+// Who may create huddle groups and manage their rosters: anyone with direct reports (a supervisor), plus admins.
+function canManageHuddles(){ return isAdmin() || isSupervisor(); }
+// Who may open/start/run a given huddle's meeting: its creator, a member who supervises, admins/leadership.
+function canEditHuddle(h){ h=h||HUDDLE(); if(!h) return false;
+  if(isLeadership()) return true;
+  const me=myName(); if(!me) return false;
+  if(sameName(h.createdBy,me)) return true;
+  if((h.editors||[]).some(n=>sameName(n,me))) return true;
+  if(isSupervisor() && huddleRoster(h).some(n=>sameName(n,me))) return true;   // a supervisor who's in the huddle can run it
+  return false;
+}
+function huddleRoster(h){ return (h&&h.members||[]).map(m=>m.name).filter(Boolean); }
+function huddlesForUser(){ return allHuddles().filter(canSeeHuddle); }
+function HUDDLE(){ const hs=huddlesForUser(); let h=hs.find(x=>x&&x.id===curHuddleId);
+  if(!h){ h=hs[0]||null; curHuddleId=h?h.id:null; }
+  return h; }
+function setHuddle(id){ const h=allHuddles().find(x=>x&&x.id===id); if(h && !canSeeHuddle(h)) return;
+  curHuddleId=id; try{localStorage.setItem("eostracker.huddle",id);}catch(e){}
+  _justConcluded=null; syncMeetingRef(); renderHuddle(); if(currentView==="huddle") startPresence(); }
+function noHuddleAccess(){ return !huddlesForUser().length; }
+function enforceHuddlePin(){ const hs=huddlesForUser();
+  if(!hs.length){ curHuddleId=null; return; }
+  if(!hs.some(h=>h.id===curHuddleId)){ curHuddleId=hs[0].id; try{localStorage.setItem("eostracker.huddle",curHuddleId);}catch(e){} } }
+// ===== The active MEETING container — a huddle on the Huddle view, otherwise the current team. The L10
+// engine (saveL10, renderSegContent, conclude, presence) runs on THIS, so mtgTeam()===TEAM() off the
+// Huddle view keeps every L10 code path byte-identical. =====
+function mtgTeam(){ return currentView==="huddle" ? HUDDLE() : TEAM(); }
+function mtgTeamId(){ const t=mtgTeam(); return t?t.id:null; }
+function curMtgId(){ return currentView==="huddle" ? curHuddleId : curTeamId; }
+function curSegs(){ return currentView==="huddle" ? HUDDLE_SEGMENTS : SEGMENTS; }   // which agenda the runner walks
+function lastSegIdx(){ return curSegs().length-1; }
+function renderHuddlePicker(wrap){
+  wrap=wrap||$("#teamPick"); if(!wrap) return;
+  const mine=huddlesForUser();
+  if(!mine.length && !canManageHuddles()){ wrap.style.display="none"; return; }
+  wrap.style.display="";
+  const cur=HUDDLE();
+  const opts=mine.map(h=>`<option value="${h.id}" ${cur&&h.id===cur.id?"selected":""}>${esc(h.name)}</option>`).join("");
+  wrap.innerHTML=`<select id="huddleSel" title="Which huddle group you're in">${opts||'<option>No huddle groups yet</option>'}</select>`
+    + (canManageHuddles()?`<button id="huddleNew" class="btn ghost sm" title="Create a new huddle group" style="padding:6px 10px;margin-left:6px">＋</button>`:"");
+  const sel=$("#huddleSel"); if(sel) sel.onchange=()=>setHuddle(sel.value);
+  const nb=$("#huddleNew"); if(nb) nb.onclick=newHuddleGroup;
+}
+// Create a huddle group (anyone with direct reports). Opens the member picker right after.
+function newHuddleGroup(){
+  if(!canManageHuddles()) return;
+  const name=(prompt("Name this huddle group (e.g. Medical Providers):","")||"").trim();
+  if(!name) return;
+  const h=newHuddle(name, myName()||myEmail());
+  data.huddles=data.huddles||[]; data.huddles.push(h);
+  curHuddleId=h.id; try{localStorage.setItem("eostracker.huddle",h.id);}catch(e){}
+  save(true); refreshAdminNav();
+  if(currentView==="huddle") renderHuddle();
+  manageHuddle(h.id);
+}
+// Edit a huddle group's name + roster. Members are chosen from everyone the app knows (cross-team).
+function manageHuddle(id){
+  const h=allHuddles().find(x=>x&&x.id===id); if(!h || !canManageHuddles()) return;
+  const roster=huddleRoster(h);
+  const chosen=new Set(roster.map(n=>n.toLowerCase()));
+  // Company-wide names PLUS this huddle's current members — so a cross-team member who isn't on any team/chart
+  // (added here by name) still shows up checked and is never silently dropped on the next edit.
+  const people=(()=>{ const m=new Map(); knownPeople().concat(roster).forEach(n=>{ const v=(n||"").trim(); if(!v) return; const k=v.toLowerCase(); if(!m.has(k)) m.set(k,v); }); return [...m.values()].sort((a,b)=>a.localeCompare(b)); })();
+  const rows=people.map(n=>`<label class="hg-row" style="display:flex;align-items:center;gap:9px;padding:8px 4px;border-bottom:1px solid var(--line-2)">
+      <input type="checkbox" data-hm="${esc(n)}" ${chosen.has(n.toLowerCase())?"checked":""} style="width:18px;height:18px;flex:0 0 auto">
+      <span>${esc(n)}</span></label>`).join("");
+  openSheet(`
+    <h2>Huddle group</h2>
+    <label class="hint" style="display:block;margin:4px 0 4px;font-weight:700">Name</label>
+    <input id="hg-name" class="row-add-input" value="${esc(h.name)}" style="width:100%;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:10px;padding:10px 12px;font-family:inherit;font-size:15px">
+    <label class="hint" style="display:block;margin:12px 0 4px;font-weight:700">Members <span style="font-weight:600;color:var(--muted)">— pick from anyone in the company</span></label>
+    <input id="hg-filter" placeholder="Filter people…" style="width:100%;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:10px;padding:9px 12px;font-family:inherit;font-size:14px;margin-bottom:6px">
+    <div id="hg-people" style="max-height:38vh;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:2px 10px">${rows||'<div class="hint" style="padding:10px 0">No people found yet — add names below.</div>'}</div>
+    <input id="hg-add" placeholder="＋ Add a name that isn't listed…" style="width:100%;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:10px;padding:9px 12px;font-family:inherit;font-size:14px;margin-top:8px">
+    <div class="sheet-actions" style="margin-top:14px">
+      <button class="btn danger" id="hg-del">Delete group</button>
+      <button class="btn ghost" id="hg-cancel">Cancel</button>
+      <button class="btn" id="hg-save">Save</button>
+    </div>`);
+  { const f=$("#hg-filter"); if(f) f.oninput=()=>{ const q=f.value.trim().toLowerCase();
+      document.querySelectorAll("#hg-people .hg-row").forEach(r=>{ const nm=(r.querySelector("input").dataset.hm||"").toLowerCase(); r.style.display=(!q||nm.indexOf(q)>=0)?"":"none"; }); }; }
+  { const sv=$("#hg-save"); if(sv) sv.onclick=()=>{
+      const name=($("#hg-name").value||"").trim()||h.name;
+      const picks=[...document.querySelectorAll('#hg-people input[data-hm]:checked')].map(c=>c.dataset.hm);
+      const extra=($("#hg-add").value||"").trim(); if(extra) picks.push(extra);
+      const seen=new Set(), members=[];
+      picks.forEach(n=>{ const v=(n||"").trim(); if(!v) return; const k=v.toLowerCase(); if(seen.has(k)) return; seen.add(k); members.push({id:"hm_"+k.replace(/[^a-z0-9]/g,""), name:v}); });
+      h.name=name; h.members=members;   // mutate local; save() pushes the full huddle doc (version-guarded) via pushMulti
+      save(true); closeSheet(); refreshAdminNav(); enforceHuddlePin(); if(currentView==="huddle") renderHuddle(); setSync("Huddle group saved");
+    }; }
+  { const c=$("#hg-cancel"); if(c) c.onclick=closeSheet; }
+  { const d=$("#hg-del"); if(d) d.onclick=()=>{ if(!confirm(`Delete the huddle group "${h.name}"?\n\nThis removes it for everyone and deletes its past huddle minutes. This cannot be undone.`)) return;
+      data.huddles=(data.huddles||[]).filter(x=>x&&x.id!==h.id);
+      if(curHuddleId===h.id){ curHuddleId=null; try{localStorage.removeItem("eostracker.huddle");}catch(e){} }
+      if(meeting && mtgTeamId()===h.id){ meeting=null; stopTick(); }
+      save(true); closeSheet(); refreshAdminNav(); if(currentView==="huddle") renderHuddle(); setSync("Huddle group deleted");
+    }; }
 }
 
 /* ===== Shared cloud storage (Firestore) =====
@@ -5115,7 +5282,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=234;
+const BUILD=235;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5373,8 +5540,8 @@ function mergeCompany(applyCompany){
   })).then(res=>{ _companyState=res.state; _companyAt=res.at; _baseCompany=res.at; _shadowCompany=JSON.stringify(companyOf(data)); setSync("Saved"); })
     .catch(e=>{ console.error("company merge tx failed — falling back",e); save(true); });
 }
-function saveL10(immediate, ending){   // persist the current L10 team's meeting + to-dos/issues by merging into the latest server state
-  const t=TEAM(); if(!t){ save(); return; } const teamId=t.id;
+function saveL10(immediate, ending){   // persist the current meeting (team L10 OR huddle) + to-dos/issues by merging into the latest server state
+  const t=mtgTeam(); if(!t){ save(); return; } const teamId=t.id;
   const snapJson=JSON.stringify({ liveMeeting:(t.liveMeeting||null), todos:(t.todos||[]), issues:(t.issues||[]) });
   // Two people write the live meeting at once — the FACILITATOR drives navigation/timer, the SCRIBE owns the
   // notes/content. Merge each client's changes onto the server's LATEST meeting by role instead of overwriting
@@ -5401,7 +5568,7 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
       // WIFLS text being typed). Gate on navAt: a facilitator overlays these only when this write's navigation
       // stamp is at least as fresh as the server's, so a stale content save can never revert navigation.
       const locNav=(loc.navAt||0), srvNav=(st.liveMeeting.navAt||0);
-      if(fac && locNav>=srvNav){ NAV.concat(IDENT,["activeIssue","solvedIssues","guests"]).forEach(k=>{ if(k in loc) merged[k]=loc[k]; }); merged.navAt=locNav; }
+      if(fac && locNav>=srvNav){ NAV.concat(IDENT,["activeIssue","solvedIssues","guests","phase","kind"]).forEach(k=>{ if(k in loc) merged[k]=loc[k]; }); merged.navAt=locNav; }   // phase = the huddle's open→live flip; facilitator-authoritative + navAt-gated, so a stale content echo can't knock it back to "open"
       // ---- PER-FIELD note merge: write ONLY the boxes this client holds a live lock on, so a teammate
       // editing a different box at the same instant is never overwritten (that was the old same-box chaos). ----
       merged.notes=Object.assign({}, st.liveMeeting.notes||{});
@@ -5468,7 +5635,7 @@ function saveL10(immediate, ending){   // persist the current L10 team's meeting
 // second time always works".) The to-do itself always persists; the meeting link is added when a live meeting
 // exists on the server.
 function addMeetingTodo(nt){
-  const tt=TEAM(); if(!tt) return; const teamId=tt.id;
+  const tt=mtgTeam(); if(!tt) return; const teamId=tt.id;
   tt.todos=tt.todos||[]; if(!tt.todos.some(x=>x&&x.id===nt.id)) tt.todos.unshift(nt); _touchedTodos.add(nt.id);   // optimistic local add + claim it so saveL10 persists it
   tt.liveMeeting=tt.liveMeeting||{}; tt.liveMeeting.createdTodos=tt.liveMeeting.createdTodos||[];
   if(tt.liveMeeting.createdTodos.indexOf(nt.id)<0) tt.liveMeeting.createdTodos.push(nt.id);
@@ -5547,7 +5714,7 @@ function isBusy(){
    facilitator. `meeting` is just a reference to that object — mutating it mutates the shared
    record, and save() broadcasts it. After a remote snapshot the whole data graph is rebuilt,
    so the old reference is stale and MUST be re-bound. */
-function syncMeetingRef(){ const t=TEAM(); let lm=(t&&t.liveMeeting)||null;
+function syncMeetingRef(){ const t=mtgTeam(); let lm=(t&&t.liveMeeting)||null;
   if(lm && _justConcluded && (lm.startedAt||0)===_justConcluded.sa && (Date.now()-_justConcluded.at)<8000) lm=null;   // ignore a meeting we just ended, even if a stale snapshot still carries it
   meeting=lm; if(meeting){ startTick(); setTimeout(maybeAutoEndStale,1500); }   // a meeting that synced in already past its cap (started & abandoned) gets ended right away, even if we're not on the L10 view
   else { stopTick(); stopDictation(); _lockedKey=null; stopLockHb(); _touchedRate=new Set(); _progNotes=new Set(); _touchedIssues=new Set(); _touchedTodos=new Set(); _deletedIssues=new Set(); _deletedTodos=new Set(); _touchedBy=new Set(); _fieldEditAt={}; } }
@@ -5571,8 +5738,8 @@ function pickSolved(dst,src){ if(dst&&src&&(src.solvedAt||0)>(dst.solvedAt||0)){
 // Carry a locally-newer solved decision across a wholesale remote adopt, so an echo / other-team snapshot that
 // predates the click can never flip an issue back to unsolved on screen. prev = the data currently on screen.
 function reconcileSolved(next, prev){ if(!next||!prev) return;
-  const pi={}; (prev.teams||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pi[x.id]=x; }));
-  (next.teams||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pickSolved(x, pi[x.id]); })); }
+  const pi={}; (prev.teams||[]).concat(prev.huddles||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pi[x.id]=x; }));
+  (next.teams||[]).concat(next.huddles||[]).forEach(t=>((t&&t.issues)||[]).forEach(x=>{ if(x&&x.id) pickSolved(x, pi[x.id]); })); }
 // ===== WIFLS / per-person boxes = last-writer-wins too (same rationale as solved) =====
 // Each box (meeting.byPerson[seg][person]) carries a monotonic stamp in meeting.byPersonAt[seg][person],
 // set on EVERY keystroke. The save-merge resolves boxes by newest stamp; livePatchSharedText only streams a
@@ -5581,8 +5748,8 @@ function reconcileSolved(next, prev){ if(!next||!prev) return;
 function stampBy(seg,person){ if(!meeting) return; meeting.byPersonAt=meeting.byPersonAt||{}; meeting.byPersonAt[seg]=meeting.byPersonAt[seg]||{};
   meeting.byPersonAt[seg][person]=Math.max(Date.now(),(meeting.byPersonAt[seg][person]||0)+1); }
 function reconcileBy(next, prev){ if(!next||!prev) return;
-  const pm={}; (prev.teams||[]).forEach(t=>{ if(t&&t.id&&t.liveMeeting) pm[t.id]=t.liveMeeting; });
-  (next.teams||[]).forEach(t=>{ const nlm=t&&t.liveMeeting, plm=t&&pm[t.id]; if(!nlm||!plm) return;
+  const pm={}; (prev.teams||[]).concat(prev.huddles||[]).forEach(t=>{ if(t&&t.id&&t.liveMeeting) pm[t.id]=t.liveMeeting; });
+  (next.teams||[]).concat(next.huddles||[]).forEach(t=>{ const nlm=t&&t.liveMeeting, plm=t&&pm[t.id]; if(!nlm||!plm) return;
     const pBP=plm.byPerson||{}, pAt=plm.byPersonAt||{};
     Object.keys(pBP).forEach(sg=>Object.keys(pBP[sg]||{}).forEach(pn=>{
       const pvt=(pAt[sg]||{})[pn]||0, nvt=((nlm.byPersonAt||{})[sg]||{})[pn]||0;
@@ -5594,7 +5761,7 @@ function reconcileBy(next, prev){ if(!next||!prev) return;
    ("I added the TDL and it didn't save"). So before every adopt we capture the To-Dos THIS client created
    during the current meeting, and after the rebuild we re-insert any that came back missing, then re-save. */
 function pendingMeetingTodos(){
-  const t=TEAM(); if(!t||!t.liveMeeting) return null;
+  const t=mtgTeam(); if(!t||!t.liveMeeting) return null;
   const ids=t.liveMeeting.createdTodos||[]; if(!ids.length) return null;
   const set=new Set(ids);
   const todos=(t.todos||[]).filter(x=>x&&set.has(x.id)).map(x=>JSON.parse(JSON.stringify(x)));
@@ -5602,7 +5769,7 @@ function pendingMeetingTodos(){
 }
 function reMergeMeetingTodos(pend){
   if(!pend) return false;
-  const t=(data.teams||[]).find(x=>x&&x.id===pend.teamId); if(!t) return false;
+  const t=allSyncTeams().find(x=>x&&x.id===pend.teamId); if(!t) return false;
   t.todos=t.todos||[]; let changed=false;
   pend.todos.forEach(td=>{ if(!t.todos.some(x=>x&&x.id===td.id)){ t.todos.unshift(td); changed=true; } });   // only recover ones that came back MISSING — never overwrite an edit
   return changed;
@@ -5658,7 +5825,7 @@ function scheduleAdopt(incoming, at){ remoteQueued=incoming; if(typeof at==="num
 function flushAdopt(){
   if(!remoteQueued) return;
   if(isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS){
-    if(currentView==="l10" && meeting){ const mt=((remoteQueued&&remoteQueued.teams)||[]).find(x=>x&&x.id===curTeamId); livePatchSharedText(mt); }   // stream teammates' shared text in even while we can't rebuild yet
+    if((currentView==="l10"||currentView==="huddle") && meeting){ const mt=((remoteQueued&&remoteQueued.teams)||[]).concat((remoteQueued&&remoteQueued.huddles)||[]).find(x=>x&&x.id===curMtgId()); livePatchSharedText(mt); }   // stream teammates' shared text in even while we can't rebuild yet
     clearTimeout(adoptTimer); adoptTimer=setTimeout(flushAdopt,400); return;   // wait until they stop editing / a click in progress lands
   }
   const s=remoteQueued; remoteQueued=null;
@@ -5711,14 +5878,22 @@ let _teamAt={};                         // teamId -> updatedAt of the LATEST tea
 let _baseAt={};                         // teamId -> the server version our LOCAL data.teams[id] is based on; a write refuses if the server has moved past it
 let _companyAt=0;                        // updatedAt of the LATEST company doc we've received
 let _baseCompany=0;                      // the company version our LOCAL company fields are based on; a write refuses if the server moved past it (same guard the team docs use — closes the last shared-write lane, e.g. concurrent evaluations)
-function companyOf(d){ const c=Object.assign({}, d); delete c.teams; return c; }
+function companyOf(d){ const c=Object.assign({}, d); delete c.teams; delete c.huddles; return c; }   // teams AND huddles live in their own docs, never in the company doc
+// Every synced doc in the teams collection — operational teams PLUS cross-team huddle groups. The sync
+// layer (shadows, push, orphan-delete) treats them identically; only assembleMulti() and the domain code
+// tell them apart, so a huddle saves and is never orphan-deleted, yet never pollutes a team enumeration.
+function allSyncTeams(){ return (data.teams||[]).concat(data.huddles||[]); }
 function assembleMulti(){
   const order=(_companyState&&_companyState.teamOrder)||[];
   const ids=Object.keys(_teamDocs);
   const ordered=order.filter(id=>_teamDocs[id]).concat(ids.filter(id=>order.indexOf(id)<0));
-  return Object.assign({}, _companyState||{}, { teams: ordered.map(id=>_teamDocs[id]) });
+  const all=ordered.map(id=>_teamDocs[id]).filter(Boolean);
+  return Object.assign({}, _companyState||{}, {
+    teams:   all.filter(t=>t.kind!=="huddle"),   // operational teams — every existing data.teams reader sees ONLY these
+    huddles: all.filter(t=>t.kind==="huddle")    // cross-team huddle groups — only the Huddle tab reads these
+  });
 }
-function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shadowTeams={}; (data.teams||[]).forEach(t=>{ _shadowTeams[t.id]=JSON.stringify(t); }); }
+function refreshShadows(){ _shadowCompany=JSON.stringify(companyOf(data)); _shadowTeams={}; allSyncTeams().forEach(t=>{ _shadowTeams[t.id]=JSON.stringify(t); }); }
 function adoptMulti(){
   // CHEAP GUARD FIRST. During active typing / a click in progress / our own write still confirming we won't
   // rebuild anyway — so don't assemble + stringify the WHOLE workspace on every incoming snapshot just to find
@@ -5730,17 +5905,17 @@ function adoptMulti(){
   // changed, jump this screen there IMMEDIATELY rather than sitting behind the typing guard. What anyone was
   // typing is already saved (saveL10 on each input), so moving forward loses nothing; an open modal is never cut.
   let _navJump=false;
-  if(_multiBooted && currentView==="l10" && meeting){
+  if(_multiBooted && (currentView==="l10"||currentView==="huddle") && meeting){
     const _mdl=$("#modal"), _modalOpen=!!(_mdl&&_mdl.classList.contains("open"));
     if(!_modalOpen){
-      const lm=(_teamDocs[curTeamId]||{}).liveMeeting;   // read the current team doc directly — no full assemble
+      const lm=(_teamDocs[curMtgId()]||{}).liveMeeting;   // read the current meeting doc directly — no full assemble
       if(!lm) _navJump=true;   // meeting ended elsewhere → leave the dead segment now
-      else if((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null)) _navJump=true;
+      else if((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null) || (lm.phase||"")!==(meeting.phase||"")) _navJump=true;   // a huddle flipping open→live also jumps everyone in
     }
   }
   if(_multiBooted && !_navJump && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
       || (_teamWriteInFlight>0 && (Date.now()-_teamWriteSince)<3000))){
-    if(currentView==="l10" && meeting) livePatchSharedText(_teamDocs[curTeamId]);   // stream teammates' shared text into their boxes WITHOUT a rebuild or a full serialize
+    if((currentView==="l10"||currentView==="huddle") && meeting) livePatchSharedText(_teamDocs[curMtgId()]);   // stream teammates' shared text into their boxes WITHOUT a rebuild or a full serialize
     scheduleAdoptMulti(); return;   // ONE coalesced retry — never a stack of full-workspace assemblies while someone types
   }
   const merged=assembleMulti(), json=JSON.stringify(merged);
@@ -5758,8 +5933,8 @@ function adoptMulti(){
   // BLINK GUARD: if only ANOTHER team's doc changed — our current team slice AND the company doc are both
   // byte-identical — a single-team view (L10 / Scorecard / Lists / team Rocks) cannot show anything different,
   // so skip the rebuild. This is what stops one busy team's live L10 from flickering everyone else's screen.
-  const _teamSlice=d=>{ const x=((d&&d.teams)||[]).find(y=>y&&y.id===curTeamId); return x?JSON.stringify(x):""; };
-  const singleTeamView=(currentView==="l10"||currentView==="scorecard"||currentView==="lists"||(currentView==="rocks"&&rocksMode==="team"));
+  const _teamSlice=d=>{ const id=curMtgId(); const x=(((d&&d.teams)||[]).concat((d&&d.huddles)||[])).find(y=>y&&y.id===id); return x?JSON.stringify(x):""; };
+  const singleTeamView=(currentView==="l10"||currentView==="huddle"||currentView==="scorecard"||currentView==="lists"||(currentView==="rocks"&&rocksMode==="team"));
   const viewUnaffected = _multiBooted && singleTeamView && !sameAsScreen
      && _teamSlice(nextData)===_teamSlice(data) && JSON.stringify(companyOf(nextData))===JSON.stringify(companyOf(data));
   // COMPANY-ONLY BLINK GUARD (mirror of the above): these views render purely from the company doc (chart,
@@ -5840,7 +6015,7 @@ function persistMulti(){
       }).catch(e=>console.error("company write",e));
     }
   }
-  (data.teams||[]).forEach(t=>{ const tj=JSON.stringify(t);
+  allSyncTeams().forEach(t=>{ const tj=JSON.stringify(t);
     if(tj===_shadowTeams[t.id]) return;                       // unchanged since our last write/adopt → nothing to do
     const ref=db.doc(TEAMS_COL+"/"+t.id), baseAt=_baseAt[t.id]||0, obj=JSON.parse(tj);
     _shadowTeams[t.id]=tj; wrote++;
@@ -5857,7 +6032,7 @@ function persistMulti(){
       else { _teamAt[t.id]=res.at; _baseAt[t.id]=res.at; }
     }).catch(e=>console.error("team write",e));
   });
-  Object.keys(_shadowTeams).forEach(id=>{ if(!(data.teams||[]).some(t=>t.id===id)){ db.doc(TEAMS_COL+"/"+id).delete().catch(()=>{}); delete _shadowTeams[id]; } });
+  Object.keys(_shadowTeams).forEach(id=>{ if(!allSyncTeams().some(t=>t.id===id)){ db.doc(TEAMS_COL+"/"+id).delete().catch(()=>{}); delete _shadowTeams[id]; } });
   maybeBackup(data);                    // rolling restore point still snapshots the FULL assembled state
   if(wrote) setSync("Saved");
   return wrote;
@@ -5943,7 +6118,7 @@ function initialsOf(s){ s=(s||"").trim(); if(!s) return "?";
   const p=s.split(/\s+/); return (((p[0]||"")[0]||"")+((p[1]||"")[0]||"")).toUpperCase()||s[0].toUpperCase(); }
 // The team whose L10 this person is on. Via TEAM() rather than curTeamId because TEAM() self-heals a
 // stale/empty selection, so we can never heartbeat into a team id that isn't really selected.
-function presTeamId(){ try{ return String((TEAM()||{}).id||""); }catch(e){ return ""; } }
+function presTeamId(){ try{ return String((mtgTeam()||{}).id||""); }catch(e){ return ""; } }   // presence is scoped to the active meeting container (team L10 or huddle)
 function beatPresence(){ const em=myEmail(); if(!presRef||!em) return;
   // sat = SERVER timestamp (one shared clock for everyone) — the source of truth for "how recent".
   // at = device timestamp, kept only so clients on an older build still have something to read.
@@ -5977,10 +6152,14 @@ function stopPresence(){
   if(presRef&&em){ const u={}; u[presKey(em)]={name:(myName()||em), at:0, sat:0, team:presTeamId()}; presRef.set({users:u},{merge:true}).catch(()=>{}); }  // leave = drop immediately (both stamps zeroed)
 }
 function renderPresence(){
-  const box=$("#l10Presence"); if(!box) return;
-  if(currentView!=="l10"){ box.classList.add("hide"); return; }
+  const huddleView=(currentView==="huddle");
+  const box=huddleView?$("#huddlePresence"):$("#l10Presence");
+  { const other=huddleView?$("#l10Presence"):$("#huddlePresence"); if(other) other.classList.add("hide"); }
+  if(!box) return;
+  if(currentView!=="l10" && !huddleView){ box.classList.add("hide"); return; }
+  const lbl=huddleView?"In this huddle":"On this L10";
   const now=Date.now(), meKey=presKey(myEmail()), team=presTeamId();
-  const t=TEAM()||{}, tName=t.name?" · "+esc(t.name):"";
+  const t=mtgTeam()||{}, tName=t.name?" · "+esc(t.name):"";
   // Measure freshness against the SERVER clock: read each heartbeat's server stamp (sat) and compare it to
   // the newest server stamp in the doc — one shared clock, so no device's wrong local time can hide anyone.
   // Only fall back to the device stamp (at vs local now) for entries that have no server stamp yet.
@@ -5997,8 +6176,8 @@ function renderPresence(){
   // "🚨 Tangent!" — only while a meeting is actually running; anyone on the L10 can fire it.
   const tBtn = meeting ? '<button class="lp-tangent" id="lpTangent" title="Call a tangent — everyone on this L10 sees it!">🚨 Tangent!</button>' : '';
   box.classList.remove("hide");
-  if(!list.length){ box.innerHTML='<span class="lp-lbl">On this L10'+tName+'</span><span class="lp-empty">Connecting…</span>'+tBtn; }
-  else box.innerHTML='<span class="lp-lbl">On this L10'+tName+' · '+list.length+'</span>'+list.map(u=>{
+  if(!list.length){ box.innerHTML='<span class="lp-lbl">'+lbl+tName+'</span><span class="lp-empty">Connecting…</span>'+tBtn; }
+  else box.innerHTML='<span class="lp-lbl">'+lbl+tName+' · '+list.length+'</span>'+list.map(u=>{
     const me=u.k===meKey;
     return `<span class="lp-chip"><span class="lp-dot"></span><span class="lp-av">${esc(initialsOf(u.name))}</span>${esc(u.name||"Someone")}${me?" (you)":""}</span>`;
   }).join("")+tBtn;
@@ -8413,6 +8592,7 @@ function refreshAdminNav(){
   const rc=$("#navRecruiting"); if(rc) rc.style.display=canSeeRecruiting()?"":"none";
   const p=$("#navPlanning"); if(p) p.style.display=canSeePlanning()?"":"none";
   const sa=$("#navSales"); if(sa) sa.style.display=canSeeSales()?"":"none";
+  const hd=$("#navHuddle"); if(hd) hd.style.display=(huddlesForUser().length||canManageHuddles())?"":"none";   // show the Huddle tab to members + anyone who can create a group
 }
 
 // Everything a person is attached to, so deleting them can't silently orphan work.
@@ -11442,7 +11622,16 @@ const SEGMENTS=[
   {key:"ids",       name:"IDS",         min:60,sub:"Identify · Discuss · Solve issues"},
   {key:"conclude",  name:"Conclude",    min:5, sub:"Recap to-dos, cascade, rate 1–10"}
 ];
+// Huddle agenda — a lighter, cross-team meeting that lives on Issues. Every key here has a renderSegContent
+// branch already (segue/headlines/ids/conclude), so the Huddle reuses the exact same segment renderers.
+const HUDDLE_SEGMENTS=[
+  {key:"segue",     name:"WIFLS",     min:3,  sub:"What I feel like saying — a quick check-in"},
+  {key:"headlines", name:"Headlines", min:3,  sub:"Good news — customer & staff wins"},
+  {key:"ids",       name:"Issues",    min:30, sub:"Identify · Discuss · Solve — the heart of the huddle"},
+  {key:"conclude",  name:"Wrap-Up",   min:4,  sub:"To-dos, owners & a quick rating"}
+];
 let meeting=null, tick=null;
+let huddleMode="run";               // "run" | "archive" — the Huddle view's recent-minutes toggle (mirrors l10Mode)
 /* ===== Field-level scribe locks (multi-scribe) =====
    Everyone in the meeting can take notes at once; each editable note/IDS box is soft-locked to whoever is
    currently typing in it, so two people never fight over the SAME box (the old chaos) — but different people
@@ -11465,13 +11654,13 @@ let _rec=null, _recTarget=null, _recBtn=null, _recKey="", _recBase="", _recFinal
 function meetingGuests(){ return (meeting && Array.isArray(meeting.guests)) ? meeting.guests : []; }
 function meetingRoster(){   // team members (from the chart) + this meeting's guests, deduped by name (member spelling wins)
   const out=[], seen=new Set();
-  (teamMembers()||[]).forEach(p=>{ const nm=p&&(p.name||"").trim(); if(!nm) return; const k=nm.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push({id:p.id, name:nm, guest:false}); } });
+  (teamMembers(mtgTeam())||[]).forEach(p=>{ const nm=p&&(p.name||"").trim(); if(!nm) return; const k=nm.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push({id:p.id, name:nm, guest:false}); } });
   meetingGuests().forEach(g=>{ const nm=g&&(g.name||"").trim(); if(!nm) return; const k=nm.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push({id:g.id, name:nm, guest:true}); } });
   return out;
 }
 function addMeetingGuest(name){ if(!meeting) return false; name=(name||"").trim(); if(!name) return false;
   const k=name.toLowerCase();
-  if((teamMembers()||[]).some(p=>p&&(p.name||"").trim().toLowerCase()===k)) return false;   // already on the team — no duplicate
+  if((teamMembers(mtgTeam())||[]).some(p=>p&&(p.name||"").trim().toLowerCase()===k)) return false;   // already on the team — no duplicate
   meeting.guests=meeting.guests||[];
   if(meeting.guests.some(g=>g&&(g.name||"").trim().toLowerCase()===k)) return false;         // already a guest
   meeting.guests.push({id:"g_"+uid(), name:name}); return true;
@@ -11485,7 +11674,7 @@ function ownerChoices(){
   const m=new Map();
   const add=n=>{ const v=(n||"").trim(); if(!v||v.indexOf("@")>=0) return;   // never offer a raw email — owners are matched by name
     const k=v.toLowerCase(); if(!m.has(k)) m.set(k,v); };
-  (teamMembers()||[]).forEach(x=>x&&add(x.name));
+  (teamMembers(mtgTeam())||[]).forEach(x=>x&&add(x.name));
   if(meeting) add(meeting.facilitatorName);
   add(myName());
   return [...m.values()].sort((a,b)=>a.localeCompare(b));
@@ -11503,6 +11692,25 @@ function renderArchive(){
     wrap.innerHTML=intro+`<div class="empty"><span class="emoji">🗄️</span>No meetings archived yet for ${esc(TEAM().name)}.<br>Finish an L10 and its minutes land here.</div>`;
     return;
   }
+  wrap.innerHTML=intro+ms.map(m=>{
+    const nT=(m.todos||[]).length, nI=(m.issues||[]).length, draft=!meetingIsFinal(m);
+    return `<div class="arch-card${draft?" is-draft":""}">
+      <div class="arch-top">
+        <div><div class="arch-date">${fmtLong(m.date)} ${draft?'<span class="min-badge draft">Draft</span>':""}</div>
+          <div class="arch-meta">${m.durationMin} min · ${nI} issue${nI===1?"":"s"} solved · ${nT} to-do${nT===1?"":"s"}</div></div>
+        <span class="pill ${m.avg>=8?"green":(m.avg>=6?"amber":"red")}">${m.avg?"Avg "+m.avg:"—"}</span>
+      </div>
+      <button class="btn ghost sm" data-open-min="${m.id}">${draft?"Open & finish":"View minutes"}</button>
+    </div>`;
+  }).join("");
+  wrap.querySelectorAll("[data-open-min]").forEach(b=>b.onclick=()=>showMinutes(b.dataset.openMin));
+}
+function renderHuddleArchive(wrap){
+  wrap=wrap||$("#huddleWrap"); if(!wrap) return;
+  const h=HUDDLE()||{meetings:[],name:"Huddle"};
+  const ms=(h.meetings||[]).slice().reverse();
+  const intro=`<div class="hint" style="margin:0 2px 12px">Minutes file themselves when you finish a huddle. Showing <b>${esc(h.name)}</b> — switch groups at the top right for another huddle's archive.</div>`;
+  if(!ms.length){ wrap.innerHTML=intro+`<div class="empty"><span class="emoji">🗄️</span>No huddles archived yet for ${esc(h.name)}.<br>Finish a huddle and its minutes land here.</div>`; return; }
   wrap.innerHTML=intro+ms.map(m=>{
     const nT=(m.todos||[]).length, nI=(m.issues||[]).length, draft=!meetingIsFinal(m);
     return `<div class="arch-card${draft?" is-draft":""}">
@@ -11775,11 +11983,11 @@ function setMinutesFinal(id, val){
   apply(TEAM()); mergeTeam(TEAM().id, apply);
 }
 function showMinutes(id){
-  const m=(TEAM().meetings||[]).find(x=>x.id===id); if(!m) return;
+  const m=(mtgTeam().meetings||[]).find(x=>x.id===id); if(!m) return;
   const canEd=canEditTeam(), fin=meetingIsFinal(m);
   openSheet(`
     <h2>L10 Minutes ${fin?'<span class="min-badge final">Final</span>':'<span class="min-badge draft">Draft — editable</span>'}</h2>
-    <div class="min-head">${fmtLong(m.date)} · ${m.durationMin} min · ${esc(m.team||TEAM().name)}${m.avg?` · Avg ${m.avg}/10`:""}</div>
+    <div class="min-head">${fmtLong(m.date)} · ${m.durationMin} min · ${esc(m.team||mtgTeam().name)}${m.avg?` · Avg ${m.avg}/10`:""}</div>
     ${minutesInnerHtml(m)}
     <div class="sheet-actions">
       ${canEd?`<button class="btn danger" id="min-del">Delete</button>`:""}
@@ -11791,8 +11999,8 @@ function showMinutes(id){
   wireHeadlineThumbs($("#sheet"));
   { const b=$("#min-pdf"); if(b) b.onclick=()=>printMinutes(m); }
   { const b=$("#min-edit"); if(b) b.onclick=()=>editMinutes(id); }
-  { const b=$("#min-final"); if(b) b.onclick=()=>{ setMinutesFinal(id,true); showMinutes(id); renderArchive(); }; }
-  { const b=$("#min-reopen"); if(b) b.onclick=()=>{ setMinutesFinal(id,false); showMinutes(id); renderArchive(); }; }
+  { const b=$("#min-final"); if(b) b.onclick=()=>{ setMinutesFinal(id,true); showMinutes(id); renderMeetingArchive(); }; }
+  { const b=$("#min-reopen"); if(b) b.onclick=()=>{ setMinutesFinal(id,false); showMinutes(id); renderMeetingArchive(); }; }
   $("#min-copy").onclick=()=>{
     const txt=minutesText(m);
     const done=()=>{ const b=$("#min-copy"); if(b){ b.textContent="Copied ✓"; setTimeout(()=>{ if($("#min-copy")) $("#min-copy").textContent="Copy"; },1500); } };
@@ -11802,7 +12010,7 @@ function showMinutes(id){
   { const b=$("#min-del"); if(b) b.onclick=()=>{
     if(!confirm("Delete these minutes permanently?\n\nThe to-dos and issues themselves aren't affected — only this meeting record.")) return;
     const apply=t=>{ t.meetings=(t.meetings||[]).filter(x=>x&&x.id!==id); };
-    apply(TEAM()); mergeTeam(TEAM().id, apply); closeSheet(); renderArchive();
+    apply(mtgTeam()); mergeTeam(mtgTeam().id, apply); closeSheet(); renderMeetingArchive();
   }; }
 }
 // ===== Edit archived minutes =====
@@ -11812,7 +12020,7 @@ function showMinutes(id){
 let _meDraft=null, _meId=null;
 function editMinutes(id){
   if(!canEditTeam()) return;
-  const m=(TEAM().meetings||[]).find(x=>x.id===id); if(!m) return;
+  const m=(mtgTeam().meetings||[]).find(x=>x.id===id); if(!m) return;
   _meId=id; _meDraft=JSON.parse(JSON.stringify(m)); _meDraft.notes=_meDraft.notes||{};
   renderMinutesEditor();
 }
@@ -11855,7 +12063,7 @@ function renderMinutesEditor(){
       return `<div class="me-grid-wrap"><table class="me-grid"><thead><tr><th><input class="me-in me-sl-secname" data-si="${si}" value="${esc(sec.name||"")}"></th>${cols.map((c,ci)=>`<th><input class="me-in me-sl-colname" data-si="${si}" data-ci="${ci}" value="${esc(c.name||"")}" style="width:78px"></th>`).join("")}</tr></thead><tbody>${rows.map((r,ri)=>`<tr><td><input class="me-in me-sl-rowname" data-si="${si}" data-ri="${ri}" value="${esc(r.name||"")}"></td>${cols.map(c=>{ const v=((sec.values||{})[r.id]||{})[c.id]||""; return `<td><input class="me-in me-cellv me-sl-val" data-si="${si}" data-rid="${esc(r.id)}" data-cid="${esc(c.id)}" value="${esc(v)}"></td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`; }).join("") : "";
   openSheet(`
     <h2>Edit minutes</h2>
-    <div class="min-head">${esc(d.team||TEAM().name)}</div>
+    <div class="min-head">${esc(d.team||mtgTeam().name)}</div>
     <div class="me-form">
       <label>Meeting date &amp; length</label>
       <div class="me-hdr-fields">
@@ -11930,14 +12138,17 @@ function renderMinutesEditor(){
         mm.date=patch.date; mm.durationMin=patch.durationMin; mm.avg=patch.avg; mm.ratingList=patch.ratingList;
         mm.notes=patch.notes; mm.headlinesSnap=patch.headlinesSnap; mm.issues=patch.issues; mm.todos=patch.todos;
         mm.scorecardSnap=patch.scorecardSnap; mm.rocksSnap=patch.rocksSnap; mm.salesSnap=patch.salesSnap; } };
-    apply(TEAM()); mergeTeam(TEAM().id, apply);
-    _meDraft=null; _meId=null; showMinutes(id); renderArchive();
+    apply(mtgTeam()); mergeTeam(mtgTeam().id, apply);
+    _meDraft=null; _meId=null; showMinutes(id); renderMeetingArchive();
   };
 }
+function renderActiveMeeting(){ if(currentView==="huddle") renderHuddle(); else renderL10(); }
+function renderMeetingArchive(){ if(currentView==="huddle") renderHuddle(); else renderArchive(); }   // re-render the right archive after a minutes edit
+function canRunMeeting(){ return currentView==="huddle" ? canEditHuddle() : canEditTeam(); }   // who may start/drive THIS meeting
 function renderL10(){
   if(noTeamAccess()){ const w=$("#l10Wrap"); if(w) w.innerHTML=NO_TEAM_HTML; return; }
   if(l10Mode==="archive"){ renderArchive(); return; }
-  const wrap=$("#l10Wrap");
+  const wrap=$("#l10Wrap"); { const hw=$("#huddleWrap"); if(hw) hw.innerHTML=""; }   // clear the other meeting view so there's never a duplicate #segContent
   renderPresence();   // reflect the current meeting state in the presence bar (shows/hides the Tangent button)
   if(!meeting){
     const hist=TEAM().meetings.slice().reverse().slice(0,8).map(m=>`<div class="meeting-hist">
@@ -11955,21 +12166,95 @@ function renderL10(){
     { const b=$("#startMeeting"); if(b) b.onclick=startMeeting; }
     return;
   }
-  const seg=SEGMENTS[meeting.seg];
-  const elapsed=Math.floor(segLiveSecs());          // live time, so a re-render doesn't snap the clock back
-  const allot=seg.min*60; const over=elapsed>allot;
-  const mm=String(Math.floor(elapsed/60)).padStart(2,"0"), ss=String(elapsed%60).padStart(2,"0");
-  const agenda=SEGMENTS.map((s,i)=>`<div class="ag-item ${i===meeting.seg?"cur":(i<meeting.seg?"past":"")}" data-seg="${i}">
+  renderMeetingRunner(wrap);
+}
+function renderHuddle(){
+  renderHuddlePicker();
+  const wrap=$("#huddleWrap"); if(!wrap) return;
+  { const lw=$("#l10Wrap"); if(lw) lw.innerHTML=""; }   // clear the other meeting view (no duplicate #segContent)
+  if(huddleMode==="archive"){ renderHuddleArchive(wrap); return; }
+  renderPresence();
+  if(noHuddleAccess()){
+    wrap.innerHTML = canManageHuddles()
+      ? `<div class="l10-hero"><div class="seg-name">Team Huddles</div>
+           <div class="seg-sub">A quick, structured cross-team meeting — WIFLS, Headlines & Issues.</div>
+           <div style="margin-top:16px"><button class="btn wide" id="huddleFirst">＋ Create a huddle group</button></div></div>
+         <div class="hint" style="margin-top:14px">A huddle group is a lightweight roster you pull from across teams (e.g. “Medical Providers”). It isn't a team — no scorecard, rocks or org-chart seat. Open it to pre-load discussion items, then start the huddle and it's all there.</div>`
+      : `<div class="empty"><span class="emoji">🩺</span>You're not in a huddle group yet.<br><span style="font-size:13px;color:var(--muted)">A supervisor can add you to one (e.g. a medical-provider huddle) in Admin → Huddles.</span></div>`;
+    const fb=$("#huddleFirst"); if(fb) fb.onclick=newHuddleGroup;
+    return;
+  }
+  if(!meeting){
+    const h=HUDDLE()||{};
+    const hist=(h.meetings||[]).slice().reverse().slice(0,8).map(m=>`<div class="meeting-hist">
+      <div><div style="font-weight:700">${fmtLong(m.date)}</div><div style="font-size:12px;color:var(--muted)">${m.durationMin} min</div></div>
+      <span class="pill ${m.avg>=8?"green":(m.avg>=6?"amber":"red")}">Avg ${m.avg}</span></div>`).join("");
+    const nMembers=huddleRoster(h).length;
+    wrap.innerHTML=`
+      <div class="l10-hero">
+        <img class="l10-brand" src="${markSrc()}" alt="Warriors Heart">
+        <div class="seg-name">${esc(h.name||"Huddle")}</div>
+        <div class="seg-sub">${nMembers} ${nMembers===1?"member":"members"} · WIFLS · Headlines · Issues</div>
+        <div style="margin-top:16px">${canEditHuddle(h)
+          ? `<button class="btn wide" id="openHuddleBtn">▶ Open Huddle</button>`
+          : `<div class="hint">A huddle leader opens this — you'll be able to add your items and follow along here when they do.</div>`}</div>
+      </div>
+      <div class="hint" style="margin-bottom:14px">Open the huddle to pre-load discussion items — everyone can drop in their WIFLS, headlines and issues. When you're ready, hit <b>Start</b> and it's all there, timed and structured.</div>
+      ${canManageHuddles()?`<div class="row-add" style="margin-bottom:14px"><button class="btn ghost sm" id="huddleManage">⚙ Manage members</button><button class="btn ghost sm" id="huddleNew2">＋ New huddle group</button></div>`:""}
+      ${hist?`<div class="sec-title">Recent Huddles</div>${hist}`:""}`;
+    { const b=$("#openHuddleBtn"); if(b) b.onclick=openHuddle; }
+    { const m=$("#huddleManage"); if(m) m.onclick=()=>manageHuddle(curHuddleId); }
+    { const n=$("#huddleNew2"); if(n) n.onclick=newHuddleGroup; }
+    return;
+  }
+  renderMeetingRunner(wrap);
+}
+// Shared live-meeting runner for BOTH the L10 and the Huddle. Uses curSegs()/mtgTeam() so it drives the
+// right container on the right agenda; the only branch is the huddle's "open" (prep) phase, which has no
+// clock and lets everyone navigate + seed boxes before Start.
+function renderMeetingRunner(wrap){
+  const isHuddle=currentView==="huddle";
+  const segs=curSegs(), last=segs.length-1;
+  const openPhase=isHuddle && meeting.phase==="open";
+  const seg=segs[meeting.seg]||segs[0];
+  const agenda=segs.map((s,i)=>`<div class="ag-item ${i===meeting.seg?"cur":(i<meeting.seg?"past":"")}" data-seg="${i}">
     <div class="ag-num"><span class="n">${i+1}</span></div><div class="ag-title">${s.name}</div><div class="ag-min">${s.min}m</div></div>`).join("");
-
-  const driving=isFacilitator();
-  const scribing=isScribe();
-  const scribeName=(meeting.scribeName || (meetingHasScribe()?"" : meeting.facilitatorName) || "—");
-  const canAssignScribe=isFacilitator()||canEditTeam();
-  const scMembers=teamMembers();
   const scribeBar=`<div class="scribe-bar">
       <span class="sb-lbl">✍️ <b>Everyone can take notes.</b> <span class="sb-ro">The box you're typing in locks to you, so no one types over you.</span></span>
     </div>`;
+  if(openPhase){
+    // PREP BOARD — no timer; anyone in the huddle can navigate and seed WIFLS / Headlines / Issues.
+    const canStart=canEditHuddle();
+    wrap.innerHTML=`
+      <div class="l10-hero prep">
+        <div class="prep-tag">● Prep — not started</div>
+        <div class="seg-name">${meeting.seg+1}. ${seg.name}</div>
+        <div class="seg-sub">${seg.sub}</div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+          <button class="btn ghost sm" id="prevSeg" ${meeting.seg===0?"disabled style=opacity:.4":""}>‹</button>
+          <div style="flex:1;font-size:12px;color:var(--muted)">Add items, move between sections — everyone can.</div>
+          <button class="btn ghost sm" id="nextSeg" ${meeting.seg>=last?"disabled style=opacity:.4":""}>›</button>
+        </div>
+        ${canStart?`<button class="btn wide" id="startHuddleBtn" style="margin-top:12px">▶ Start Huddle</button>`:`<div class="hint" style="margin-top:10px">Add your items above — a huddle leader will start it.</div>`}
+      </div>
+      ${scribeBar}
+      <div id="segContent"></div>
+      <div class="agenda">${agenda}</div>
+      ${canStart?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px">Discard this prep board</button>`:""}`;
+    renderSegContent(meeting.seg);
+    const goTo=j=>{ if(j<0||j>last) return; meeting.seg=j; bumpNav(); saveL10(true); renderActiveMeeting(); };
+    { const p=wrap.querySelector("#prevSeg"); if(p) p.onclick=()=>goTo(meeting.seg-1); }
+    { const n=wrap.querySelector("#nextSeg"); if(n) n.onclick=()=>goTo(meeting.seg+1); }
+    wrap.querySelectorAll(".ag-item").forEach(a=>a.onclick=()=>goTo(+a.dataset.seg));
+    { const s=wrap.querySelector("#startHuddleBtn"); if(s) s.onclick=startHuddle; }
+    { const c=wrap.querySelector("#cancelMeeting"); if(c) c.onclick=()=>{ if(confirm("Discard this prep board? The items people added here won't be saved to minutes.")) discardMeeting(); }; }
+    return;
+  }
+  const elapsed=Math.floor(segLiveSecs());          // live time, so a re-render doesn't snap the clock back
+  const allot=seg.min*60; const over=elapsed>allot;
+  const mm=String(Math.floor(elapsed/60)).padStart(2,"0"), ss=String(elapsed%60).padStart(2,"0");
+  const driving=isFacilitator();
+  const lastLabel=isHuddle?"Finish & Wrap":"Finish & Rate";
   wrap.innerHTML=`
     ${driving?"":`<div class="follow-bar"><span class="fdot"></span><div><b>Following ${esc(meeting.facilitatorName||"the facilitator")}</b>
         <small>Your screen moves with theirs. Watch along — the facilitator drives.</small></div>
@@ -11981,21 +12266,21 @@ function renderL10(){
       <div class="alloc">${over?"Over by "+fmt(elapsed-allot):"Allotted "+seg.min+" min"} · Total ${fmt(totalLiveSecs())}</div>
       ${driving?`<div style="display:flex;gap:8px;margin-top:14px">
         <button class="btn ghost sm" id="prevSeg" ${meeting.seg===0?"disabled style=opacity:.4":""}>‹ Back</button>
-        <button class="btn sm" style="flex:1" id="nextSeg">${meeting.seg<6?"Next Segment ›":"Finish & Rate"}</button>
+        <button class="btn sm" style="flex:1" id="nextSeg">${meeting.seg<last?"Next Segment ›":lastLabel}</button>
       </div>`:""}
     </div>
     ${scribeBar}
     <div id="segContent"></div>
     ${driving?`<div class="seg-nav-bottom">
         <button class="btn ghost sm" id="prevSegB" ${meeting.seg===0?"disabled style=opacity:.4":""}>‹ Back</button>
-        <button class="btn" style="flex:1" id="nextSegB">${meeting.seg<6?"Next Segment ›":"Finish & Rate"}</button>
+        <button class="btn" style="flex:1" id="nextSegB">${meeting.seg<last?"Next Segment ›":lastLabel}</button>
       </div>`:""}
     <div class="agenda ${driving?"":"ro"}">${agenda}</div>
     ${driving?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px">End meeting early (saves a draft)</button>`:""}`;
 
   renderSegContent(meeting.seg);
   if(driving){
-    const goNext=()=>{ if(meeting.seg<6){ advanceSeg(meeting.seg+1); } else { concludeMeeting(); } };
+    const goNext=()=>{ if(meeting.seg<last){ advanceSeg(meeting.seg+1); } else { concludeMeeting(); } };
     const goPrev=()=>{ if(meeting.seg>0) advanceSeg(meeting.seg-1); };
     wrap.querySelector("#nextSeg").onclick=goNext;
     wrap.querySelector("#prevSeg").onclick=goPrev;
@@ -12023,23 +12308,23 @@ function lastL10Ts(t){ const ms=(t&&t.meetings)||[];
 function l10TodoAnchor(t){ const ts=lastL10Ts(t); return ts ? (ts-12*36e5) : (Date.now()-9*864e5); }
 function todoDoneInWindow(td, anchor){ return !!(td && td.doneAt && Date.parse(td.doneAt)>=anchor); }
 function renderSegContent(i){
-  const c=$("#segContent"); const seg=SEGMENTS[i];
+  const c=$("#segContent"); const seg=curSegs()[i];
   if(seg.key==="scorecard"){
     const cwi=currentWeekIndex();
     // Same board as the Scorecard TAB, grouped by OWNER so each person's numbers are reviewed together.
-    const rows=groupByOwner(measuresOnBoard(TEAM()), x=>x.m.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({m,mirror})=>{ const e=m.values&&m.values[cwi]; const v=e?(e.v||""):"", s=e?(e.s||""):"";
+    const rows=groupByOwner(measuresOnBoard(mtgTeam()), x=>x.m.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({m,mirror})=>{ const e=m.values&&m.values[cwi]; const v=e?(e.v||""):"", s=e?(e.s||""):"";
       return `<div class="rate-row"><div><b>${esc(m.name)}${mirror?' <span class="mir-tag">↔ shared</span>':''}</b><div style="font-size:11px;color:var(--muted)">goal ${esc(m.goal)}</div></div>
         <span class="pill ${s==="on"?"green":(s==="off"?"red":"grey")}">${v===""?"—":esc(v)}${s==="on"?" · On":(s==="off"?" · Off":"")}</span></div>`; }).join("")).join("");
-    const salesBlock=TEAM().salesCard
-      ? `<h4 style="margin-top:18px">📋 Sales Card — ${esc(salesWeekLabel(TEAM().salesCard.weekStart))}</h4>
-         ${salesReadonlyHtml(TEAM().salesCard)}
+    const salesBlock=mtgTeam().salesCard
+      ? `<h4 style="margin-top:18px">📋 Sales Card — ${esc(salesWeekLabel(mtgTeam().salesCard.weekStart))}</h4>
+         ${salesReadonlyHtml(mtgTeam().salesCard)}
          <div class="hint" style="margin-top:2px">Advocates enter/update their numbers on the <b>Sales Card</b> tab; this reviews them.</div>` : "";
     c.innerHTML=`<div class="seg-panel"><h4>This Week (W${cwi+1})</h4>${rows||'<div class="hint">No measurables. Add them on the Scorecard tab.</div>'}
       ${salesBlock}
       <textarea id="seg-note" data-lock="note:scorecard" placeholder="Notes / off-track measurables to drop into IDS…">${esc(meeting.notes.scorecard||"")}</textarea></div>`;
   }else if(seg.key==="rocks"){
     // Same board as the Rocks TAB, grouped by OWNER (name) so each person's Rocks are reviewed together.
-    const rows=groupByOwner(rocksOnBoard(TEAM()), x=>x.r.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({r,mirror})=>`<div class="rate-row rock-review" data-rid="${r.id}">
+    const rows=groupByOwner(rocksOnBoard(mtgTeam()), x=>x.r.owner).map(g=>ownerGroupHead(g.owner)+g.items.map(({r,mirror})=>`<div class="rate-row rock-review" data-rid="${r.id}">
       <div class="rr-info"><div class="rr-title"><b>${esc(r.title)}</b>${mirror?' <span class="mir-tag">↔ shared</span>':''}</div>
         <div class="rr-meta"><span class="rr-pct">${rockPct(r)}%</span></div></div>
       <select class="rate-input rock-stat rs-${r.status||'off'}" style="width:120px" data-rock-status="${r.id}"><option value="on" ${r.status==="on"?"selected":""}>On</option><option value="off" ${r.status==="off"?"selected":""}>Off</option><option value="done" ${r.status==="done"?"selected":""}>Done</option><option value="notdone" ${r.status==="notdone"?"selected":""}>Not Done</option></select></div>`).join("")).join("");
@@ -12052,8 +12337,8 @@ function renderSegContent(i){
     // Review last week's To-Do list: show what's still OPEN plus what got DONE SINCE THE LAST L10 (so the
     // meeting can report "these got done, these didn't"), including to-dos ticked off on My Board / Lists
     // between meetings. Anything created THIS meeting always shows. Done items drop off at the next meeting.
-    const created=new Set(meeting.createdTodos||[]), anchor=l10TodoAnchor(TEAM());
-    const list=TEAM().todos.filter(t=> !t.done
+    const created=new Set(meeting.createdTodos||[]), anchor=l10TodoAnchor(mtgTeam());
+    const list=mtgTeam().todos.filter(t=> !t.done
         || created.has(t.id)
         || todoDoneInWindow(t, anchor));
     list.sort((a,b)=>(a.done?1:0)-(b.done?1:0) || String(a.due||"9999").localeCompare(String(b.due||"9999")));
@@ -12062,27 +12347,40 @@ function renderSegContent(i){
       <button class="btn ${t.done?"":"ghost"} sm" data-todo-toggle="${t.id}">${t.done?"✓ Done":"Mark done"}</button></div>`).join("");
     c.innerHTML=`<div class="seg-panel"><h4>Last Week's To-Dos${list.length?` <small style="font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">— ${openN} open · ${doneN} done</small>`:""}</h4>${rows||'<div class="hint">No to-dos to review.</div>'}
       <div class="mini-add" style="margin-top:10px"><input id="seg-todo" placeholder="New 7-day to-do…"><input id="seg-todo-owner" placeholder="Owner" style="max-width:92px"><button class="btn sm" id="seg-todo-add">Add</button></div></div>`;
-    c.querySelectorAll("[data-todo-toggle]").forEach(b=>b.onclick=()=>{ const t=TEAM().todos.find(x=>x.id===b.dataset.todoToggle); if(!t) return; t.done=!t.done; t.doneAt=t.done?new Date().toISOString():""; _touchedTodos.add(t.id); saveL10(true); renderSegContent(i); });
+    c.querySelectorAll("[data-todo-toggle]").forEach(b=>b.onclick=()=>{ const t=mtgTeam().todos.find(x=>x.id===b.dataset.todoToggle); if(!t) return; t.done=!t.done; t.doneAt=t.done?new Date().toISOString():""; _touchedTodos.add(t.id); saveL10(true); renderSegContent(i); });
     const add=()=>{ const el2=$("#seg-todo"), ow=$("#seg-todo-owner"); const v=el2.value.trim(); if(!v) return; const nt={id:uid(),text:v,owner:ow.value.trim(),due:isoAddDays(todayIso(),7),done:false,created:todayIso()}; addMeetingTodo(nt); renderSegContent(i); };
     $("#seg-todo-add").onclick=add;
   }else if(seg.key==="ids"){
-    const active=meeting.activeIssue?TEAM().issues.find(x=>x.id===meeting.activeIssue):null;   // allow revisiting a SOLVED issue too
+    const active=meeting.activeIssue?mtgTeam().issues.find(x=>x.id===meeting.activeIssue):null;   // allow revisiting a SOLVED issue too
     if(!active){
-      const open=TEAM().issues.filter(x=>!x.solved), solved=TEAM().issues.filter(x=>x.solved);
+      const open=mtgTeam().issues.filter(x=>!x.solved), solved=mtgTeam().issues.filter(x=>x.solved);
       const openRows=open.map(x=>`<div class="ids-item"><div class="ids-txt">${esc(x.text)}${x.owner?`<span class="ids-by">Raised by ${esc(x.owner)}</span>`:""}</div><div class="ids-actions"><button class="btn sm" data-work="${x.id}">Work on it</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
       const solvedRows=solved.map(x=>`<div class="ids-item solved"><div class="ids-txt"><span class="ids-solved-tag">✓ Solved</span> ${esc(x.text)}</div><div class="ids-actions"><button class="btn ghost sm" data-work="${x.id}">Revisit</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
       c.innerHTML=`<div class="seg-panel"><h4>Issues List — IDS</h4>
         ${openRows||'<div class="hint">No open issues. 🎉</div>'}
         ${solvedRows?`<div class="ids-solved-head">Solved this list <small>— tap Revisit to reopen &amp; add to one, or ✕ to clear it</small></div>${solvedRows}`:""}
-        <div class="ids-addnote" style="margin-top:12px">📝 Need to add an issue? Add it from your <b>Lists</b> tab (Issues) — it drops right into this list.</div>
+        ${currentView==="huddle"
+          ? `<div class="mini-add" style="margin-top:12px"><input id="ids-new" placeholder="Add an issue to discuss…"><input id="ids-new-owner" list="ids-new-names" placeholder="Raised by" style="max-width:120px"><button class="btn sm" id="ids-new-add">Add</button></div><datalist id="ids-new-names">${ownerOptionsHtml()}</datalist>`
+          : `<div class="ids-addnote" style="margin-top:12px">📝 Need to add an issue? Add it from your <b>Lists</b> tab (Issues) — it drops right into this list.</div>`}
         <div class="hint" style="margin-top:8px">Tap “Work on it” to Identify, Discuss & Solve an issue, or ✕ to drop one that no longer belongs.</div></div>`;
-      c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=TEAM().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; bumpNav(); saveL10(true); renderSegContent(i); });
-      c.querySelectorAll("[data-del-issue]").forEach(b=>b.onclick=()=>{ const id=b.dataset.delIssue, x=TEAM().issues.find(y=>y.id===id);
+      if(currentView==="huddle"){
+        const addIssue=()=>{ const ti=$("#ids-new"), oi=$("#ids-new-owner"); const v=(ti&&ti.value.trim())||""; if(!v) return;
+          const owner=(oi&&oi.value.trim())||(myName()||"");
+          const nid="iss_"+uid(), nit={id:nid, text:v, owner, solved:false, created:todayIso()};
+          mtgTeam().issues=mtgTeam().issues||[]; mtgTeam().issues.unshift(nit); _touchedIssues.add(nid);   // local add + claim so saveL10 persists it
+          mergeTeam(mtgTeamId(), t=>{ t.issues=upsertById(t.issues||[],[nit]); });                        // merge onto the latest huddle doc — never refused
+          saveL10(true); renderSegContent(i); };
+        { const b=$("#ids-new-add"); if(b) b.onclick=addIssue; }
+        { const ti=$("#ids-new"); if(ti) ti.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); const o=$("#ids-new-owner"); if(o) o.focus(); } }; }
+        { const oi=$("#ids-new-owner"); if(oi) oi.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addIssue(); } }; }
+      }
+      c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=mtgTeam().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; bumpNav(); saveL10(true); renderSegContent(i); });
+      c.querySelectorAll("[data-del-issue]").forEach(b=>b.onclick=()=>{ const id=b.dataset.delIssue, x=mtgTeam().issues.find(y=>y.id===id);
         if(!confirm(`Delete this issue from the meeting?\n\n"${(x&&x.text)||""}"\n\nThis removes it for everyone. To-Dos already created from it are kept.`)) return;
-        TEAM().issues=TEAM().issues.filter(y=>y.id!==id); _deletedIssues.add(id); if(meeting.activeIssue===id) meeting.activeIssue=null; bumpNav(); mergeTeam(TEAM().id, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); saveL10(true); renderSegContent(i); });
+        mtgTeam().issues=mtgTeam().issues.filter(y=>y.id!==id); _deletedIssues.add(id); if(meeting.activeIssue===id) meeting.activeIssue=null; bumpNav(); mergeTeam(mtgTeam().id, t=>{ t.issues=(t.issues||[]).filter(y=>y&&y.id!==id); }); saveL10(true); renderSegContent(i); });
     }else{
       seedIdsFromNote(active);
-      const linked=TEAM().todos.filter(t=>t.fromIssue===active.id);
+      const linked=mtgTeam().todos.filter(t=>t.fromIssue===active.id);
       const tdl=linked.map(t=>`<div class="tdl-row"><div class="tdl-txt ${t.done?"done":""}">${esc(t.text)}</div><div class="tdl-meta">${t.owner?esc(t.owner)+" · ":""}${t.due?"due "+fmtShort(t.due):"7-day"}${t.done?" · done":""}</div></div>`).join("");
       c.innerHTML=`<div class="seg-panel ids-work">
         <button class="btn ghost sm" id="ids-back">‹ Back to issues</button>
@@ -12117,7 +12415,7 @@ function renderSegContent(i){
       const back=()=>{ meeting.activeIssue=null; renderSegContent(i); };
       $("#ids-back").onclick=back; $("#ids-keep").onclick=back;
       { const bs=$("#ids-solved"); if(bs) bs.onclick=()=>{
-        const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;   // re-fetch LIVE at click time — a rebuild must not make this act on a stale, detached issue
+        const a=(meeting&&meeting.activeIssue)?mtgTeam().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;   // re-fetch LIVE at click time — a rebuild must not make this act on a stale, detached issue
         stampSolved(a,true); _touchedIssues.add(a.id);   // LWW stamp + claim it so a teammate's stale save can't un-solve it
         // Snapshot the worksheet into this meeting's minutes. UPSERT by issue id so re-solving a revisited
         // issue doesn't list it twice, and keep the raiser (owner) so the archived minutes show "raised by".
@@ -12128,7 +12426,7 @@ function renderSegContent(i){
         meeting.activeIssue=null; bumpNav(); saveL10(true); renderSegContent(i);
       }; }
       { const br=$("#ids-reopen"); if(br) br.onclick=()=>{   // put a solved issue back on the open list (still worked on)
-        const a=(meeting&&meeting.activeIssue)?TEAM().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;
+        const a=(meeting&&meeting.activeIssue)?mtgTeam().issues.find(x=>x&&x.id===meeting.activeIssue):null; if(!a) return;
         stampSolved(a,false); _touchedIssues.add(a.id);   // LWW stamp + claim it for the reopen too
         meeting.solvedIssues=(meeting.solvedIssues||[]).filter(x=>!(x&&x.issueId===a.id));   // drop its snapshot so a left-reopened issue isn't filed as "solved"
         bumpNav(); saveL10(true); renderSegContent(i);
@@ -12145,7 +12443,7 @@ function renderSegContent(i){
   }else if(seg.key==="conclude"){
     const members=(meetingRoster().length?meetingRoster():[{id:"me",name:"Me"}]).slice()
       .sort((a,b)=>((a.guest?1:0)-(b.guest?1:0)) || String(a.name||"").localeCompare(String(b.name||"")));   // same order as the opening WIFLS: team members alphabetically, then guests
-    const meetingTodos=(meeting.createdTodos||[]).map(id=>TEAM().todos.find(t=>t.id===id)).filter(Boolean);
+    const meetingTodos=(meeting.createdTodos||[]).map(id=>mtgTeam().todos.find(t=>t.id===id)).filter(Boolean);
     const dataList=`<datalist id="member-names">${ownerOptionsHtml()}</datalist>`;
     const recap=meetingTodos.length?meetingTodos.map(t=>`<div class="recap-todo">
         <div class="recap-txt">${esc(t.text)}</div>
@@ -12175,7 +12473,7 @@ function renderSegContent(i){
       <div class="wf-addguest"><input id="cc-guest" placeholder="＋ Add an attendee to rate…"><button class="btn ghost sm" id="cc-guest-add">Add attendee</button></div>
       <div class="rate-avg" id="rateAvg">Average: —</div></div>`;
     c.querySelectorAll(".wf-in[data-wfc]").forEach(inp=>inp.oninput=()=>{ meeting.byPerson=meeting.byPerson||{}; meeting.byPerson.wifls_close=meeting.byPerson.wifls_close||{}; meeting.byPerson.wifls_close[inp.dataset.wfc]=inp.value; stampBy("wifls_close",inp.dataset.wfc); _touchedBy.add("wifls_close:"+inp.dataset.wfc); touchLock("by:wifls_close:"+inp.dataset.wfc); saveL10(); });
-    c.querySelectorAll("[data-todo-owner]").forEach(inp=>inp.oninput=()=>{ const t=TEAM().todos.find(x=>x.id===inp.dataset.todoOwner); if(t){ t.owner=inp.value; saveL10(); } });
+    c.querySelectorAll("[data-todo-owner]").forEach(inp=>inp.oninput=()=>{ const t=mtgTeam().todos.find(x=>x.id===inp.dataset.todoOwner); if(t){ t.owner=inp.value; saveL10(); } });
     c.querySelectorAll("[data-guest-del]").forEach(b=>b.onclick=()=>{ removeMeetingGuest(b.dataset.guestDel); bumpNav(); saveL10(true); renderSegContent(i); });
     { const g=$("#cc-guest"), ga=$("#cc-guest-add");
       const addG=()=>{ if(!g) return; if(addMeetingGuest(g.value)){ g.value=""; bumpNav(); saveL10(true); renderSegContent(i); } else { g.value=""; g.focus(); } };
@@ -12221,7 +12519,7 @@ function renderSegContent(i){
   // the meeting concluded (and were lost outright if the tab closed). save() makes the minutes
   // durable AND is what lets the rest of the team read along live.
   const note=$("#seg-note");
-  if(note){ const key=SEGMENTS[i].key;
+  if(note){ const key=curSegs()[i].key;
     note.oninput=()=>{ meeting.notes[key]=note.value; touchLock("note:"+key); saveL10(); }; }
   const casc=$("#seg-cascade"); if(casc) casc.oninput=()=>{ meeting.notes.cascade=casc.value; touchLock("note:cascade"); saveL10(); };
   { const aib=$("#cc-ai"); if(aib) aib.onclick=()=>aiRun(aib, $("#cc-ai-status"), "Reviewing the meeting…", async ()=>{
@@ -12229,7 +12527,7 @@ function renderSegContent(i){
       if(!digest.trim()) throw new Error("Nothing recorded yet — capture some notes first.");
       const vals=[...document.querySelectorAll("[data-rate]")].map(x=>parseFloat(x.value)).filter(v=>!isNaN(v));
       const rating=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):"";
-      const text=await aiCall("l10_minutes",{ teamName:TEAM().name, transcript:digest, rating });
+      const text=await aiCall("l10_minutes",{ teamName:mtgTeam().name, transcript:digest, rating });
       const j=aiParseJSON(text);
       if(j.cascade){ const ta=$("#seg-cascade"); if(ta) ta.value=j.cascade; meeting.notes.cascade=j.cascade; _progNotes.add("cascade"); }
       if(j.summary){ meeting.notes.aiSummary=j.summary; _progNotes.add("aiSummary"); const box=$("#cc-ai-summary"); if(box){ box.hidden=false; box.innerHTML="<b>Meeting summary</b><br>"+esc(j.summary).replace(/\n/g,"<br>"); } }
@@ -12293,14 +12591,39 @@ function startMeeting(){
   TEAM().liveMeeting=meeting; saveL10(true);       // publish it so the team can follow (merge — never refused)
   startTick(); renderL10();
 }
+// ===== Huddle: two-phase open → live =====
+// Open creates the shared meeting in "open" (prep) phase — no clock, everyone seeds WIFLS/Headlines/Issues.
+function openHuddle(){
+  const h=HUDDLE(); if(!h || !canEditHuddle(h)) return;
+  meeting={date:todayIso(),startedAt:0,capMin:HUDDLE_CAP_MIN,seg:0,segStart:0,segElapsed:0,totalElapsed:0,navAt:Date.now(),
+    phase:"open",kind:"huddle",notes:{},ratings:{},createdTodos:[],activeIssue:null,solvedIssues:[],locks:{},byPerson:{},byPersonAt:{},
+    facilitatorEmail:myEmail(), facilitatorName:myName()||myEmail(), scribeEmail:myEmail(), scribeName:myName()||myEmail()};
+  h.liveMeeting=meeting; saveL10(true); renderHuddle();
+}
+// Start flips the prepped board to the live, timed huddle — everything already seeded is right there.
+function startHuddle(){
+  if(!meeting || meeting.phase!=="open" || !canEditHuddle()) return;
+  meeting.phase="live"; meeting.startedAt=Date.now(); meeting.seg=0; meeting.segStart=Date.now(); meeting.segElapsed=0; meeting.totalElapsed=0;
+  meeting.facilitatorEmail=myEmail(); meeting.facilitatorName=myName()||myEmail();   // whoever starts drives
+  if(!meeting.scribeEmail){ meeting.scribeEmail=myEmail(); meeting.scribeName=myName()||myEmail(); }
+  bumpNav(); saveL10(true); startTick(); renderHuddle();
+}
+// Discard an un-started prep board (nothing filed to minutes).
+function discardMeeting(){
+  const t=mtgTeam(); if(!t) return;
+  _justConcluded={sa:(meeting&&meeting.startedAt)||0, at:Date.now()};
+  t.liveMeeting=null; stopTick(); meeting=null;
+  const _tid=t.id; if(MULTI) mergeTeamMulti(_tid, st=>{ if(st) st.liveMeeting=null; }); else mergeSave(state=>{ const st=(state.teams||[]).find(x=>x&&x.id===_tid); if(st) st.liveMeeting=null; });
+  renderActiveMeeting(); setSync("Prep board discarded");
+}
 // Whoever started it drives; everyone else follows read-only. Email is the stable key —
 // names can be blank or change, and two people could share a first name.
 function isFacilitator(){ return !!meeting && (!meeting.facilitatorEmail || meeting.facilitatorEmail===myEmail()); }
 function takeOverMeeting(){
-  if(!meeting || !canEditTeam()) return;
-  if(!confirm(`Take over running this L10 from ${meeting.facilitatorName||"the facilitator"}?`)) return;
+  if(!meeting || !canRunMeeting()) return;
+  if(!confirm(`Take over running this ${currentView==="huddle"?"huddle":"L10"} from ${meeting.facilitatorName||"the facilitator"}?`)) return;
   meeting.facilitatorEmail=myEmail(); meeting.facilitatorName=myName()||myEmail(); bumpNav();
-  saveL10(true); renderL10();
+  saveL10(true); renderActiveMeeting();
 }
 /* ===== The SCRIBE = the single note-taker =====
    Only the scribe can edit the meeting minutes (notes, IDS, to-dos, ratings, WIFLS/Headlines) — that's
@@ -12315,8 +12638,8 @@ function isScribe(){ if(!meeting) return false;
 function setScribe(name){ if(!meeting) return;
   meeting.scribeName=String(name||"").trim();
   meeting.scribeEmail=meeting.scribeName?emailForName(meeting.scribeName):"";   // "" if they've never logged in — name gate still applies
-  bumpNav(); saveL10(true); renderL10(); }
-function becomeScribe(){ if(!meeting) return; meeting.scribeEmail=myEmail(); meeting.scribeName=myName()||myEmail(); bumpNav(); saveL10(true); renderL10(); }
+  bumpNav(); saveL10(true); renderActiveMeeting(); }
+function becomeScribe(){ if(!meeting) return; meeting.scribeEmail=myEmail(); meeting.scribeName=myName()||myEmail(); bumpNav(); saveL10(true); renderActiveMeeting(); }
 /* ===== Field-lock primitives (see the LOCK_TTL note up top) ===== */
 function lockMine(l){ if(!l) return false; const me=myEmail(); if(l.email&&me) return l.email===me; return sameName(l.name, myName()); }
 function lockActive(l){ return !!(l && (Date.now()-(l.at||0) < LOCK_TTL)); }
@@ -12440,7 +12763,7 @@ function wireDictation(){
 }
 function advanceSeg(to){ if(!isFacilitator()) return; stopDictation(); commitSegTime();
   meeting.totalElapsed=(meeting.totalElapsed||0)+(meeting.segElapsed||0);   // roll the finished segment into the meeting total
-  meeting.seg=to; meeting.segStart=Date.now(); meeting.segElapsed=0; bumpNav(); saveL10(true); renderL10(); }   // navAt stamps this navigation so a stale content write can't revert it
+  meeting.seg=to; meeting.segStart=Date.now(); meeting.segElapsed=0; bumpNav(); saveL10(true); renderActiveMeeting(); }   // navAt stamps this navigation so a stale content write can't revert it
 function commitSegTime(){ if(!meeting||!meeting.segStart) return; const add=(Date.now()-meeting.segStart)/1000; meeting.segElapsed=(meeting.segElapsed||0)+add; }
 // The running clock = committed segElapsed + wall-clock since this segment started. The RENDER and
 // the TICK must both use this — otherwise a re-render draws the committed value (≈0) and the clock
@@ -12471,12 +12794,12 @@ function discardLiveMeeting(){ if(!meeting||meeting._concluding) return;
   meeting._concluding=true;
   _justConcluded={sa:(meeting.startedAt||0), at:Date.now()};   // a stale snapshot can't flicker it back onto our screen
   clearTimeout(_l10Timer); _l10Timer=null;
-  const t=TEAM(); if(t) t.liveMeeting=null; const _tid=t&&t.id;
+  const t=mtgTeam(); if(t) t.liveMeeting=null; const _tid=t&&t.id;
   const applyClear=(st)=>{ if(st) st.liveMeeting=null; };
   if(_tid){ if(MULTI) mergeTeamMulti(_tid, applyClear); else mergeSave(state=>{ applyClear((state.teams||[]).find(x=>x&&x.id===_tid)); }); }
   stopTick(); meeting=null;
   const cb=$("#l10CapBar"); if(cb) cb.remove();
-  if(currentView==="l10") renderL10();
+  if(currentView==="l10"||currentView==="huddle") renderActiveMeeting();
   setSync("An L10 was started and left empty — cleared.");
 }
 /* ===== THE WATCHDOG — ends an abandoned L10 even when NO ONE is looking at it =====
@@ -12514,6 +12837,7 @@ function paintTimer(){
    • Opened later already well past the window (abandoned overnight) → any team editor's client ends it.
    Countdown is derived purely from the (synced) start time + capMin, so everyone sees the same clock. */
 const L10_CAP_MIN=90;               // default meeting length; "＋15 minutes" bumps meeting.capMin
+const HUDDLE_CAP_MIN=40;            // a huddle is shorter than an L10
 const L10_GRACE_SECS=5*60;          // once over the cap, this long to add time before it auto-concludes
 function checkMeetingCap(){
   if(!meeting) return;
@@ -12564,14 +12888,14 @@ function buildMeetingRec(opts){
   const vals=members.map(m=>parseFloat(meeting.ratings[m.id])).filter(v=>!isNaN(v));
   const avg=vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):0;
   const durationMin=meetingDurationMin();
-  const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
-  const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(TEAM());
-  const reviewedTodos=TEAM().todos
+  const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=mtgTeam().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
+  const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(mtgTeam());
+  const reviewedTodos=mtgTeam().todos
     .filter(t=> !createdIds.has(t.id) && ( !t.done || todoDoneInWindow(t, revAnchor) ))
     .map(t=>({text:t.text, owner:t.owner, due:t.due, done:!!t.done}));
   const ratingList=members.map(m=>({name:m.name,score:meeting.ratings[m.id]}))
                           .filter(r=>r.score!==undefined&&r.score!=="");
-  const t=TEAM();
+  const t=mtgTeam();
   const rec={id:"m_"+(meeting.startedAt||Date.now()),date:meeting.date,durationMin,avg,
     ratings:{...meeting.ratings}, ratingList,
     notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
@@ -12591,7 +12915,7 @@ function cancelToDraft(){
   _justConcluded={sa:(meeting.startedAt||0), at:Date.now()};   // a stale snapshot can't flicker the ended meeting back onto our screen
   clearTimeout(_l10Timer); _l10Timer=null;   // kill any pending debounced write so it can't resurrect the meeting
   commitSegTime();
-  const t=TEAM();
+  const t=mtgTeam();
   const rec=buildMeetingRec({draft:true});
   t.meetings.push(rec);
   t.liveMeeting=null;
@@ -12607,7 +12931,7 @@ function cancelToDraft(){
     if(MULTI) mergeTeamMulti(_tid, applyCancel); else mergeSave(state=>{ applyCancel((state.teams||[]).find(x=>x&&x.id===_tid)); }); }
   stopTick(); meeting=null;
   const cb=$("#l10CapBar"); if(cb) cb.remove();
-  renderL10();
+  renderActiveMeeting();
   setSync("Saved as draft minutes 📝");
   showMinutes(rec.id);   // open the draft so staff see it saved and can finish/download/delete it
 }
@@ -12622,17 +12946,17 @@ function concludeMeeting(auto){
   const vals=members.map(m=>parseFloat(meeting.ratings[m.id])).filter(v=>!isNaN(v));
   const avg=vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):0;
   const durationMin=meetingDurationMin();
-  const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=TEAM().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
+  const todosRecap=(meeting.createdTodos||[]).map(id=>{ const t=mtgTeam().todos.find(x=>x.id===id); return t?{text:t.text,owner:t.owner,due:t.due,fromIssueText:t.fromIssueText||""}:null; }).filter(Boolean);
   // Snapshot last week's reviewed TDL (done + not done, excluding ones created this meeting) so the
   // minutes report what got completed vs. carried over.
-  const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(TEAM());
-  const reviewedTodos=TEAM().todos
+  const createdIds=new Set(meeting.createdTodos||[]), revAnchor=l10TodoAnchor(mtgTeam());
+  const reviewedTodos=mtgTeam().todos
     .filter(t=> !createdIds.has(t.id) && ( !t.done || todoDoneInWindow(t, revAnchor) ))
     .map(t=>({text:t.text, owner:t.owner, due:t.due, done:!!t.done}));
   // resolve rating names now — the minutes must stay readable even if members change later
   const ratingList=members.map(m=>({name:m.name,score:meeting.ratings[m.id]}))
                           .filter(r=>r.score!==undefined&&r.score!=="");
-  const t=TEAM();
+  const t=mtgTeam();
   const rec={id:"m_"+(meeting.startedAt||Date.now()),date:meeting.date,durationMin,avg,   // deterministic id (from start time) so two clients auto-concluding the same L10 file ONE record, not two
     ratings:{...meeting.ratings}, ratingList,
     notes:{...meeting.notes}, byPerson:JSON.parse(JSON.stringify(meeting.byPerson||{})), todos:todosRecap, reviewedTodos:reviewedTodos,
@@ -12669,7 +12993,7 @@ function concludeMeeting(auto){
     if(MULTI) mergeTeamMulti(_tid, applyConclude); else mergeSave(state=>{ applyConclude((state.teams||[]).find(x=>x&&x.id===_tid)); }); }
   stopTick(); meeting=null;   // ends it for everyone following
   const cb=$("#l10CapBar"); if(cb) cb.remove();
-  renderL10();
+  renderActiveMeeting();
   setSync(auto?"90-minute cap reached — L10 concluded ⏱":"Minutes saved to history 🎉");
   if(!auto) showMinutes(rec.id);   // manual conclude opens the saved minutes so staff can download the PDF and send it the usual way; an auto-conclude just files them silently
 }
@@ -14072,6 +14396,7 @@ $("#importFile").onchange=e=>{
 const TITLES={scorecard:["Scorecard","13-week measurables"],rocks:["Rocks","Quarterly SMART goals"],
   vision:["Vision","V/TO & Accountability"],proven:["Proven Process","The Warriors Way Home"],
   l10:["L10 Meeting","Level 10 weekly agenda"],
+  huddle:["Huddle","Team huddle — WIFLS, Headlines & Issues"],
   sales:["Sales Card","Custom weekly grid"],
   lists:["Lists","Issues & To-Dos"],tools:["Tools","Warriors Heart Operating System"],
   setup:["Setup","Your account & backup"],admin:["Admin","Teams, people & access"],
@@ -14391,7 +14716,9 @@ function recHire(c){
 }
 let currentView="scorecard";
 function switchView(v){
+  const prevView=currentView;
   if(v!=="vision") acDraftMode=false;              // draft chart is confined to the chart view — exit it on navigate-away
+  if(v==="huddle" && !huddlesForUser().length && !canManageHuddles()) v="l10";   // no huddle access → fall back
   if(v==="admin" && !canManagePeople()) v="setup";   // the onboarding permission opens a TRIMMED Admin tab; full admins see everything
   if(v==="health" && !canSeeHealth()) v="vision"; // same for the leadership dashboard
   if(v==="evals" && !canDoEvals() && !canSeeBranchEvals()) v="board";     // supervisors, facility leaders + HR/admins reach evaluations
@@ -14400,7 +14727,9 @@ function switchView(v){
   if(v==="sales" && !canSeeSales()) v="scorecard";  // sales card shows only for teams that have one (+ their leaders)
   if(v!=="people") paPerson=null;                 // don't leave someone's worksheet open behind you
   currentView=v;
+  if(v==="huddle"||prevView==="huddle") syncMeetingRef();   // rebind `meeting` to the huddle (or back to the team) when crossing into/out of the Huddle view
   enforceTeamPin();                               // non-switchers stay locked to their own team
+  if(v==="huddle") enforceHuddlePin();
   refreshAdminNav();
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===v));
   document.querySelectorAll(".view").forEach(sec=>sec.classList.toggle("active",sec.id==="view-"+v));
@@ -14415,6 +14744,7 @@ function switchView(v){
                           :(v==="people")?"Core Values & GWC · "+qLabel(paQuarter||curQuarter())
                           :(v==="board")?(myName()?myName()+" · across all your teams":"across all your teams")  /* textContent — do NOT esc() */
                           :(v==="guide")?"How we use this to run the company"
+                          :(v==="huddle")?((HUDDLE()||{}).name||"Huddle group")
                           :TEAM().name;
   renderTeamPicker();
   renderUserBadge();
@@ -14423,6 +14753,7 @@ function switchView(v){
   if(v==="rocks") renderRocks();
   if(v==="vision") renderVision();
   if(v==="l10") renderL10();
+  if(v==="huddle") renderHuddle();
   if(v==="sales") renderSales();
   if(v==="lists") renderLists();
   if(v==="proven") renderProven();
@@ -14436,7 +14767,7 @@ function switchView(v){
   if(v==="evals") renderEvals();
   if(v==="recruiting") renderRecruiting();
   if(v==="guide") renderGuide();
-  if(v==="l10") startPresence(); else stopPresence();   // "who's on this L10" bar — live only on the L10 view
+  if(v==="l10"||v==="huddle") startPresence(); else stopPresence();   // "who's here" bar — live on the L10 and Huddle views
   refreshNotes();
 }
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>switchView(b.dataset.view));
@@ -14472,6 +14803,11 @@ document.querySelectorAll("#view-l10 .subtabs button").forEach(b=>b.onclick=()=>
   if(meeting && b.dataset.l10==="archive" && !confirm("A meeting is in progress. Look at the archive anyway?\n\nYour meeting keeps running — tap “Run Meeting” to go back to it.")) return;
   l10Mode=b.dataset.l10; document.querySelectorAll("#view-l10 .subtabs button").forEach(x=>x.classList.toggle("active",x===b));
   renderL10();
+});
+document.querySelectorAll("#view-huddle .subtabs button").forEach(b=>b.onclick=()=>{
+  if(meeting && b.dataset.huddle==="archive" && !confirm("A huddle is in progress. Look at the archive anyway?\n\nYour huddle keeps running — tap “Huddle” to go back to it.")) return;
+  huddleMode=b.dataset.huddle; document.querySelectorAll("#view-huddle .subtabs button").forEach(x=>x.classList.toggle("active",x===b));
+  renderHuddle();
 });
 
 /* ================= MODAL ================= */
@@ -14727,7 +15063,7 @@ function wireHelpButtons(){
     b.onclick=()=>{ helpUser(b.textContent); helpRespond(b.textContent); };
   });
 }
-function renderAll(){ renderScorecard(); if(currentView==="rocks")renderRocks(); if(currentView==="vision")renderVision(); if(currentView==="lists")renderLists(); if(currentView==="proven")renderProven(); if(currentView==="tools")renderTools(); if(currentView==="setup")renderSetup(); if(currentView==="l10")renderL10(); }
+function renderAll(){ renderScorecard(); if(currentView==="rocks")renderRocks(); if(currentView==="vision")renderVision(); if(currentView==="lists")renderLists(); if(currentView==="proven")renderProven(); if(currentView==="tools")renderTools(); if(currentView==="setup")renderSetup(); if(currentView==="l10")renderL10(); if(currentView==="huddle")renderHuddle(); }
 
 /* ================= BRAND / SPLASH INIT ================= */
 function applyBrandImages(){
@@ -14740,7 +15076,7 @@ function applyBrandImages(){
 }
 applyBrandImages();
 if(window.matchMedia){ const mq=window.matchMedia("(prefers-color-scheme: dark)");
-  (mq.addEventListener?mq.addEventListener.bind(mq,"change"):mq.addListener.bind(mq))(()=>{ applyBrandImages(); if(currentView==="l10") renderL10(); }); }
+  (mq.addEventListener?mq.addEventListener.bind(mq,"change"):mq.addListener.bind(mq))(()=>{ applyBrandImages(); if(currentView==="l10") renderL10(); else if(currentView==="huddle") renderHuddle(); }); }
 // hide splash after a short brand moment
 setTimeout(()=>{ const sp=$("#splash"); if(sp) sp.classList.add("hide"); }, 1300);
 setTimeout(()=>{ const sp=$("#splash"); if(sp) sp.style.display="none"; }, 1900);
