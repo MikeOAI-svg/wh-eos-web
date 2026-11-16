@@ -102,7 +102,8 @@ function inviteHtml(name, link, inviter, team){
             <a href="${esc(link)}" style="display:inline-block;padding:13px 26px;font-size:15px;font-weight:700;color:#fff;text-decoration:none;border-radius:10px">Set your password →</a>
           </td></tr></table>
           <p style="margin:0 0 6px;font-size:12.5px;line-height:1.5;color:#78716c">If the button doesn't work, copy and paste this link into your browser:</p>
-          <p style="margin:0 0 18px;font-size:12px;line-height:1.5;word-break:break-all"><a href="${esc(link)}" style="color:#b4530f">${esc(link)}</a></p>
+          <p style="margin:0 0 16px;font-size:12px;line-height:1.5;word-break:break-all"><a href="${esc(link)}" style="color:#b4530f">${esc(link)}</a></p>
+          <p style="margin:0 0 12px;font-size:12.5px;line-height:1.5;color:#78716c">For your security this link is good for <b>1 hour</b>. If it's already expired when you open it, no problem — go to <a href="${esc(APP_URL)}/?setup" style="color:#b4530f">${esc(APP_URL.replace(/^https?:\/\//,""))}</a> and we'll email you a fresh one in seconds.</p>
           <p style="margin:0;font-size:12px;line-height:1.5;color:#a8a29e">If you weren't expecting this, you can ignore this email — no account changes happen until you set a password.</p>
         </td></tr>
         <tr><td style="padding:16px 28px 26px;border-top:1px solid #efeae0"><div style="font-size:11px;color:#a8a29e">Warriors Heart · HEART.OS</div></td></tr>

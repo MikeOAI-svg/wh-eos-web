@@ -1903,7 +1903,7 @@
       <input id="lg-email" type="email" placeholder="Email" autocomplete="username" enterkeyhint="next">
       <input id="lg-pass" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go">
       <button class="btn wide" id="lg-go">Sign In</button>
-      <button class="lg-link" id="lg-forgot">Forgot password?</button>
+      <button class="lg-link" id="lg-forgot">First time here, or forgot your password? Email me a sign-in link</button>
       <div class="lg-msg" id="lg-msg"></div>
     </div>
   </div>
@@ -5282,7 +5282,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=236;
+const BUILD=238;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5915,7 +5915,8 @@ function adoptMulti(){
     if(!_modalOpen){
       const lm=(_teamDocs[curMtgId()]||{}).liveMeeting;   // read the current meeting doc directly — no full assemble
       if(!lm) _navJump=true;   // meeting ended elsewhere → leave the dead segment now
-      else if((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null) || (lm.phase||"")!==(meeting.phase||"")) _navJump=true;   // a huddle flipping open→live also jumps everyone in
+      else if((lm.phase||"")!==(meeting.phase||"")) _navJump=true;   // open→live (or ended) always jumps everyone in
+      else if((lm.phase||meeting.phase)!=="open" && ((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null))) _navJump=true;   // follow-the-facilitator ONLY once live — during a huddle PREP board each person browses on their own (prepSeg), so a differing server seg must never yank them back
     }
   }
   if(_multiBooted && !_navJump && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
@@ -8220,64 +8221,27 @@ function maybeOnboard(){ if(needsOnboarding()) showOnboard(); else hideOnboard()
 function hideOnboard(){ const o=$("#onboard"); if(o) o.classList.add("hide"); }
 function showOnboard(){
   const ov=$("#onboard"); if(!ov) return;
-  const seats=((data.accountability||{}).seats)||[];
-  // FACILITY FIRST: a new person picks the facility they fall under, then only sees THAT facility's
-  // seats — never the whole company's list. Facilities = the Integrator's direct reports (same as the
-  // chart's facility tabs). Seats outside every facility go under "Company leadership".
-  const facs=acFunctionSeats(), facIds=new Set(facs.map(f=>f.id));
-  const facOf=s=>{ const pl=pillarSeatOf(s.id); return (pl&&facIds.has(pl.id))?pl.id:ONB_COMPANY; };
-  const useFac=facs.length>0;   // no Integrator/facilities on the chart yet → fall back to the full list
-  const hasCompany=useFac && seats.some(s=>facOf(s)===ONB_COMPANY && !seatOpensRestricted(s));
-  if(useFac && onbFac && onbFac!==ONB_COMPANY && !facIds.has(onbFac)) onbFac=null;
-  const shown=(useFac?(onbFac?seats.filter(s=>facOf(s)===onbFac):[]):seats).filter(s=>!seatOpensRestricted(s));
-  if(onbSeat && !shown.some(s=>s.id===onbSeat)) onbSeat=null;   // switched facility → drop a seat from the old one
-  const picked=onbSeat?seats.find(s=>s.id===onbSeat):null;
-  // The admin builds the chart; a new user PICKS their existing seat (no self-created duplicates).
-  // Several people can share one seat, so any seat is joinable.
-  const list=shown.slice().sort((a,b)=>String(a.role||"").localeCompare(String(b.role||"")))
-    .map(s=>{ const occ=seatNames(s);
-      return `<button type="button" class="onb-pick ${picked&&picked.id===s.id?"on":""}" data-pick="${s.id}">
-        <span class="op-role">${esc(s.role||"Untitled")}</span>
-        <span class="op-occ">${occ.length?esc(occ.join(", ")):"open seat"}</span></button>`; }).join("");
-  const facBtn=(id,label)=>`<button type="button" class="onb-seat ${onbFac===id?"on":""}" data-fac="${id}">${esc(label)}</button>`;
-  const facName=onbFac===ONB_COMPANY?"Company leadership":((facs.find(f=>f.id===onbFac)||{}).role||"");
-  // The seat picker (facility → seat) is now OPT-IN — by default a new person just enters their name and
-  // lands in the admin's waiting room, so nobody picks the wrong seat. "I know my seat" reveals the picker.
-  const pickerHtml=`
-    ${useFac?`<div class="field"><label>Your facility</label>
-      <div class="onb-seats">${facs.map(f=>facBtn(f.id,f.role||"Facility")).join("")}${hasCompany?facBtn(ONB_COMPANY,"Company leadership"):""}</div></div>`:""}
-    <div class="field"><label>Your seat${useFac&&onbFac?" · "+esc(facName):""}</label>
-      ${!seats.length?`<div class="hint">No seats on the chart yet — your admin will place you.</div>`
-        :(useFac&&!onbFac)?`<div class="hint">Choose your facility above to see its seats.</div>`
-        :shown.length?`<div class="onb-picklist">${list}</div>`
-        :`<div class="hint">No seats under this facility yet — your admin will place you.</div>`}</div>`;
+  // SIMPLE first-run gate: a new person just confirms their name (and, optionally, their role/team). The
+  // admin places them on the right team/seat from the Accountability Chart — so nobody has to understand
+  // facilities or seats on day one, and nobody lands in the wrong seat. (The old self-pick seat chooser was
+  // removed here: it was the confusing part, and the admin assigns seats anyway.)
   ov.innerHTML=`<div class="onb-card">
     <svg class="onb-pulse" role="img" aria-label="HEART.OS" viewBox="0 0 120 60" style="width:150px;height:auto;display:block;margin:0 auto 6px;overflow:visible;filter:drop-shadow(0 8px 24px rgba(216,94,22,.28))"><polyline points="6,34 46,34 58,34 68,13 82,51 94,34 114,34" fill="none" style="stroke:var(--accent)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <div class="onb-word">HEART<span class="hl">.OS</span></div>
     <div style="font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-top:4px">Warriors Heart</div>
-    <h2 class="onb-h">Welcome — let's get you set up</h2>
-    <p class="onb-sub">Signed in as <b>${esc(myEmail())}</b>. ${onbPickMode
-      ? "Choose your facility and seat, then enter your name. Several people can share one seat."
-      : "Just enter your name — an admin will add you to the right team. (You no longer pick your own seat, so no one lands in the wrong one.)"}</p>
-    <div class="field"><label>Your full name</label><input id="onb-name" placeholder="e.g. Aaron Whitfield" value="${esc(onbName)}"></div>
+    <h2 class="onb-h">Welcome to HEART.OS</h2>
+    <p class="onb-sub">You're signed in as <b>${esc(myEmail())}</b>. Just tell us your name — your admin takes care of adding you to the right team.</p>
+    <div class="field"><label>Your full name</label><input id="onb-name" placeholder="e.g. Aaron Whitfield" value="${esc(onbName)}" autocomplete="name"></div>
     <div class="field"><label>Your role or team <span style="color:var(--muted);font-weight:600">· optional — helps your admin place you faster</span></label><input id="onb-role" placeholder="e.g. Admissions Advocate · Texas" value="${esc(onbRole)}"></div>
-    ${onbPickMode?pickerHtml:""}
-    <button class="btn wide" id="onb-done">${onbPickMode?"Join this seat":"Enter →"}</button>
-    ${onbPickMode
-      ? `<button type="button" class="onb-skip" id="onb-waitroom">Not sure which seat? Let my admin place me instead</button>`
-      : `<button type="button" class="onb-skip" id="onb-pickseat">I know exactly which seat is mine — let me pick it</button>`}
+    <button class="btn wide" id="onb-done">Enter HEART.OS →</button>
     <div class="onb-msg" id="onb-msg"></div>
   </div>`;
   ov.classList.remove("hide");
-  const grabFields=()=>{ onbName=($("#onb-name").value||"").trim(); onbRole=($("#onb-role")?($("#onb-role").value||""):onbRole).trim(); };
-  const nm=$("#onb-name"); if(nm) nm.oninput=()=>{ onbName=nm.value; };
+  const nm=$("#onb-name"); if(nm){ nm.oninput=()=>{ onbName=nm.value; }; setTimeout(()=>{ try{ nm.focus(); }catch(e){} },60); }
   const rl=$("#onb-role"); if(rl) rl.oninput=()=>{ onbRole=rl.value; };
-  // Picking a facility or seat re-renders to highlight it — keep the typed name + role.
-  ov.querySelectorAll("[data-fac]").forEach(b=>b.onclick=()=>{ grabFields(); onbFac=b.dataset.fac; showOnboard(); });
-  ov.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{ grabFields(); onbSeat=b.dataset.pick; showOnboard(); });
-  { const pb=$("#onb-pickseat"); if(pb) pb.onclick=()=>{ grabFields(); onbPickMode=true; showOnboard(); }; }
-  { const wb=$("#onb-waitroom"); if(wb) wb.onclick=()=>{ grabFields(); onbSeat=null; onbPickMode=false; showOnboard(); }; }
-  $("#onb-done").onclick=()=>finishOnboard(!onbPickMode);   // default (waiting room) = skip the seat
+  if(nm) nm.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); if(rl) rl.focus(); else finishOnboard(true); } };
+  if(rl) rl.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); finishOnboard(true); } };
+  $("#onb-done").onclick=()=>finishOnboard(true);   // always the waiting room — admin assigns the seat
 }
 function finishOnboard(skipSeat){
   const name=($("#onb-name").value||"").trim();
@@ -11636,6 +11600,7 @@ const HUDDLE_SEGMENTS=[
   {key:"conclude",  name:"Wrap-Up",   min:4,  sub:"To-dos, owners & a quick rating"}
 ];
 let meeting=null, tick=null;
+let prepSeg=0;   // HUDDLE PREP board only: each viewer's OWN segment position (WIFLS/Headlines/Issues). Kept LOCAL — never written to the shared doc and never driven by sync — so prep is free browsing/seeding. (Fixes "prep snaps back to Issues": the shared meeting.seg + follow-the-facilitator path were yanking everyone's position.)
 let huddleMode="run";               // "run" | "archive" — the Huddle view's recent-minutes toggle (mirrors l10Mode)
 /* ===== Field-level scribe locks (multi-scribe) =====
    Everyone in the meeting can take notes at once; each editable note/IDS box is soft-locked to whoever is
@@ -12221,24 +12186,29 @@ function renderMeetingRunner(wrap){
   const isHuddle=currentView==="huddle";
   const segs=curSegs(), last=segs.length-1;
   const openPhase=isHuddle && meeting.phase==="open";
-  const seg=segs[meeting.seg]||segs[0];
-  const agenda=segs.map((s,i)=>`<div class="ag-item ${i===meeting.seg?"cur":(i<meeting.seg?"past":"")}" data-seg="${i}">
+  if(openPhase) prepSeg=Math.max(0, Math.min(last, prepSeg|0));   // keep the local prep position in range
+  const curIdx=openPhase ? prepSeg : meeting.seg;   // prep follows the VIEWER's own position; live follows the shared meeting
+  const seg=segs[curIdx]||segs[0];
+  const agenda=segs.map((s,i)=>`<div class="ag-item ${i===curIdx?"cur":(i<curIdx?"past":"")}" data-seg="${i}">
     <div class="ag-num"><span class="n">${i+1}</span></div><div class="ag-title">${s.name}</div><div class="ag-min">${s.min}m</div></div>`).join("");
   const scribeBar=`<div class="scribe-bar">
       <span class="sb-lbl">✍️ <b>Everyone can take notes.</b> <span class="sb-ro">The box you're typing in locks to you, so no one types over you.</span></span>
     </div>`;
   if(openPhase){
     // PREP BOARD — no timer; anyone in the huddle can navigate and seed WIFLS / Headlines / Issues.
+    // The segment position is LOCAL (prepSeg) and is NEVER written to the shared doc, so moving between
+    // sections can't be clobbered by a sync echo or yanked by the follow-the-facilitator path. The ITEMS
+    // you add still auto-save normally; only your cursor position is private to you.
     const canStart=canEditHuddle();
     wrap.innerHTML=`
       <div class="l10-hero prep">
         <div class="prep-tag">● Prep — not started</div>
-        <div class="seg-name">${meeting.seg+1}. ${seg.name}</div>
+        <div class="seg-name">${curIdx+1}. ${seg.name}</div>
         <div class="seg-sub">${seg.sub}</div>
         <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
-          <button class="btn ghost sm" id="prevSeg" ${meeting.seg===0?"disabled style=opacity:.4":""}>‹</button>
+          <button class="btn ghost sm" id="prevSeg" ${curIdx===0?"disabled style=opacity:.4":""}>‹</button>
           <div style="flex:1;font-size:12px;color:var(--muted)">Add items, move between sections — everyone can.</div>
-          <button class="btn ghost sm" id="nextSeg" ${meeting.seg>=last?"disabled style=opacity:.4":""}>›</button>
+          <button class="btn ghost sm" id="nextSeg" ${curIdx>=last?"disabled style=opacity:.4":""}>›</button>
         </div>
         ${canStart?`<button class="btn wide" id="startHuddleBtn" style="margin-top:12px">▶ Start Huddle</button>`:`<div class="hint" style="margin-top:10px">Add your items above — a huddle leader will start it.</div>`}
         <div class="prep-saved" style="margin-top:10px;font-size:12px;color:var(--muted)">✓ Saved automatically — you can leave and come back anytime; your items stay.</div>
@@ -12247,10 +12217,10 @@ function renderMeetingRunner(wrap){
       <div id="segContent"></div>
       <div class="agenda">${agenda}</div>
       ${canStart?`<button class="btn ghost wide sm" id="cancelMeeting" style="margin-bottom:10px;opacity:.75">🗑 Delete this prep board (clears everyone's items)</button>`:""}`;
-    renderSegContent(meeting.seg);
-    const goTo=j=>{ if(j<0||j>last) return; meeting.seg=j; bumpNav(); saveL10(true); renderActiveMeeting(); };
-    { const p=wrap.querySelector("#prevSeg"); if(p) p.onclick=()=>goTo(meeting.seg-1); }
-    { const n=wrap.querySelector("#nextSeg"); if(n) n.onclick=()=>goTo(meeting.seg+1); }
+    renderSegContent(curIdx);
+    const goTo=j=>{ j=Math.max(0, Math.min(last, j)); if(j===prepSeg){ renderSegContent(prepSeg); return; } prepSeg=j; renderActiveMeeting(); };   // LOCAL only — no bumpNav, no saveL10; your position is yours alone
+    { const p=wrap.querySelector("#prevSeg"); if(p) p.onclick=()=>goTo(prepSeg-1); }
+    { const n=wrap.querySelector("#nextSeg"); if(n) n.onclick=()=>goTo(prepSeg+1); }
     wrap.querySelectorAll(".ag-item").forEach(a=>a.onclick=()=>goTo(+a.dataset.seg));
     { const s=wrap.querySelector("#startHuddleBtn"); if(s) s.onclick=startHuddle; }
     { const c=wrap.querySelector("#cancelMeeting"); if(c) c.onclick=()=>{ if(confirm("Delete this prep board?\n\nThe WIFLS and headlines added here are cleared for everyone (issues already on the list stay). You don't need to do this just to leave — the board auto-saves, so you can close it and come back anytime.\n\nDelete anyway?")) discardMeeting(); }; }
@@ -12601,6 +12571,7 @@ function startMeeting(){
 // Open creates the shared meeting in "open" (prep) phase — no clock, everyone seeds WIFLS/Headlines/Issues.
 function openHuddle(){
   const h=HUDDLE(); if(!h || !canEditHuddle(h)) return;
+  prepSeg=0;   // start a fresh prep board at WIFLS (local position)
   meeting={date:todayIso(),startedAt:0,capMin:HUDDLE_CAP_MIN,seg:0,segStart:0,segElapsed:0,totalElapsed:0,navAt:Date.now(),
     phase:"open",kind:"huddle",notes:{},ratings:{},createdTodos:[],activeIssue:null,solvedIssues:[],locks:{},byPerson:{},byPersonAt:{},
     facilitatorEmail:myEmail(), facilitatorName:myName()||myEmail(), scribeEmail:myEmail(), scribeName:myName()||myEmail()};
@@ -15111,13 +15082,45 @@ function doLogin(){
 $("#lg-go").onclick=doLogin;
 $("#lg-pass").onkeydown=e=>{ if(e.key==="Enter") doLogin(); };
 $("#lg-email").onkeydown=e=>{ if(e.key==="Enter") $("#lg-pass").focus(); };
-$("#lg-forgot").onclick=()=>{
+// Self-service "email me a sign-in link". Routes through our OWN branded endpoint (Resend) instead of
+// firebase.auth().sendPasswordResetEmail — that mail came from firebaseapp.com and Microsoft 365 quarantines
+// it, so staff never saw it. The server generates a FRESH reset link on each request, so the 1-hour clock
+// starts now (when they're ready) rather than days ago when the invite went out. The endpoint is
+// anti-enumeration: it returns the same generic "on its way" whether or not the account exists.
+let _setupBusy=false;
+function requestSetupLink(){
   const em=($("#lg-email").value||"").trim();
-  if(!em){ lgMsg("Type your email above first, then tap Forgot password."); return; }
-  firebase.auth().sendPasswordResetEmail(em)
-    .then(()=>lgMsg("Reset link sent to "+em+" — check your inbox.",true))
-    .catch(e=>lgMsg(authError(e)));
-};
+  if(!em||em.indexOf("@")<1){ lgMsg("Type your email in the box above, then tap this."); const f=$("#lg-email"); if(f) f.focus(); return; }
+  if(_setupBusy) return; _setupBusy=true;
+  const btn=$("#lg-forgot"); const label=btn?btn.textContent:""; if(btn){ btn.disabled=true; }
+  lgMsg("Sending your link…",true);
+  fetch("/.netlify/functions/setup-link",{ method:"POST",
+    headers:{ "content-type":"application/json" },
+    body:JSON.stringify({ email:em }) })
+    .then(r=>r.json().catch(()=>({})).then(d=>({ok:r.ok,d})))
+    .then(({ok,d})=>{
+      if(ok){ lgMsg((d&&d.message)||"If that email is set up, a secure sign-in link is on its way — check your inbox and spam.",true); }
+      else { lgMsg((d&&d.error)||"Couldn't send the link just now — try again in a moment."); }
+    })
+    .catch(()=>lgMsg("Couldn't reach the server — check your connection and try again."))
+    .finally(()=>{ _setupBusy=false; if(btn){ btn.disabled=false; btn.textContent=label; } });
+}
+$("#lg-forgot").onclick=requestSetupLink;
+// First-run / recovery landing: the invite email's fallback link (and an expired-link recovery) send people
+// to <app>/?setup. Pre-fill their email if it's in the URL and nudge them to request a fresh link — the
+// 60-minute window then starts here, while they're actually at the screen.
+(function handleSetupLanding(){
+  try{
+    const q=new URLSearchParams(location.search||"");
+    if(!q.has("setup")) return;
+    const em=(q.get("email")||q.get("setup")||"").trim();
+    const fill=em&&em.indexOf("@")>0?em:"";
+    const apply=()=>{ const f=$("#lg-email"); if(fill&&f) f.value=fill;
+      lgMsg(fill?("Welcome! Tap “Email me a sign-in link” below and we'll send "+fill+" a fresh, secure link.")
+                :"Welcome! Enter your work email below, then tap “Email me a sign-in link”.",true); };
+    if(document.readyState!=="loading") apply(); else document.addEventListener("DOMContentLoaded",apply);
+  }catch(e){}
+})();
 window.signOutApp=function(){
   firebase.auth().signOut().then(()=>location.reload());
 };
