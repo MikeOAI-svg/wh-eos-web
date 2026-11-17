@@ -5282,7 +5282,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=240;
+const BUILD=241;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -6357,18 +6357,19 @@ function canSetHireDate(name){
 // review CONTENT stays per-supervisor (canDoEvals). Fixes "a director only saw their team lead, not the
 // people under that lead."
 function canSeeBranchEvals(){ const me=myName(); return isEvalAdmin() || (!!me && peopleBelowMe(me).length>0); }
-// ===== Facility leaders act as HR for THEIR OWN facility =====
-// A facility leader gets the same HR eval functions (status board, approve / send-back, audit) but SCOPED to
-// their facility; HR/eval admins cover every facility. NOTE: reading & approving other supervisors' eval docs
-// is ALSO gated by Firestore security rules — a facility leader must be permitted there, or these reads/writes
-// return permission-denied (the view then shows what it could read and flags it).
-function evHrFacilityRoles(){   // facility (pillar) roles this person is the HR for
+// ===== Facility leaders: read-only oversight of THEIR OWN facility's evals =====
+// A facility leader can SEE the status / audit board for their facility (who's due, what's in progress, filed
+// records) — scoped to their facility; HR/eval admins see every facility. They do NOT get HR sign-off:
+// approving an evaluation in the HR slot is HR / eval-admins ONLY (see canHrApproveRegion). Reading these
+// docs is ALSO gated by Firestore rules — a facility leader must be permitted there, or the reads return
+// permission-denied (the view then shows what it could read and flags it).
+function evHrFacilityRoles(){   // facility (pillar) roles this person oversees (status/audit view only — NOT HR approval)
   if(isEvalAdmin()) return acFunctionSeats().map(s=>s&&s.role).filter(Boolean);
   const me=myName(); if(!me) return [];
   return facilitiesLedBy(me).map(id=>{ const s=acSeatById(id); return s&&s.role; }).filter(Boolean);
 }
 function canSeeEvalHR(){ return isEvalAdmin() || evHrFacilityRoles().length>0; }         // who gets the HR status/audit view
-function canHrApproveRegion(region){ return isEvalAdmin() || evHrFacilityRoles().indexOf(region)>=0; }   // may act as HR approver for an eval in `region`
+function canHrApproveRegion(region){ return isEvalAdmin(); }   // HR sign-off is HR / eval-admins ONLY — facility leaders may NOT approve as HR (compliance; region kept for call-site compatibility)
 // Load the eval docs this HR-capable user may read: ADMIN/HR → the whole collection; a FACILITY LEADER → one
 // QUERY for the docs that list them in state.reviewers (manager OR facility leader) + their OWN doc. Using a
 // query — instead of a read per branch person — avoids firing dozens of permission-denied reads, which with
@@ -9845,7 +9846,7 @@ function evReviewWrite(leadEmail, reportKey, role, decision, note, done){
 function evalReviewSheet(leadEmail, leadName, reportKey, rep){
   const form=rep.draft||{}, rev=form.review||{};
   const canSup = rev.status==="submitted" && rev.supEmail && evMyE()===String(rev.supEmail).toLowerCase() && !rev.sup;
-  const canHr  = rev.status==="submitted" && canHrApproveRegion(evRegionOf(rep.name)) && !rev.hr;   // HR/admin anywhere, or a facility leader for their own facility; only on a genuinely submitted eval
+  const canHr  = rev.status==="submitted" && canHrApproveRegion(evRegionOf(rep.name)) && !rev.hr;   // HR / eval-admins ONLY; only on a genuinely submitted eval
   const who = canSup&&canHr ? "Supervisor &amp; HR" : canSup ? "Supervisor" : canHr ? "HR" : "";
   openSheet(`<h2>Review evaluation · ${esc(rep.name||reportKey)}</h2>
     <div class="min-head">By <b>${esc(leadName||leadEmail)}</b> · ${esc(form.jobTitle||"")} · submitted ${esc(rev.submittedAt||"")}</div>
@@ -9873,7 +9874,7 @@ function evReviewInbox(cb){
     Object.keys(reports).forEach(k=>{ const rep=reports[k], rev=rep&&rep.draft&&rep.draft.review;
       if(!rev||rev.status!=="submitted") return;
       const needSup = rev.supEmail && myE===String(rev.supEmail).toLowerCase() && !rev.sup;
-      const needHr  = canHrApproveRegion(evRegionOf(rep.name||k)) && !rev.hr;   // HR/admin anywhere, or a facility leader for their own facility
+      const needHr  = canHrApproveRegion(evRegionOf(rep.name||k)) && !rev.hr;   // HR / eval-admins ONLY
       if(!needSup && !needHr) return;
       const id=leadEmail+"|"+k; if(seen.has(id)) return; seen.add(id);
       out.push({ leadEmail, leadName:st._lead||leadEmail, reportKey:k, rep, rev, region:evRegionOf(rep.name||k), as: needSup&&needHr?"Supervisor + HR":needSup?"Supervisor":"HR" }); }); };
