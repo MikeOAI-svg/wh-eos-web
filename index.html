@@ -2118,6 +2118,10 @@
     messagingSenderId: "139951248065",
     appId: "1:139951248065:web:80c0c7c5ca940c4854ba40"
   });
+  // Some facility networks (firewalls / proxies) block Firestore's default streaming connection, which made
+  // reads HANG until a timeout — e.g. a facility leader's eval-status board "couldn't load in time". Auto-detect
+  // falls back to long-polling on those networks. MUST run before any other Firestore use (enablePersistence incl).
+  try{ firebase.firestore().settings({ experimentalAutoDetectLongPolling: true }); }catch(e){}
   // keep working through brief connection drops
   firebase.firestore().enablePersistence({synchronizeTabs:true}).catch(function(){});
 </script>
@@ -5282,7 +5286,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=241;
+const BUILD=242;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
