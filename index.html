@@ -5282,7 +5282,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=239;
+const BUILD=240;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -9676,7 +9676,7 @@ function openEvalForm(name,f){
         <div class="ev-sec-d">Top 3 development priorities tied to the LMAs:</div>
         <input class="ev-cc" data-nf="0" value="${esc(f.nextFocus[0]||"")}" placeholder="1."><input class="ev-cc" data-nf="1" value="${esc(f.nextFocus[1]||"")}" placeholder="2."><input class="ev-cc" data-nf="2" value="${esc(f.nextFocus[2]||"")}" placeholder="3."></div>
       <div class="ev-sec"><div class="ev-sec-h">Sign-off</div>
-        <div class="ev-sec-d">Record the date the evaluation was completed, then the three signatures with their dates. All are required to mark complete. The HR name is set automatically from ${esc(name.split(" ")[0])}'s facility.</div>
+        <div class="ev-sec-d">Fill this in <b>during the evaluation</b> — after your supervisor and HR have approved it and you're sitting down with ${esc(name.split(" ")[0])}. Enter the date you conduct it, then capture all three signatures and their dates. The HR name is set automatically from ${esc(name.split(" ")[0])}'s facility.</div>
         <div class="field"><label>Date completed</label><input id="ef-completed" type="date" value="${esc(f.completedDate||"")}"></div>
         <div class="ev-sig"><input data-sig="employee-name" value="${esc(f.sigEmployee.name)}" placeholder="Employee name"><input data-sig="employee-date" type="date" value="${esc(f.sigEmployee.date)}"></div>
         <div class="ev-sig"><input data-sig="supervisor-name" value="${esc(f.sigSupervisor.name)}" placeholder="Supervisor name"><input data-sig="supervisor-date" type="date" value="${esc(f.sigSupervisor.date)}"></div>
