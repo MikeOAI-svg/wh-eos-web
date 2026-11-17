@@ -31,23 +31,60 @@ function rateLimited(uid){ const now = Date.now(); const arr = (_hits.get(uid) |
 // data `admins` list, so mirror them here or the owner gets a false 403.
 const OWNER_EMAILS = ["odellmike76@gmail.com"];
 
-// Is the signed-in caller an admin of THIS workspace? Owner-admins pass immediately; otherwise read the
-// company doc with the caller's own token (rules allow any authed user to read it) and check state.admins.
-// Unknown (can't read / no list) → null, which the handler treats as "allow" since the Add-Member UI is
-// already admin-only; a definite false blocks.
-async function callerIsAdmin(callerToken, callerEmail){
-  const who = String(callerEmail || "").trim().toLowerCase();
+const normName = s => String(s == null ? "" : s).trim().toLowerCase();
+const isOpenName = s => { const n = normName(s); return !n || n === "open" || n === "vacant" || n === "tbd" || n === "open seat"; };
+
+// Decode one Firestore REST typed value (…Value wrappers) into a plain JS value, recursively.
+function fsDecode(v){
+  if(v == null) return null;
+  if("stringValue" in v) return v.stringValue;
+  if("booleanValue" in v) return !!v.booleanValue;
+  if("integerValue" in v) return Number(v.integerValue);
+  if("doubleValue" in v) return Number(v.doubleValue);
+  if("nullValue" in v) return null;
+  if("timestampValue" in v) return v.timestampValue;
+  if("mapValue" in v){ const o = {}, f = (v.mapValue && v.mapValue.fields) || {}; for(const k in f) o[k] = fsDecode(f[k]); return o; }
+  if("arrayValue" in v){ return ((v.arrayValue && v.arrayValue.values) || []).map(fsDecode); }
+  return null;
+}
+
+// Real occupants of a seat (drops "Open"/"Vacant" placeholders). Mirrors seatNames() in the client.
+function seatNamesOf(seat){
+  const raw = Array.isArray(seat.names) ? seat.names : (seat.name ? [seat.name] : []);
+  return raw.filter(n => n && !isOpenName(n));
+}
+
+// Does the caller hold the "people" (or full "admin") grant on a seat they occupy? Mirrors the client's
+// iHavePerm("people"): map the caller's email → their name via state.people, then look for any seat that
+// lists that name and carries perms.people or perms.admin. This is what lets HR / Executive Directors
+// invite without being a workspace admin.
+function callerHasPeoplePerm(state, callerEmail){
+  const who = normName(callerEmail);
+  const me = ((state && state.people) || []).find(p => p && normName(p.email) === who);
+  const myName = me && me.name; if(!myName) return false;
+  const seats = ((state && state.accountability) || {}).seats || [];
+  return seats.some(s => s && s.perms && (s.perms.people || s.perms.admin) &&
+    seatNamesOf(s).some(n => normName(n) === normName(myName)));
+}
+
+// May this signed-in caller invite new members? Owner-admins pass immediately; otherwise read the company
+// doc with the caller's own token (rules allow any authed user to read it) and allow workspace admins OR
+// anyone holding the "Add & onboard people" seat grant. Unknown (can't read, or no admins list to judge by)
+// → null, which the handler treats as "allow" since the Add-Member UI is itself gated; a definite false blocks.
+async function callerMayInvite(callerToken, callerEmail){
+  const who = normName(callerEmail);
   if(OWNER_EMAILS.indexOf(who) >= 0) return true;
   try{
     const r = await fetch(`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/workspaces/main`,
       { headers: { authorization: "Bearer " + callerToken } });
     if(!r.ok) return null;
     const doc = await r.json();
-    const adminsArr = (((((doc.fields || {}).state || {}).mapValue || {}).fields || {}).admins || {}).arrayValue;
-    const vals = (adminsArr && adminsArr.values) || [];
-    const list = vals.map(v => String(v.stringValue || "").trim().toLowerCase()).filter(Boolean);
-    if(!list.length) return null;
-    return list.includes(String(callerEmail || "").trim().toLowerCase());
+    const state = (fsDecode({ mapValue: { fields: doc.fields || {} } }) || {}).state || {};
+    const admins = (state.admins || []).map(normName).filter(Boolean);
+    if(admins.includes(who)) return true;                // workspace admin
+    if(callerHasPeoplePerm(state, callerEmail)) return true;   // HR / ED with the "Add & onboard people" grant
+    if(!admins.length) return null;                      // nothing to judge by → stay permissive (UI is gated)
+    return false;
   }catch(e){ return null; }
 }
 
@@ -138,9 +175,9 @@ export async function handler(event){
   if(!uid) return json(401, { error: "Your session isn't valid — sign in again." });
   if(rateLimited(uid)) return json(429, { error: "You're going a bit fast — wait a moment and try again." });
 
-  // 2) And must be an admin of this workspace (the Add-Member action is admin-only).
-  const adm = await callerIsAdmin(token, claims.email);
-  if(adm === false) return json(403, { error: "Only an admin can invite new members." });
+  // 2) And must be allowed to add people — a workspace admin, or HR/ED with the "Add & onboard people" grant.
+  const may = await callerMayInvite(token, claims.email);
+  if(may === false) return json(403, { error: "You don't have permission to invite new members — ask an admin or HR." });
 
   // 3) Validate the recipient.
   let body;

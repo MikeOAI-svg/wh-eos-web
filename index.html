@@ -5282,7 +5282,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=238;
+const BUILD=239;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -6234,6 +6234,9 @@ const EVAL_HR_EMAILS=["odellmike76@gmail.com","michael.odell@warriorsheart.com",
 // evals route to its own HR first. Keyed by the pillar seat's role (AC_FUNCTIONS): Shared Services → Kayle,
 // Texas → Gwen, Virginia → Ashtyn. Company-wide / shared staff (no single facility) show to all three.
 const EVAL_HR_PRIMARY={"Shared Services":"kayle.christian@warriorsheart.com","Texas Facility":"gwen.sanchez@warriorsheart.com","Virginia Facility":"ashtyn.morgan@warriorsheart.com"};
+// Display names for the HR specialists, so the eval form can auto-fill the right HR sign-off by facility even
+// before that person is on the chart. Prefer the live name from data.people; fall back to these.
+const EVAL_HR_NAMES={"kayle.christian@warriorsheart.com":"Kayle Christian","gwen.sanchez@warriorsheart.com":"Gwen Sanchez","ashtyn.morgan@warriorsheart.com":"Ashtyn Morgan"};
 const isEvalAdmin=()=>{ const e=myEmail(); return isAdmin() || EVAL_HR_EMAILS.indexOf(e)>=0; };
 const canDoEvals=()=>evalIsSupervisor()||isEvalAdmin()||iHavePerm("evals");   // evalIsSupervisor covers people who conduct evals for reports under an open seat
 let evalData={reports:{}}, evalRef=null, evalUnsub=null, evalSaveTimer=null, evalPending=null;
@@ -9500,7 +9503,7 @@ function renderEvals(){
   if(!canDoEvals() && !canSeeBranchEvals()){ wrap.innerHTML=`<div class="empty"><span class="emoji">🔒</span>Evaluations are for supervisors, facility leaders and HR.</div>`; return; }
   const me=myName(), reports=me?evalReportsOf(me):[];   // includes reports under an open seat that rolls up to me
   const doesEvals=canDoEvals();
-  const note=doesEvals?`<div class="ev-note">🔒 <b>Confidential.</b> These records live in a locked, per-supervisor file — only you and HR can open them. Reviews run on each person's <b>hire-date anniversary</b>, with reminders at 30, 15, 7 and 1 day.</div>`:"";
+  const note=doesEvals?`<div class="ev-note">🔒 <b>Confidential.</b> These records live in a locked, per-supervisor file — only you and HR can open them. Reviews run on each person's <b>hire-date anniversary</b>. You'll get <b>email reminders</b> (and in-app alerts) at 30, 15, 7 and 1 day before — then weekly until it's filed.</div>`:"";
   let body;
   if(!doesEvals) body="";   // facility-leader-only viewer: skip the per-supervisor section, show the branch roster below
   else if(!me) body=`<div class="empty"><span class="emoji">👤</span>Set who you are in Setup first — then your direct reports appear here.</div>`;
@@ -9546,8 +9549,8 @@ function evalGuide(){
       <p class="eg-lead">Every direct report gets <b>one formal performance review a year</b> — a Joint Commission requirement. It's separate from the <b>Quarterly Conversation</b> (forward-looking) and the <b>People Analyzer</b> (values alignment). This is the annual, on-the-record evaluation.</p>
       <ol class="eg-steps">
         <li><b>Set the hire date — once per person.</b> Tap <b>Set hire date</b> on each report. The review comes due on their hire anniversary every year, and all the reminders run off this date. Blank hire date means no reminders — so do this first.</li>
-        <li><b>Watch for the reminders.</b> The 🔔 bell notifies you at <b>30, 15, 7 and 1 day</b> before it's due, and the person's card shows “Due in X days” (turns red once overdue). Don't wait for the 1-day notice — book the conversation early.</li>
-        <li><b>Fill out the form</b> (tap <b>Evaluate</b>). Rate <b>Lead</b> and <b>Manage</b> on the Below&nbsp;Standard → Exceptional scale with comments. <b>Accountabilities fill in automatically</b> from the person's seat on the chart — edit or add a line if their seat changed. <b>Comments must be behavior-based and specific</b> — what they did, not how you feel — especially for any <b>Below Standard</b> rating (concrete examples tied to the LMA). Finish with the <b>Execution Summary</b>, <b>Next Period Focus</b> (top 3), and the <b>sign-offs</b>.</li>
+        <li><b>Watch for the reminders.</b> You get an <b>email</b> and an in-app 🔔 alert at <b>30, 15, 7 and 1 day</b> before it's due — then once a week while it's overdue. The person's card shows “Due in X days” (turns red once overdue). Don't wait for the 1-day notice — book the conversation early.</li>
+        <li><b>Fill out the form</b> (tap <b>Evaluate</b>). <b>Every field is required</b> — you can't submit or complete with anything blank. Rate <b>Lead</b> and <b>Manage</b> on the Below&nbsp;Standard → Exceptional scale with comments. <b>Accountabilities fill in automatically</b> from the person's seat on the chart — edit or add a line if their seat changed; each one needs a rating and a comment. <b>Comments must be behavior-based and specific</b> — what they did, not how you feel — especially for any <b>Below Standard</b> rating (concrete examples tied to the LMA). Finish with the <b>Execution Summary</b>, <b>Next Period Focus</b> (top 3), the <b>date completed</b>, and the <b>sign-offs</b> (the HR name fills in automatically for the person's facility).</li>
         <li><b>Save draft while you work.</b> <b>Save draft</b> keeps your progress private and files nothing — use it until the conversation is done and signed.</li>
         <li><b>Mark complete — only when it's truly final.</b> This files the evaluation as a <b>permanent, read-only record</b> and automatically schedules next year's. ⚠ You can't edit it afterward, so complete it only <b>after</b> the conversation and the sign-offs. Completed one by mistake? Contact HR (Kayle).</li>
       </ol>
@@ -9604,15 +9607,48 @@ function evaluateReport(name){
     jobTitle:roles.join(" · "), reviewDate:todayIso(),
     lead:{rating:"",comments:""}, manage:{rating:"",comments:""},
     accountabilities:resp.length?resp.map(t=>({text:t,rating:"",comments:""})):[{text:"",rating:"",comments:""}],
-    execution:"", supervisorSummary:"", nextFocus:["","",""],
-    sigEmployee:{name:name,date:""}, sigSupervisor:{name:myName()||"",date:""}, sigHr:{name:"",date:""} };
+    execution:"", supervisorSummary:"", nextFocus:["","",""], completedDate:"",
+    sigEmployee:{name:name,date:""}, sigSupervisor:{name:myName()||"",date:""}, sigHr:{name:evHrNameFor(name),date:""} };
   openEvalForm(name,f);
 }
 function evRatingRow(val){ return `<div class="ev-rate">`+EVAL_RATINGS.map(([v,l])=>`<button type="button" class="ev-rb${val===v?" on "+v:""}" data-v="${v}">${l}</button>`).join("")+`</div>`; }
+// Every field that still needs filling. phase "submit" checks the CONTENT (title → next-focus); phase
+// "complete" also requires the completion date and all three dated signatures — so nothing on the form is
+// ever blank when it files. Blank accountability rows (no text) are ignored; a row WITH text must be rated
+// and commented. Returns a list of plain-English labels for what's missing.
+function evMissing(f, phase){
+  const m=[]; f=f||{};
+  if(!(f.jobTitle||"").trim()) m.push("Job title / seat");
+  if(!(f.reviewDate||"").trim()) m.push("Date of review");
+  if(!((f.lead||{}).rating)) m.push("Lead rating");
+  if(!(((f.lead||{}).comments)||"").trim()) m.push("Lead comments");
+  if(!((f.manage||{}).rating)) m.push("Manage rating");
+  if(!(((f.manage||{}).comments)||"").trim()) m.push("Manage comments");
+  const accs=(f.accountabilities||[]).filter(a=>a&&(a.text||"").trim());
+  if(!accs.length) m.push("At least one accountability");
+  accs.forEach((a,i)=>{ const who="Accountability "+(i+1); if(!a.rating) m.push(who+" — rating"); if(!(a.comments||"").trim()) m.push(who+" — comments"); });
+  if(!(f.execution||"").trim()) m.push("Execution summary — rating");
+  if(!(f.supervisorSummary||"").trim()) m.push("Execution summary — comments");
+  [0,1,2].forEach(i=>{ if(!(((f.nextFocus||[])[i])||"").trim()) m.push("Next period focus #"+(i+1)); });
+  if(phase==="complete"){
+    if(!(f.completedDate||"").trim()) m.push("Date completed");
+    const sig=(lbl,s)=>{ s=s||{}; if(!(s.name||"").trim()) m.push(lbl+" signature — name"); if(!(s.date||"").trim()) m.push(lbl+" signature — date"); };
+    sig("Employee", f.sigEmployee); sig("Supervisor", f.sigSupervisor); sig("HR", f.sigHr);
+  }
+  return m;
+}
+function evMissingAlert(list, phase){
+  const head = phase==="complete"
+    ? "Every field has to be filled in before you can mark this evaluation complete.\n\nStill needed:\n• "
+    : "Fill in the whole evaluation before submitting it for review.\n\nStill needed:\n• ";
+  alert(head + list.join("\n• "));
+}
 function openEvalForm(name,f){
   f=f||{};   // normalize a draft that's missing fields so a partial/legacy record can't white-screen the form
   f.accountabilities=f.accountabilities||[]; f.lead=f.lead||{}; f.manage=f.manage||{};
   f.nextFocus=f.nextFocus||["","",""]; f.sigEmployee=f.sigEmployee||{}; f.sigSupervisor=f.sigSupervisor||{}; f.sigHr=f.sigHr||{};
+  f.completedDate=f.completedDate||"";
+  if(!(f.sigHr.name||"").trim()) f.sigHr.name=evHrNameFor(name);   // auto-fill the facility's HR on older drafts too
   const rev0=(f&&f.review)||null;   // review/approval state carried on the draft
   const accHtml=f.accountabilities.map(a=>`<div class="ev-acc">
       <div class="ev-acc-top"><input class="ev-acc-text" value="${esc(a.text)}" placeholder="Accountability from the chart…"><button type="button" class="ev-acc-del" title="Remove">✕</button></div>
@@ -9640,13 +9676,15 @@ function openEvalForm(name,f){
         <div class="ev-sec-d">Top 3 development priorities tied to the LMAs:</div>
         <input class="ev-cc" data-nf="0" value="${esc(f.nextFocus[0]||"")}" placeholder="1."><input class="ev-cc" data-nf="1" value="${esc(f.nextFocus[1]||"")}" placeholder="2."><input class="ev-cc" data-nf="2" value="${esc(f.nextFocus[2]||"")}" placeholder="3."></div>
       <div class="ev-sec"><div class="ev-sec-h">Sign-off</div>
+        <div class="ev-sec-d">Record the date the evaluation was completed, then the three signatures with their dates. All are required to mark complete. The HR name is set automatically from ${esc(name.split(" ")[0])}'s facility.</div>
+        <div class="field"><label>Date completed</label><input id="ef-completed" type="date" value="${esc(f.completedDate||"")}"></div>
         <div class="ev-sig"><input data-sig="employee-name" value="${esc(f.sigEmployee.name)}" placeholder="Employee name"><input data-sig="employee-date" type="date" value="${esc(f.sigEmployee.date)}"></div>
         <div class="ev-sig"><input data-sig="supervisor-name" value="${esc(f.sigSupervisor.name)}" placeholder="Supervisor name"><input data-sig="supervisor-date" type="date" value="${esc(f.sigSupervisor.date)}"></div>
         <div class="ev-sig"><input data-sig="hr-name" value="${esc(f.sigHr.name)}" placeholder="HR name"><input data-sig="hr-date" type="date" value="${esc(f.sigHr.date)}"></div></div>
     </div>
     ${(rev0&&rev0.status)
       ? `<div style="margin:16px 2px 2px"><div class="ev-note">${evReviewStatusLabel(rev0)}</div>${evApprovalTrailHtml(rev0)}</div>`
-      : `<div class="hint" style="margin:16px 2px 2px;line-height:1.5"><b>Policy:</b> your <b>supervisor</b> and <b>HR</b> must approve this before you can conduct it with ${esc(name)}. Fill it in, then <b>Submit for review</b>. <b>Save draft</b> keeps progress private in the meantime.</div>`}
+      : `<div class="hint" style="margin:16px 2px 2px;line-height:1.5"><b>Policy:</b> your <b>supervisor</b> and <b>HR</b> must approve this before you can conduct it with ${esc(name)}. <b>Every field is required</b> — fill the whole form in, then <b>Submit for review</b>. <b>Save draft</b> keeps a partial copy private in the meantime.</div>`}
     <div class="sheet-actions"><button class="btn ghost" id="ef-cancel">Close</button><button class="btn ghost" id="ef-draft">Save draft</button>${evCleared(rev0)?`<button class="btn" id="ef-complete">Mark complete</button>`:`<button class="btn" id="ef-submit">${(rev0&&rev0.status==="submitted")?"Re-submit for review":"Submit for review"}</button>`}</div>
     ${evCleared(rev0)?"":`<div class="hint" style="margin:8px 2px 0;color:var(--muted)">“Mark complete” unlocks once your supervisor and HR approve.</div>`}`);
   const wireRates=()=>document.querySelectorAll(".ev-rate").forEach(g=>g.querySelectorAll(".ev-rb").forEach(b=>b.onclick=()=>{ g.querySelectorAll(".ev-rb").forEach(x=>x.className="ev-rb"); b.className="ev-rb on "+b.dataset.v; }));
@@ -9666,22 +9704,25 @@ function openEvalForm(name,f){
       lead:{rating:leadRate,comments:cOf("lead")}, manage:{rating:manageRate,comments:cOf("manage")},
       accountabilities:accs, execution:execEl?execEl.dataset.exec:"", supervisorSummary:cOf("summary"),
       nextFocus:[0,1,2].map(i=>(document.querySelector(`[data-nf="${i}"]`).value||"").trim()),
+      completedDate:(($("#ef-completed")||{}).value||""),
       sigEmployee:sig("employee"), sigSupervisor:sig("supervisor"), sigHr:sig("hr") };
   };
   $("#ef-cancel").onclick=closeSheet;
   $("#ef-draft").onclick=()=>{ const r=evalReport(name); const keep=rev0; r.draft=collect(); if(keep) r.draft.review=keep; saveEvals(); closeSheet(); renderEvals(); setSync("Draft saved"); };
   { const sb=$("#ef-submit"); if(sb) sb.onclick=()=>{
       const form=collect();
-      if(!form.lead.rating||!form.manage.rating||!form.execution){ alert("Set the Lead rating, the Manage rating and the Execution Summary before submitting for review."); return; }
+      const miss=evMissing(form,"submit");
+      if(miss.length){ evMissingAlert(miss,"submit"); return; }
       const r=evalReport(name); r.draft=form; saveEvals();   // save the content first, then stamp the review
       evSubmitForReview(name); closeSheet(); }; }
   { const cb=$("#ef-complete"); if(cb) cb.onclick=()=>{
     const r0=evalReport(name); if(!evCleared((r0.draft||{}).review)){ alert("This evaluation must be approved by your supervisor AND HR before you can conduct and file it."); return; }
     const form=collect();
-    if(!form.lead.rating||!form.manage.rating||!form.execution){ alert("Please set the Lead rating, the Manage rating, and the Execution Summary before completing."); return; }
+    const miss=evMissing(form,"complete");
+    if(miss.length){ evMissingAlert(miss,"complete"); return; }
     if(!confirm("Mark this evaluation complete?\n\nIt files as a locked, read-only record and schedules the next review for "+name+"'s next hire anniversary.")) return;
     const r=evalReport(name);
-    r.history=r.history||[]; r.history.push(Object.assign({completedAt:todayIso(), completedBy:myName()||myEmail()}, form));
+    r.history=r.history||[]; r.history.push(Object.assign({completedBy:myName()||myEmail()}, form, {completedAt:form.completedDate}));
     r.draft=null;
     if(r.hireDate){ const base=r.nextDue||nextAnniversary(r.hireDate,todayIso());
       r.nextDue=nextAnniversary(r.hireDate, addDaysIso(base,1));
@@ -9754,6 +9795,13 @@ function evSupEmailFor(leadName){ const mgr=managerOf(leadName); return mgr?((em
 // or "" for company-wide/shared staff. Drives which HR specialist an eval routes to.
 function evRegionOf(personName){ const seat=(seatsFor(personName)||[])[0]; if(!seat) return ""; const p=pillarSeatOf(seat.id); return (p&&p.role)||""; }
 function evPrimaryHrEmail(region){ return (EVAL_HR_PRIMARY[region]||"").toLowerCase(); }
+// The HR specialist who signs off a given person's eval, chosen by the facility their seat rolls up to.
+// Used to auto-fill the HR line on the evaluation so the supervisor doesn't have to know who it is.
+function evHrNameFor(personName){
+  const e=evPrimaryHrEmail(evRegionOf(personName)); if(!e) return "";
+  const p=(data.people||[]).find(x=>x&&(x.email||"").trim().toLowerCase()===e);
+  return (p&&p.name)||EVAL_HR_NAMES[e]||"";
+}
 function evCleared(rev){ return !!(rev&&rev.status==="cleared"); }
 function evReviewStatusLabel(rev){
   if(!rev||!rev.status) return "";
