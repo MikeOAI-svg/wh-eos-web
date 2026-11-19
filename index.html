@@ -5286,7 +5286,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=242;
+const BUILD=244;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -8532,12 +8532,13 @@ function canManagePeople(){ return isAdmin() || iHavePerm("people"); }   // add 
 function isLeadership(){ if(isAdmin()) return true; const me=myName(); if(!me) return false;
   return ((data.accountability||{}).seats||[]).some(s=>s&&seatHasName(s,me)&&/visionary|integrator/i.test(String(s.role||""))); }
 const canEditCompany=()=>isLeadership();
-// Confidential V/TO financials (Revenue & Profit) — visible ONLY to Admin, the Visionary, the Integrator,
-// and the Shared Services leader. Everyone else sees the V/TO with those two figures hidden.
+// Confidential V/TO financials (Revenue & Profit) — visible ONLY to whoever actually SITS in the Visionary,
+// Integrator, or Shared Services seat. Deliberately NOT tied to admin/leadership: HR and facility leaders were
+// made admins, and being an admin must NOT by itself unlock revenue. Everyone else sees the V/TO with Revenue
+// & Profit hidden. (The owner-admin sees it because he sits in the Shared Services seat, not because he's admin.)
 function canSeeFinancials(){
-  if(isLeadership()) return true;                 // admin, Visionary, Integrator
   const me=myName(); if(!me) return false;
-  return (((data.accountability||{}).seats)||[]).some(s=>s&&/shared services/i.test(String(s.role||""))&&seatHasName(s,me));
+  return (((data.accountability||{}).seats)||[]).some(s=>s&&seatHasName(s,me)&&/visionary|integrator|shared services/i.test(String(s.role||"")));
 }
 // Who may PRINT / Save the V/TO — leadership (admin, Visionary, Integrator) plus facility leaders
 // (Shared Services / Texas / Virginia). Others can still VIEW the V/TO on screen, just not print it.
@@ -10171,7 +10172,7 @@ function editVTO(key){
   }else if(CHECK_SECS[key]){
     const withDates=(key!=="collectiveGoals");
     const sec=withDates?v[key]:null;
-    const finFields=(withDates&&canSeeFinancials())?`<div class="field"><label>Revenue <small>(confidential — Admin, Visionary, Integrator &amp; Shared Services only)</small></label><input id="e5" value="${esc(sec.revenue)}" placeholder="e.g. $12M / yr"></div>
+    const finFields=(withDates&&canSeeFinancials())?`<div class="field"><label>Revenue <small>(confidential — Visionary, Integrator &amp; Shared Services only)</small></label><input id="e5" value="${esc(sec.revenue)}" placeholder="e.g. $12M / yr"></div>
       <div class="field"><label>Profit <small>(confidential)</small></label><input id="e6" value="${esc(sec.profit)}" placeholder="e.g. $2.4M"></div>`:"";
     const dates=withDates?`<div class="field"><label>Future Date</label><input id="e1" value="${esc(sec.date)}" placeholder="MM/DD/YY"></div>
       <div class="field"><label>Measurables</label><input id="e2" value="${esc(sec.measurables)}"></div>${finFields}`:"";
@@ -12862,13 +12863,13 @@ function paintTimer(){
   const alloc=hero.querySelector(".alloc");
   if(alloc) alloc.textContent=(elapsed>allot?"Over by "+fmt(elapsed-allot):"Allotted "+seg.min+" min")+" · Total "+fmt(totalLiveSecs());
 }
-/* HARD 90-MINUTE CAP — an L10 must never run for days. Wall-clock since the meeting started:
+/* HARD 120-MINUTE CAP — an L10 must never run for days. Wall-clock since the meeting started:
    • Under the cap → nothing.
    • At the cap → a prompt to the facilitator: add 15 min, or wrap up, with a live 5-minute countdown.
    • Countdown runs out with no more time added → the meeting concludes ON ITS OWN.
    • Opened later already well past the window (abandoned overnight) → any team editor's client ends it.
    Countdown is derived purely from the (synced) start time + capMin, so everyone sees the same clock. */
-const L10_CAP_MIN=90;               // default meeting length; "＋15 minutes" bumps meeting.capMin
+const L10_CAP_MIN=120;              // default meeting length; "＋15 minutes" bumps meeting.capMin
 const HUDDLE_CAP_MIN=40;            // a huddle is shorter than an L10
 const L10_GRACE_SECS=5*60;          // once over the cap, this long to add time before it auto-concludes
 function checkMeetingCap(){
