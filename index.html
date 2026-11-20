@@ -1216,6 +1216,9 @@
   .sc-dot.on{background:var(--pa-good)} .sc-dot.off{background:var(--pa-bad)}
   .qc-hit{font-size:11px;font-weight:800;color:var(--pa-good);flex:none;min-width:74px;text-align:right}
   .qc-hit.bad{color:var(--pa-bad)}
+  /* a direct report's pre-written answer, shown to the leader above their own notes box */
+  .qc-selfans{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:7px 11px;margin:0 0 7px;font-size:13px;line-height:1.5;color:var(--text);white-space:pre-wrap;word-break:break-word}
+  .qc-selfans b{color:var(--accent)}
   /* ===== Company Health dashboard =====
      Status steps validated (lightness band, chroma floor, CVD ΔE, contrast) against
      this app's real card surfaces — #ffffff light, #1b1e24 dark. Don't hand-tweak. */
@@ -4947,7 +4950,7 @@ function migrate(d){
   if(!d.meta) d.meta={};                      // holds app-version build number for live-update nudges
   if(!Array.isArray(d.pa)) d.pa=[];          // People Analyzer + Quarterly Conversation records
   d.pa.forEach(r=>{ if(r){ r.self=r.self||{v:{},g:"",w:"",c:""}; r.sup=r.sup||{v:{},g:"",w:"",c:""};
-    r.final=r.final||{v:{},g:"",w:"",c:""}; r.notes=r.notes||{}; r.qc=r.qc||{}; } });
+    r.final=r.final||{v:{},g:"",w:"",c:""}; r.notes=r.notes||{}; r.qc=r.qc||{}; r.selfQc=r.selfQc||{}; } });
   d.version=2;
   if(!d.provenProcess) d.provenProcess=defaultProvenProcess();
   if(!Array.isArray(d.processes)) d.processes=defaultProcesses();
@@ -5286,7 +5289,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=244;
+const BUILD=245;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -8340,6 +8343,11 @@ const GWC_KEYS=[
    qSelf:"Do you have the time, mental bandwidth, physical ability and skill to do this seat well right now?"}];
 const RATE=["+","+/-","-"];
 const RATE_LABEL={"+":"All the Time","+/-":"Part of the Time","-":"Never"};
+// The Quarterly Conversation's five questions — the SAME set the direct report pre-answers in their
+// self-prep (r.selfQc) and the leader captures live (r.qc), so the two stay in lock-step. `leaderAsk` is
+// the sixth, leader-directed question; the report answers it from their chair during prep.
+const QC_QUESTIONS=[["working","What is working?"],["notWorking","What is not working?"],["start","One thing we should START doing"],["stop","One thing we should STOP doing"],["cont","One thing we should CONTINUE doing"]];
+const QC_LEADER_ASK_SELF="Where could your leader support you better?";
 /* ===== Core Values at the top of every L10 =====
    The company's values should be seen every week, so the opening (Segue) segment leads with them: all six
    are always on screen, and ONE is spotlighted each calendar week (rotating through all of them) with its
@@ -8364,7 +8372,7 @@ function paRec(person, quarter, make){
   data.pa=data.pa||[];
   let r=data.pa.find(x=>x&&sameName(x.person,person)&&x.quarter===quarter);
   if(!r && make){ r={id:uid(), person:person, quarter:quarter,
-    self:blankRating(), sup:blankRating(), final:blankRating(), notes:{}, qc:{}, status:"open"};
+    self:blankRating(), sup:blankRating(), final:blankRating(), notes:{}, qc:{}, selfQc:{}, status:"open"};
     data.pa.push(r); }
   return r||null;
 }
@@ -13881,6 +13889,15 @@ function renderPeople(){
       ${paGrid(mine?mine.self:blankRating(), "self", archived)}
     </div>`;
 
+  // ── your written answers for the conversation — pre-filled so your leader reads them before you meet
+  const sq=(mine&&mine.selfQc)||{};
+  html+=`<div class="sec-title" style="margin-top:20px">Your Answers for the Conversation · ${qLabel(q)}</div>
+    <div class="hint" style="margin:0 2px 10px">Think these through before your Quarterly Conversation. Your leader sees your answers when they prepare, so you spend the meeting talking it through instead of filling it in.</div>
+    <div class="card">
+      ${QC_QUESTIONS.map(([k,l])=>`<div class="field"><label>${esc(l)}</label><textarea data-selfqc="${k}" rows="2" ${archived?"readonly":""} placeholder="${archived?"":"Your answer…"}">${esc(sq[k]||"")}</textarea></div>`).join("")}
+      <div class="field"><label>${esc(QC_LEADER_ASK_SELF)}</label><textarea data-selfqc="leaderAsk" rows="2" ${archived?"readonly":""} placeholder="${archived?"":"What would help you most…"}">${esc(sq.leaderAsk||"")}</textarea></div>
+    </div>`;
+
   // ── supervisor dashboard: every direct report's ratings + GWC at a glance
   if(reports.length){
     const selfCount=archived?0:reports.filter(p=>{ const rr=paRec(p,q,false); return rr&&rateDone(rr.self); }).length;
@@ -13931,13 +13948,15 @@ function renderPeople(){
     cell.querySelectorAll("[data-yn]").forEach(b=>b.onclick=()=>{
       const r=paRec(me,q,true); r.self[cell.dataset.gwc]=b.dataset.yn; r.self.at=todayIso(); r.self.by=myEmail(); savePaRec(r); renderPeople(); });
   });
+  // your own written answers for the conversation (debounced so typing is smooth; no re-render)
+  wrap.querySelectorAll("[data-selfqc]").forEach(t=>t.oninput=()=>{ const r=paRec(me,q,true); r.selfQc=r.selfQc||{}; r.selfQc[t.dataset.selfqc]=t.value; savePaRecDebounced(r); });
   }
   wrap.querySelectorAll("[data-open-pa]").forEach(b=>b.onclick=()=>{ paPerson=b.dataset.openPa; paQuarter=q; renderPeople(); });
   { const rb=archived?null:$("#pp-reset-self"); if(rb) rb.onclick=()=>{
       const have=reports.filter(p=>{ const rr=paRec(p,q,false); return rr&&rateDone(rr.self); });
       if(!have.length){ alert(`None of your people have a self-assessment to reset for ${qLabel(q)}.`); return; }
       if(!confirm(`Reset the self-assessment for all ${have.length} of your ${have.length===1?"person":"people"} who submitted one this quarter (${qLabel(q)})?\n\nThis clears only what they entered about themselves, so they can start fresh. Your reads, final ratings and notes are untouched.`)) return;
-      have.forEach(p=>{ const rr=paRec(p,q,true); rr.self=blankRating(); }); mergeCompany(comp=>{ comp.pa=JSON.parse(JSON.stringify(data.pa)); }); renderPeople();
+      have.forEach(p=>{ const rr=paRec(p,q,true); rr.self=blankRating(); rr.selfQc={}; }); mergeCompany(comp=>{ comp.pa=JSON.parse(JSON.stringify(data.pa)); }); renderPeople();
     }; }
 }
 
@@ -14018,7 +14037,9 @@ function renderPAWorksheet(){
     $("#pa-back").onclick=()=>{ paPerson=null; renderPeople(); }; return;
   }
   const canEdit=canRatePerson(person) && !archived;   // the DIRECT leader (or HR) edits the CURRENT quarter; past quarters are read-only for everyone
-  const seeSelf=canSeeSelfAssessment(person);   // the raw self-rating is private to the person + DIRECT leader only
+  const seeSelf=canSeeSelfAssessment(person);   // the raw self-rating + the report's own written answers are private to the person + DIRECT leader (and HR)
+  const sqSelf=(r.selfQc)||{};                  // the report's pre-written answers to the conversation questions
+  const selfAnsweredQc = seeSelf && (QC_QUESTIONS.some(([k])=>(sqSelf[k]||"").trim()) || (sqSelf.leaderAsk||"").trim());
   const directMgr=managerOf(person);
   const mm=mismatches(r.self,r.sup);
   const low=belowBar(rateDone(r.final)?r.final:r.sup);
@@ -14083,12 +14104,14 @@ function renderPAWorksheet(){
     ${meas.length?meas.map(x=>qcSpark(x.t,x.m)).join(""):`<div class="hint">No measurables owned by ${esc(person)}.</div>`}
 
     <div class="sec-title" style="margin-top:18px">6 · The Five Questions</div>
-    ${[["working","What is working?"],["notWorking","What is not working?"],["start","One thing we should START doing"],
-       ["stop","One thing we should STOP doing"],["cont","One thing we should CONTINUE doing"]]
-      .map(([k,l])=>`<div class="field"><label>${l}</label><textarea data-qc="${k}" rows="2" ${canEdit?"":"readonly"}>${esc(r.qc[k]||"")}</textarea></div>`).join("")}
+    <div class="hint" style="margin:0 2px 8px">${selfAnsweredQc?`${esc(person)} answered these ahead of time — their words show under each question. Use your box to capture what you discuss and agree.`:(seeSelf?`${esc(person)} hasn't pre-answered these yet — they fill them in under “Your Answers for the Conversation” on their People tab.`:"")}</div>
+    ${QC_QUESTIONS.map(([k,l])=>`<div class="field"><label>${esc(l)}</label>
+       ${(seeSelf&&(sqSelf[k]||"").trim())?`<div class="qc-selfans">💬 <b>${esc(person)}:</b> ${esc(sqSelf[k])}</div>`:""}
+       <textarea data-qc="${k}" rows="2" ${canEdit?"":"readonly"} placeholder="${canEdit?"Notes from the conversation…":""}">${esc(r.qc[k]||"")}</textarea></div>`).join("")}
 
     <div class="field"><label>“Where can I be a better leader for you?”</label>
       <div class="hint" style="margin:-4px 2px 6px">Ask it, then sit in the silence. Don't defend. Listen and thank them.</div>
+      ${(seeSelf&&(sqSelf.leaderAsk||"").trim())?`<div class="qc-selfans">💬 <b>${esc(person)}:</b> ${esc(sqSelf.leaderAsk)}</div>`:""}
       <textarea data-qc="leaderAsk" rows="2" ${canEdit?"":"readonly"}>${esc(r.qc.leaderAsk||"")}</textarea></div>
 
     <div class="sec-title" style="margin-top:18px">7 · Commitments</div>
@@ -14144,8 +14167,8 @@ function renderPAWorksheet(){
       mergeCompany(comp=>{ comp.pa=(comp.pa||[]).filter(x=>!(x&&sameName(x.person,person)&&x.quarter===q)); }); paPerson=null; renderPeople();
     }; }
   { const rs=$("#pa-reset-self"); if(rs) rs.onclick=()=>{
-      if(!confirm(`Reset ${person}'s self-assessment for ${qLabel(q)}?\n\nThis clears only the ratings ${person} entered about themselves, so they can fill it in again. Your read, the final rating and your notes stay put.`)) return;
-      r.self=blankRating(); savePaRec(r); renderPAWorksheet();
+      if(!confirm(`Reset ${person}'s self-assessment for ${qLabel(q)}?\n\nThis clears the ratings and the written answers ${person} entered about themselves, so they can fill them in again. Your read, the final rating and your notes stay put.`)) return;
+      r.self=blankRating(); r.selfQc={}; savePaRec(r); renderPAWorksheet();
     }; }
   }   // end if(canEdit)
 }
