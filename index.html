@@ -667,6 +667,17 @@
   .ids-working{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);margin:12px 0 2px}
   .ids-raiser{color:var(--muted);font-weight:700;letter-spacing:.3px;text-transform:none}
   .ids-by{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}
+  /* ── IDS issue voting (prioritize the list) ── */
+  .ids-votebar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:2px 0 10px;font-size:12.5px;color:var(--muted)}
+  .ids-votebar b{color:var(--text)}
+  .ids-vote{display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--border);border-radius:999px;padding:4px 11px;cursor:pointer;white-space:nowrap}
+  .ids-vote:hover{border-color:var(--accent);color:var(--accent)}
+  .ids-vote.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .ids-rank{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:800;margin-right:2px}
+  .ids-rank.r2{background:#6b7280} .ids-rank.r3{background:#9aa1ad}
+  .ids-item.prio{background:var(--accent-soft);border-radius:9px;padding-left:8px;padding-right:8px}
+  .ids-item.prio .ids-txt{font-weight:700}
+  .ids-revote-prompt{background:var(--accent-soft);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:2px 0 10px;font-size:13px;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   /* TDL add: the owner is the point of a to-do, so give it a full-width row of its own */
   .tdl-add{margin-top:10px}
   .ids-addnote{background:var(--accent-soft);border:1px solid var(--accent);border-radius:11px;padding:11px 14px;font-size:13px;line-height:1.5;color:var(--text)}
@@ -5289,7 +5300,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=245;
+const BUILD=246;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5767,6 +5778,31 @@ function reconcileBy(next, prev){ if(!next||!prev) return;
       const pvt=(pAt[sg]||{})[pn]||0, nvt=((nlm.byPersonAt||{})[sg]||{})[pn]||0;
       if(pvt>nvt){ nlm.byPerson=nlm.byPerson||{}; (nlm.byPerson[sg]=nlm.byPerson[sg]||{})[pn]=pBP[sg][pn];
         nlm.byPersonAt=nlm.byPersonAt||{}; (nlm.byPersonAt[sg]=nlm.byPersonAt[sg]||{})[pn]=pvt; } })); }); }
+/* ===== IDS issue voting — the classic EOS "prioritize the list, pick your top 3" =====
+   Votes ride the SAME per-person live-sync as WIFLS: each voter owns ONE box, byPerson.idsvotes[name] =
+   a comma-joined list of up to 3 issue ids, stamped in byPersonAt. The save-merge unions everyone's boxes
+   by newest stamp, so concurrent votes never clobber each other. Tally counts only OPEN issues, so a solved
+   issue's votes fall off on their own; the top 3 float up badged 1/2/3, and when they're all solved the
+   team is auto-prompted to re-vote on what's left. */
+const IDS_VOTES_KEY="idsvotes", IDS_MAX_VOTES=3;
+function idsVotesBox(){ return (meeting&&meeting.byPerson&&meeting.byPerson[IDS_VOTES_KEY])||{}; }
+function myIdsVotes(){ const me=myName(); return ((idsVotesBox()[me])||"").split(",").map(s=>s.trim()).filter(Boolean); }
+function idsVoteTally(){ const box=idsVotesBox(), t={};
+  Object.keys(box).forEach(name=>{ (box[name]||"").split(",").map(s=>s.trim()).filter(Boolean).forEach(id=>{ t[id]=(t[id]||0)+1; }); });
+  return t; }
+// Toggle my vote for an issue (cap IDS_MAX_VOTES). Returns false + nudges when I'm out of votes.
+function toggleIdsVote(issueId){ const me=myName(); if(!me||!meeting) return false;
+  meeting.byPerson=meeting.byPerson||{}; meeting.byPerson[IDS_VOTES_KEY]=meeting.byPerson[IDS_VOTES_KEY]||{};
+  const cur=myIdsVotes(), at=cur.indexOf(issueId);
+  if(at>=0) cur.splice(at,1);
+  else { if(cur.length>=IDS_MAX_VOTES){ setSync("You've used all "+IDS_MAX_VOTES+" votes — remove one first",true); return false; } cur.push(issueId); }
+  meeting.byPerson[IDS_VOTES_KEY][me]=cur.join(",");
+  stampBy(IDS_VOTES_KEY,me); _touchedBy.add(IDS_VOTES_KEY+":"+me); saveL10(); return true; }
+// Facilitator clears every known voter's box (bumped stamps so the clear wins the merge) → a fresh round.
+function clearIdsVotes(){ if(!meeting) return; meeting.byPerson=meeting.byPerson||{};
+  const box=meeting.byPerson[IDS_VOTES_KEY]=meeting.byPerson[IDS_VOTES_KEY]||{};
+  Object.keys(box).forEach(name=>{ box[name]=""; stampBy(IDS_VOTES_KEY,name); _touchedBy.add(IDS_VOTES_KEY+":"+name); });
+  saveL10(true); }
 /* ===== TDL rescue across a remote refresh =====
    A live L10 fires many writes from several people. If a teammate's snapshot rebuilds `data` in the split
    second between you adding a To-Do and your own write echoing back from the server, that To-Do would vanish
@@ -12391,10 +12427,25 @@ function renderSegContent(i){
   }else if(seg.key==="ids"){
     const active=meeting.activeIssue?mtgTeam().issues.find(x=>x.id===meeting.activeIssue):null;   // allow revisiting a SOLVED issue too
     if(!active){
-      const open=mtgTeam().issues.filter(x=>!x.solved), solved=mtgTeam().issues.filter(x=>x.solved);
-      const openRows=open.map(x=>`<div class="ids-item"><div class="ids-txt">${esc(x.text)}${x.owner?`<span class="ids-by">Raised by ${esc(x.owner)}</span>`:""}</div><div class="ids-actions"><button class="btn sm" data-work="${x.id}">Work on it</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
+      const openRaw=mtgTeam().issues.filter(x=>!x.solved), solved=mtgTeam().issues.filter(x=>x.solved);
+      // ── prioritize: tally everyone's votes, float the top 3 up, badge 1/2/3
+      const tally=idsVoteTally(), mine=new Set(myIdsVotes()), myLeft=IDS_MAX_VOTES-mine.size;
+      const origIdx=new Map(); openRaw.forEach((x,k)=>origIdx.set(x.id,k));
+      const open=openRaw.slice().sort((a,b)=>((tally[b.id]||0)-(tally[a.id]||0)) || (origIdx.get(a.id)-origIdx.get(b.id)));
+      const prio={}; open.filter(x=>(tally[x.id]||0)>0).slice(0,3).forEach((x,k)=>prio[x.id]=k+1);
+      const anyVotes=open.some(x=>(tally[x.id]||0)>0) || solved.some(x=>(tally[x.id]||0)>0);
+      const votedOpen=open.filter(x=>(tally[x.id]||0)>0).length;
+      const fac=isFacilitator();
+      const rankBadge=id=>prio[id]?`<span class="ids-rank r${prio[id]}">${prio[id]}</span>`:"";
+      const voteBtn=x=>`<button class="ids-vote${mine.has(x.id)?" on":""}" data-vote="${x.id}" title="${mine.has(x.id)?"Your vote — tap to remove":"Vote for this issue"}">✋ ${tally[x.id]||0}</button>`;
+      const openRows=open.map(x=>`<div class="ids-item${prio[x.id]?" prio":""}">${rankBadge(x.id)}<div class="ids-txt">${esc(x.text)}${x.owner?`<span class="ids-by">Raised by ${esc(x.owner)}</span>`:""}</div><div class="ids-actions">${voteBtn(x)}<button class="btn sm" data-work="${x.id}">Work on it</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
       const solvedRows=solved.map(x=>`<div class="ids-item solved"><div class="ids-txt"><span class="ids-solved-tag">✓ Solved</span> ${esc(x.text)}</div><div class="ids-actions"><button class="btn ghost sm" data-work="${x.id}">Revisit</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
+      const voteBar = openRaw.length>1 ? `<div class="ids-votebar"><span>✋ <b>Prioritize</b> — tap your top ${IDS_MAX_VOTES}; the top 3 rise to the top. <b>${myLeft}</b> vote${myLeft===1?"":"s"} left.</span>${(anyVotes&&fac)?`<button class="btn ghost sm" id="ids-revote">↻ Re-vote</button>`:""}</div>` : "";
+      const revotePrompt = (anyVotes && votedOpen===0 && openRaw.length>0)
+        ? `<div class="ids-revote-prompt">✓ <b>The top 3 are solved.</b> ${fac?`Ready for the next round? <button class="btn sm" id="ids-revote2">↻ Re-vote on what's left</button>`:"The facilitator can start a new vote."}</div>` : "";
       c.innerHTML=`<div class="seg-panel"><h4>Issues List — IDS</h4>
+        ${revotePrompt}
+        ${voteBar}
         ${openRows||'<div class="hint">No open issues. 🎉</div>'}
         ${solvedRows?`<div class="ids-solved-head">Solved this list <small>— tap Revisit to reopen &amp; add to one, or ✕ to clear it</small></div>${solvedRows}`:""}
         ${currentView==="huddle"
@@ -12412,6 +12463,9 @@ function renderSegContent(i){
         { const ti=$("#ids-new"); if(ti) ti.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); const o=$("#ids-new-owner"); if(o) o.focus(); } }; }
         { const oi=$("#ids-new-owner"); if(oi) oi.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addIssue(); } }; }
       }
+      c.querySelectorAll("[data-vote]").forEach(b=>b.onclick=()=>{ toggleIdsVote(b.dataset.vote); renderSegContent(i); });
+      { const rv=(id)=>{ const b=$(id); if(b) b.onclick=()=>{ if(!confirm("Clear everyone's votes and start a fresh round?\n\nThe issues stay; only the votes reset so the team can pick the next top 3.")) return; clearIdsVotes(); renderSegContent(i); }; };
+        rv("#ids-revote"); rv("#ids-revote2"); }
       c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=mtgTeam().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; bumpNav(); saveL10(true); renderSegContent(i); });
       c.querySelectorAll("[data-del-issue]").forEach(b=>b.onclick=()=>{ const id=b.dataset.delIssue, x=mtgTeam().issues.find(y=>y.id===id);
         if(!confirm(`Delete this issue from the meeting?\n\n"${(x&&x.text)||""}"\n\nThis removes it for everyone. To-Dos already created from it are kept.`)) return;
