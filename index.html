@@ -5300,7 +5300,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=246;
+const BUILD=247;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5335,9 +5335,35 @@ function setSync(msg,isErr){ const d=$("#syncDot"); if(!d) return;
 const BK_TIME=24, BK_DAY=7, BK_EVT=8, BK_BUCKET=10*60*1000;
 let _bkBucket=-1, _bkDay="";
 function bkIds(){ const a=[]; for(let i=0;i<BK_TIME;i++)a.push("workspaces/bkt"+i); for(let i=0;i<BK_DAY;i++)a.push("workspaces/bkd"+i); for(let i=0;i<BK_EVT;i++)a.push("workspaces/bke"+i); return a; }
+// Backups hold the FULL assembled state in ONE doc, which outgrows Firestore's 1 MB/doc limit as the org
+// scales — the save then silently fails. So we gzip the state to a base64 string (`stateGz`), ~10× smaller,
+// well under the limit. Old plain-`state` backups still restore. And failures are now SURFACED (they used to
+// be swallowed), so a genuine limit — e.g. a Firestore quota/plan cap — shows up instead of vanishing.
+function _b64FromBytes(bytes){ let s=""; const CH=0x8000; for(let i=0;i<bytes.length;i+=CH){ s+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH)); } return btoa(s); }
+function _bytesFromB64(b64){ const bin=atob(b64), out=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i); return out; }
+async function gzipJson(obj){
+  if(typeof CompressionStream!=="function") return null;            // old browser → caller writes plain state
+  const cs=new CompressionStream("gzip"); const w=cs.writable.getWriter();
+  w.write(new TextEncoder().encode(JSON.stringify(obj||{}))); w.close();
+  const buf=await new Response(cs.readable).arrayBuffer();
+  return _b64FromBytes(new Uint8Array(buf));
+}
+async function gunzipJson(b64){
+  const ds=new DecompressionStream("gzip"); const w=ds.writable.getWriter();
+  w.write(_bytesFromB64(b64)); w.close();
+  const buf=await new Response(ds.readable).arrayBuffer();
+  return JSON.parse(new TextDecoder().decode(buf));
+}
+let _bkWarned=false, _bkLastErr="";
 function writeBackup(id, state, label){
-  try{ firebase.firestore().doc(id).set({ state:JSON.parse(JSON.stringify(state||{})),
-      at:Date.now(), by:((firebase.auth().currentUser||{}).email)||"", build:BUILD, label:label||"" }).catch(function(){}); }catch(e){}
+  const meta={ at:Date.now(), by:((firebase.auth().currentUser||{}).email)||"", build:BUILD, label:label||"" };
+  const fail=e=>{ _bkLastErr=(e&&(e.code||e.message))||"error"; console.error("backup write failed", id, _bkLastErr);
+    if(!_bkWarned){ _bkWarned=true; setSync("⚠ Restore point didn't save ("+_bkLastErr+") — tell your admin", true); } };
+  let fs; try{ fs=firebase.firestore(); }catch(e){ fail(e); return; }
+  gzipJson(state)
+    .then(gz=> fs.doc(id).set(gz!=null ? Object.assign({stateGz:gz}, meta) : Object.assign({state:JSON.parse(JSON.stringify(state||{}))}, meta)))
+    .then(()=>{ _bkLastErr=""; })
+    .catch(fail);
 }
 function maybeBackup(state){
   const now=Date.now(), bucket=Math.floor(now/BK_BUCKET);
@@ -8837,7 +8863,12 @@ function openRestore(){
   if(!isAdmin()) return;
   openSheet(`<h2>Restore points</h2><div class="hint" style="margin:-4px 2px 12px">Loading…</div>`);
   const db=firebase.firestore();
-  Promise.all(bkIds().map(id=>db.doc(id).get().then(s=>s.exists?Object.assign({id:id},s.data()):null).catch(()=>null)))
+  let _readErr="";
+  Promise.all(bkIds().map(id=>db.doc(id).get().then(async s=>{
+      if(!s.exists) return null; const d=s.data()||{};
+      if(!d.state && d.stateGz){ try{ d.state=await gunzipJson(d.stateGz); }catch(e){ return null; } }   // decompress the new format; skip one that won't decode
+      return d.state?Object.assign({id:id},d):null;
+    }).catch(e=>{ _readErr=(e&&(e.code||e.message))||"error"; return null; })))
    .then(list=>{
      const pts=list.filter(p=>p&&p.state).sort((a,b)=>(b.at||0)-(a.at||0));
      const summarize=st=>{ const teams=(st.teams||[]); let rk=0,ms=0; teams.forEach(t=>{rk+=(t.rocks||[]).length; ms+=(t.measurables||[]).length;});
@@ -8853,7 +8884,13 @@ function openRestore(){
          <button class="btn ghost sm" data-restore-cards="${i}" title="Bring back only specific teams' Scorecards from this point — every other team and everything else stays exactly as it is now">↺ Scorecards…</button>
          <button class="btn ghost sm" data-restore-team="${i}" title="Bring back one whole team (its L10 minutes, To-Dos, Issues, Rocks &amp; Scorecard) from this point — every OTHER team and all company data stay exactly as they are now">↺ Team…</button>
          <button class="btn ghost sm" data-restore="${i}">Restore everything</button></div></div>`).join("");
+     const newest=pts.length?(pts[0].at||0):0, staleMin=newest?Math.round((Date.now()-newest)/60000):null;
+     const errTxt=_bkLastErr||_readErr;
+     const warn = errTxt
+       ? `<div style="margin:-4px 2px 12px;padding:9px 12px;border:1px solid var(--red);border-radius:10px;background:rgba(217,45,45,.08);color:var(--red);font-size:12.5px;line-height:1.5">⚠ <b>Restore points are erroring:</b> ${esc(errTxt)}.${/too large|invalid|exhaust|quota|resource|size/i.test(errTxt)?" The workspace may have outgrown a Firestore limit — if this persists after today's update, your Firebase project likely needs the Blaze plan.":""}</div>`
+       : (staleMin!=null && staleMin>180 ? `<div style="margin:-4px 2px 12px;padding:9px 12px;border:1px solid #c2740c;border-radius:10px;background:rgba(194,116,12,.08);font-size:12.5px;line-height:1.5">⚠ The newest restore point is <b>${staleMin>1440?Math.round(staleMin/1440)+" day(s)":Math.round(staleMin/60)+" hour(s)"} old</b> — new ones may have stopped saving. Make a manual one (Admin → “Create restore point”) and check it appears at the top.</div>` : "");
      openSheet(`<h2>Restore points (${pts.length})</h2>
+       ${warn}
        <div class="hint" style="margin:-4px 2px 12px"><b>Chart only</b> brings back just the Accountability Chart. <b>Scorecards…</b> restores only the picked teams' measurables. <b>Team…</b> rolls a whole team back to this point — its L10 minutes, To-Dos, Issues, Rocks &amp; Scorecard — leaving every other team alone (use this to recover a team whose meeting didn't save). <b>Restore everything</b> rolls the WHOLE workspace back for everyone. Any of them saves your current state first, so it's undoable.</div>
        ${rows||'<div class="hint">No restore points yet — they accumulate as the team uses the app.</div>'}
        <div class="sheet-actions"><button class="btn ghost" id="rp-close">Close</button></div>`);
