@@ -5300,7 +5300,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=250;
+const BUILD=251;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -7830,8 +7830,8 @@ function acPrintSeatSet(branchId){
   }
   const ids=new Set(shown.map(s=>s.id));
   const fullKids={}; shown.forEach(s=>{ if(s.parent&&ids.has(s.parent)) fullKids[s.parent]=(fullKids[s.parent]||0)+1; });
-  const collapsedAncestor=s=>{ let p=s.parent?byId[s.parent]:null;
-    while(p){ if(_d3collapsed.has(p.id)) return true; p=p.parent?byId[p.parent]:null; } return false; };
+  const collapsedAncestor=s=>{ const _seen=new Set(); let p=s.parent?byId[s.parent]:null;
+    while(p){ if(_seen.has(p.id)) return false; _seen.add(p.id); if(_d3collapsed.has(p.id)) return true; p=p.parent?byId[p.parent]:null; } return false; };   // visited-guard: a looped reporting line can never spin this forever
   const visible=shown.filter(s=>!collapsedAncestor(s));
   const isSide=s=>(s.side==="left"||s.side==="right") && s.parent && ids.has(s.parent) && !fullKids[s.id];
   return { seats, byId, ids, visible, side:visible.filter(isSide), tree:visible.filter(s=>!isSide(s)) };
@@ -10481,6 +10481,20 @@ let acDraftMode=false;
 function canDraftChart(){ return canEditCompany(); }   // leadership only
 function acDoc(){ return (acDraftMode && data.accountabilityDraft) ? data.accountabilityDraft : (data.accountability||(data.accountability={title:"",schema:3,seats:[]})); }
 function acSeats(){ const d=acDoc(); if(!Array.isArray(d.seats)) d.seats=[]; return d.seats; }
+// ===== CYCLE SAFETY for the accountability chart =====
+// A seat's parent is a free pointer. If a reparent ever makes a seat report (directly or through a chain) back
+// into its own subtree — A→B→…→A — the reporting line forms a LOOP. Every chart/print walk climbs a seat's
+// ancestry with `while(parent)`, so a loop makes that walk run FOREVER and the whole page hard-freezes (the
+// "Accountability chart unresponsive" bug after changing reports). These two helpers make loops impossible and
+// self-healing: descendantIds powers the "Reports to" picker so you can't pick your own report as your boss,
+// and breakSeatCycles repairs any loop already saved (promotes the looping seat to top level) so the chart
+// un-freezes on next open. Both are iterative with a visited guard — they can't loop themselves.
+function descendantIds(rootId, seats){ const kids={}; (seats||[]).forEach(s=>{ if(s&&s.parent){ (kids[s.parent]=kids[s.parent]||[]).push(s.id); } });
+  const out=new Set(), stack=[rootId]; while(stack.length){ const id=stack.pop(); (kids[id]||[]).forEach(k=>{ if(!out.has(k)){ out.add(k); stack.push(k); } }); } return out; }
+function breakSeatCycles(seats){ const byId={}; (seats||[]).forEach(s=>{ if(s&&s.id) byId[s.id]=s; }); let fixed=0;
+  (seats||[]).forEach(s=>{ if(!s||!s.id) return; const seen=new Set([s.id]); let p=s.parent?byId[s.parent]:null;
+    while(p){ if(seen.has(p.id)){ s.parent=null; fixed++; break; } seen.add(p.id); p=p.parent?byId[p.parent]:null; } });
+  return fixed; }
 function startDraftChart(){ if(!canDraftChart()) return;
   if(!data.accountabilityDraft) data.accountabilityDraft=JSON.parse(JSON.stringify(data.accountability||{title:"",schema:3,seats:[]}));
   acDraftMode=true; acFocus=null; save(); renderAccountability(); }
@@ -10499,6 +10513,8 @@ function renderAccountability(){
   if(acView==="free") acView="chart";   // Free layout removed — anyone still on it falls back to the Chart
   if(acDraftMode && !data.accountabilityDraft) acDraftMode=false;   // draft removed by another leader → back to live
   const wrap=$("#visionWrap"), seats=acSeats();
+  // SELF-HEAL a circular reporting line before anything walks the tree, so a bad reparent can never freeze the page.
+  { const n=breakSeatCycles(seats); if(n){ try{ save(); }catch(e){} setSync("⚠ A circular reporting line was auto-fixed — a seat was reporting into its own chain. Please re-check who reports to whom.",true); } }
   // Filter to the chosen function branch (Visionary → Integrator → function → below).
   const visIds=acVisibleIds(); const inView=s=>!visIds||visIds.has(s.id);
   const byParent={}; seats.forEach(s=>{ if(!inView(s))return; const k=s.parent||"root"; (byParent[k]=byParent[k]||[]).push(s); });
@@ -10742,7 +10758,7 @@ function renderChartD3(keepView){
   // full child counts (before hiding) so a COLLAPSED box still shows a "show" toggle
   const fullKids={}; shown.forEach(s=>{ if(s.parent&&ids.has(s.parent)) fullKids[s.parent]=(fullKids[s.parent]||0)+1; });
   // hide any seat that has a COLLAPSED ancestor — deterministic collapse (no reliance on the engine's flags)
-  const hiddenByCollapse=s=>{ let p=s.parent?byId[s.parent]:null; while(p){ if(_d3collapsed.has(p.id)) return true; p=p.parent?byId[p.parent]:null; } return false; };
+  const hiddenByCollapse=s=>{ const _seen=new Set(); let p=s.parent?byId[s.parent]:null; while(p){ if(_seen.has(p.id)) return false; _seen.add(p.id); if(_d3collapsed.has(p.id)) return true; p=p.parent?byId[p.parent]:null; } return false; };   // visited-guard against a looped reporting line
   const visible=shown.filter(s=>!hiddenByCollapse(s));
   // SIDE REPORTS: a leaf seat placed left/right of its manager renders BESIDE the manager (a connector line),
   // not in the top-down tree. Pull them out of the tree data; they're drawn as an overlay after render.
@@ -10875,7 +10891,7 @@ function connectSide(parentId){
   const seats=acSeats(), byId={}; seats.forEach(s=>byId[s.id]=s);
   const parent=byId[parentId]; if(!parent) return;
   // eligible existing seats to move here: anyone that isn't this box or one of its ancestors (no cycles), and not already a side child here
-  const ancestors=new Set(); { let c=parent; while(c){ ancestors.add(c.id); c=c.parent?byId[c.parent]:null; } }
+  const ancestors=new Set(); { let c=parent; while(c&&!ancestors.has(c.id)){ ancestors.add(c.id); c=c.parent?byId[c.parent]:null; } }
   const eligible=seats.filter(s=> s.id!==parentId && !ancestors.has(s.id));
   const optHtml=eligible.map(s=>`<option value="${s.id}">${esc(s.role||"Untitled")}${seatNames(s).length?" — "+esc(seatNames(s).join(", ")):" (open)"}</option>`).join("");
   const render=side=>{
@@ -10973,7 +10989,7 @@ function jumpToSeat(id){
   if(vis && !vis.has(id)){ const p=pillarSeatOf(id); acFunction=(p&&p.id)||"all"; saveAcFunction(); }
   // Expand the seat's whole ancestor chain in BOTH collapse sets — acCollapsed (list/free views) AND
   // _d3collapsed (the chart), or the chart would filter the target out of its data and never reveal it.
-  let s=byId[id]; while(s){ acCollapsed.delete(s.id); _d3collapsed.delete(s.id); s=s.parent?byId[s.parent]:null; }
+  { const _seen=new Set(); let s=byId[id]; while(s&&!_seen.has(s.id)){ _seen.add(s.id); acCollapsed.delete(s.id); _d3collapsed.delete(s.id); s=s.parent?byId[s.parent]:null; } }
   saveCollapse(); saveD3Collapse(); renderAccountability();
   // D3 chart view: pan/zoom straight to the seat using the engine, then re-draw the side reports the engine's render() dropped.
   if(acView==="chart"){ setTimeout(()=>{ try{ if(_d3chart){ _d3chart.setCentered(id).render(); appendSideSeats($("#acD3"), _d3sideSeats); } }catch(e){} },60); return; }
@@ -11103,7 +11119,8 @@ function editSeat(id, newParent){
   // "Reports to" is scoped to the facility chart you're viewing: when a facility is selected, only seats in
   // THAT chart (its branch + the leadership line above it) are offered — never seats in another facility.
   const _pvis=acVisibleIds();
-  const parentOK=x=> x.id!==rec.id && (!_pvis||_pvis.has(x.id)) && (!scoped || canAddSeatUnder(x.id));
+  const _descIds=descendantIds(rec.id, seats);   // this seat's own subtree — never offer one of your own reports as your boss (that closes a loop → frozen chart)
+  const parentOK=x=> x.id!==rec.id && !_descIds.has(x.id) && (!_pvis||_pvis.has(x.id)) && (!scoped || canAddSeatUnder(x.id));
   const parentOpts=(scoped?"":'<option value="">— Top level —</option>')+seats.filter(parentOK).map(x=>`<option value="${x.id}" ${x.id===rec.parent?"selected":""}>${esc(x.role)}</option>`).join("");
   // Where does this box currently sit? Explicit side wins; otherwise mirror where the renderer auto-places it.
   const _par=seats.find(x=>x.id===rec.parent);
@@ -11182,6 +11199,7 @@ function editSeat(id, newParent){
     { const cv=parseInt(($("#s-cap").value||"").trim(),10); if(!isNaN(cv)&&cv>0) rec.cap=cv; else delete rec.cap; }   // headcount → drives "+N open" spots on the chart
     delete rec.name;
     rec.parent=$("#s-parent").value||null;
+    if(rec.parent && (rec.parent===rec.id || descendantIds(rec.id, seats).has(rec.parent))){ rec.parent=(s&&s.parent)||null; setSync("That seat is below this one — reporting line left unchanged so the chart can't loop",true); }   // final guard: never let a seat report into its own branch
     if(scoped && !canAddSeatUnder(rec.parent)) rec.parent=myTopSeatId();   // safety: pillar leaders stay in their branch
     rec.l10=$("#s-l10").checked;
     if($("#s-staff").checked) rec.staff=true; else delete rec.staff;
