@@ -5300,7 +5300,7 @@ let baseAt=0, remoteAt=0;
    want pushed to already-open browsers. It rides along in the shared doc (state.meta.build):
    the first client running the new deploy publishes it; every other open browser sees its own
    BUILD is behind → shows the "new version" bar and auto-reloads once that person is idle. */
-const BUILD=247;
+const BUILD=250;
 let updateReady=false, lastActivity=Date.now();
 /* A remote snapshot must never rebuild the screen in the split-second AROUND a click/keystroke. isBusy()
    alone isn't enough: the instant you mousedown on a button the focused input blurs, isBusy() flips false,
@@ -5804,6 +5804,21 @@ function reconcileBy(next, prev){ if(!next||!prev) return;
       const pvt=(pAt[sg]||{})[pn]||0, nvt=((nlm.byPersonAt||{})[sg]||{})[pn]||0;
       if(pvt>nvt){ nlm.byPerson=nlm.byPerson||{}; (nlm.byPerson[sg]=nlm.byPerson[sg]||{})[pn]=pBP[sg][pn];
         nlm.byPersonAt=nlm.byPersonAt||{}; (nlm.byPersonAt[sg]=nlm.byPersonAt[sg]||{})[pn]=pvt; } })); }); }
+// ===== Navigation (segment / timer / IDS-focus) = navAt last-writer-wins, same idea as solved & WIFLS =====
+// The facilitator sets meeting.seg + bumpNav() locally and the screen moves INSTANTLY, but the write takes a
+// round-trip to echo back from Firestore. In that window an UNRELATED incoming snapshot (a teammate's WIFLS
+// keystroke/presence write, or the facilitator's OWN earlier content echo) still carries the OLD segment — and
+// a wholesale adopt would roll the facilitator back a segment until their own write finally lands. THAT is the
+// "click Next, wait 3-4s, it snaps back then forward" bug. Fix: if the LOCAL meeting's navAt is newer than the
+// incoming one, keep the local navigation. Followers never bump navAt, so a real facilitator move (newer navAt)
+// always wins for them; only the driver's own freshly-stamped nav is shielded from its stale echo. Once the
+// driver's write echoes back the navAt matches (not greater) → we stop overriding and adopt the server → it
+// converges with no flicker. Mirror of saveL10's navAt-gated facilitator-authoritative set.
+const NAV_FIELDS=["seg","segStart","segElapsed","totalElapsed","capMin","activeIssue","solvedIssues","guests","phase","navAt"];
+function reconcileNav(next, prev){ if(!next||!prev) return;
+  const pm={}; (prev.teams||[]).concat(prev.huddles||[]).forEach(t=>{ if(t&&t.id&&t.liveMeeting) pm[t.id]=t.liveMeeting; });
+  (next.teams||[]).concat(next.huddles||[]).forEach(t=>{ const nlm=t&&t.liveMeeting, plm=t&&pm[t.id]; if(!nlm||!plm) return;
+    if((plm.navAt||0) > (nlm.navAt||0)){ NAV_FIELDS.forEach(k=>{ if(k in plm) nlm[k]=plm[k]; }); } }); }
 /* ===== IDS issue voting — the classic EOS "prioritize the list, pick your top 3" =====
    Votes ride the SAME per-person live-sync as WIFLS: each voter owns ONE box, byPerson.idsvotes[name] =
    a comma-joined list of up to 3 issue ids, stamped in byPersonAt. The save-merge unions everyone's boxes
@@ -5851,7 +5866,7 @@ function reMergeMeetingTodos(pend){
 function adoptRemote(state){
   const sc=$("main")?$("main").scrollTop:0;      // a teammate's edit must not yank you to the top
   const pend=pendingMeetingTodos();
-  const _next=migrate(state||blank()); reconcileSolved(_next, data); reconcileBy(_next, data);   // keep a locally-newer solve / WIFLS box over a stale incoming snapshot
+  const _next=migrate(state||blank()); reconcileSolved(_next, data); reconcileBy(_next, data); reconcileNav(_next, data);   // keep a locally-newer solve / WIFLS box / segment over a stale incoming snapshot
   data=_next; syncMeetingRef();
   if(reMergeMeetingTodos(pend)) saveL10(true);   // a To-Do you just added survived the refresh
   if(booted){ switchView(currentView); if($("main")) $("main").scrollTop=sc; }
@@ -5985,7 +6000,7 @@ function adoptMulti(){
       const lm=(_teamDocs[curMtgId()]||{}).liveMeeting;   // read the current meeting doc directly — no full assemble
       if(!lm) _navJump=true;   // meeting ended elsewhere → leave the dead segment now
       else if((lm.phase||"")!==(meeting.phase||"")) _navJump=true;   // open→live (or ended) always jumps everyone in
-      else if((lm.phase||meeting.phase)!=="open" && ((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null))) _navJump=true;   // follow-the-facilitator ONLY once live — during a huddle PREP board each person browses on their own (prepSeg), so a differing server seg must never yank them back
+      else if((lm.phase||meeting.phase)!=="open" && (lm.navAt||0) > (meeting.navAt||0) && ((lm.seg!=null && lm.seg!==meeting.seg) || (lm.activeIssue||null)!==(meeting.activeIssue||null))) _navJump=true;   // follow-the-facilitator ONLY once live — during a huddle PREP board each person browses on their own (prepSeg), so a differing server seg must never yank them back. navAt-GATED: only a GENUINELY NEWER server move jumps you — the facilitator's OWN stale echo (older/equal navAt) must not bypass the write-in-flight guard and roll them back a segment
     }
   }
   if(_multiBooted && !_navJump && (isBusy() || gestureActive() || (Date.now()-lastCommit)<COMMIT_GUARD_MS
@@ -5999,7 +6014,7 @@ function adoptMulti(){
   const sc=$("main")?$("main").scrollTop:0;
   const pend=pendingMeetingTodos();
   const nextData=migrate(merged);
-  reconcileSolved(nextData, data); reconcileBy(nextData, data);   // LWW: a locally-newer solve / WIFLS box survives a stale incoming snapshot (echo or another team's write). Done before the compares below so they see the resolved state.
+  reconcileSolved(nextData, data); reconcileBy(nextData, data); reconcileNav(nextData, data);   // LWW: a locally-newer solve / WIFLS box / segment survives a stale incoming snapshot (echo or another team's write). Done before the compares below so they see the resolved state — and so the facilitator's just-clicked segment can't be rolled back by a stale echo.
   // Our OWN write echoes back from the server as a fresh snapshot. If the incoming state is byte-identical to
   // what's already on screen, DON'T rebuild the view — a wholesale switchView here is exactly what made buttons
   // need a second click right after you acted. We still rebind data + refresh the merge baselines; we only skip
@@ -12468,16 +12483,25 @@ function renderSegContent(i){
       // ── prioritize: tally everyone's votes, float the top 3 up, badge 1/2/3
       const tally=idsVoteTally(), mine=new Set(myIdsVotes()), myLeft=IDS_MAX_VOTES-mine.size;
       const origIdx=new Map(); openRaw.forEach((x,k)=>origIdx.set(x.id,k));
-      const open=openRaw.slice().sort((a,b)=>((tally[b.id]||0)-(tally[a.id]||0)) || (origIdx.get(a.id)-origIdx.get(b.id)));
-      const prio={}; open.filter(x=>(tally[x.id]||0)>0).slice(0,3).forEach((x,k)=>prio[x.id]=k+1);
-      const anyVotes=open.some(x=>(tally[x.id]||0)>0) || solved.some(x=>(tally[x.id]||0)>0);
-      const votedOpen=open.filter(x=>(tally[x.id]||0)>0).length;
+      const sorted=openRaw.slice().sort((a,b)=>((tally[b.id]||0)-(tally[a.id]||0)) || (origIdx.get(a.id)-origIdx.get(b.id)));
+      // HOLD the order while I'm still choosing: keep the list in ORIGINAL order (no re-sort, no rank badges) until
+      // MY last vote is in, so a row can't jump under my finger mid-tap. Reveal the ranked top-3 the moment I finish.
+      // Per-viewer; the live vote counts on each button still tick up in place (numbers don't move rows). min() with
+      // openRaw.length handles a 1-2 issue list where you physically can't cast 3 votes.
+      const sortReady = mine.size >= Math.min(IDS_MAX_VOTES, openRaw.length);
+      const open = sortReady ? sorted : openRaw.slice();
+      const prio={}; if(sortReady) sorted.filter(x=>(tally[x.id]||0)>0).slice(0,3).forEach((x,k)=>prio[x.id]=k+1);
+      const anyVotes=sorted.some(x=>(tally[x.id]||0)>0) || solved.some(x=>(tally[x.id]||0)>0);
+      const votedOpen=sorted.filter(x=>(tally[x.id]||0)>0).length;
       const fac=isFacilitator();
       const rankBadge=id=>prio[id]?`<span class="ids-rank r${prio[id]}">${prio[id]}</span>`:"";
       const voteBtn=x=>`<button class="ids-vote${mine.has(x.id)?" on":""}" data-vote="${x.id}" title="${mine.has(x.id)?"Your vote — tap to remove":"Vote for this issue"}">✋ ${tally[x.id]||0}</button>`;
       const openRows=open.map(x=>`<div class="ids-item${prio[x.id]?" prio":""}">${rankBadge(x.id)}<div class="ids-txt">${esc(x.text)}${x.owner?`<span class="ids-by">Raised by ${esc(x.owner)}</span>`:""}</div><div class="ids-actions">${voteBtn(x)}<button class="btn sm" data-work="${x.id}">Work on it</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
       const solvedRows=solved.map(x=>`<div class="ids-item solved"><div class="ids-txt"><span class="ids-solved-tag">✓ Solved</span> ${esc(x.text)}</div><div class="ids-actions"><button class="btn ghost sm" data-work="${x.id}">Revisit</button><button class="ids-del" data-del-issue="${x.id}" title="Remove this issue from the list">✕</button></div></div>`).join("");
-      const voteBar = openRaw.length>1 ? `<div class="ids-votebar"><span>✋ <b>Prioritize</b> — tap your top ${IDS_MAX_VOTES}; the top 3 rise to the top. <b>${myLeft}</b> vote${myLeft===1?"":"s"} left.</span>${(anyVotes&&fac)?`<button class="btn ghost sm" id="ids-revote">↻ Re-vote</button>`:""}</div>` : "";
+      const voteMsg = sortReady
+        ? `✓ <b>Your votes are in.</b> The top 3 are highlighted below.`
+        : `✋ <b>Prioritize</b> — tap your top ${IDS_MAX_VOTES}. The ranking appears once your last vote is cast. <b>${myLeft}</b> vote${myLeft===1?"":"s"} left.`;
+      const voteBar = openRaw.length>1 ? `<div class="ids-votebar"><span>${voteMsg}</span>${(anyVotes&&fac)?`<button class="btn ghost sm" id="ids-revote">↻ Re-vote</button>`:""}</div>` : "";
       const revotePrompt = (anyVotes && votedOpen===0 && openRaw.length>0)
         ? `<div class="ids-revote-prompt">✓ <b>The top 3 are solved.</b> ${fac?`Ready for the next round? <button class="btn sm" id="ids-revote2">↻ Re-vote on what's left</button>`:"The facilitator can start a new vote."}</div>` : "";
       c.innerHTML=`<div class="seg-panel"><h4>Issues List — IDS</h4>
@@ -12500,7 +12524,7 @@ function renderSegContent(i){
         { const ti=$("#ids-new"); if(ti) ti.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); const o=$("#ids-new-owner"); if(o) o.focus(); } }; }
         { const oi=$("#ids-new-owner"); if(oi) oi.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); addIssue(); } }; }
       }
-      c.querySelectorAll("[data-vote]").forEach(b=>b.onclick=()=>{ toggleIdsVote(b.dataset.vote); renderSegContent(i); });
+      c.querySelectorAll("[data-vote]").forEach(b=>b.onclick=()=>{ toggleIdsVote(b.dataset.vote); renderSegContent(i); applyMeetingPerms(); });   // re-apply perms: the re-render rebuilds the other buttons enabled, so a follower who votes must NOT be left with an enabled delete / "Work on it" (vote stays open via the .ids-vote exemption)
       { const rv=(id)=>{ const b=$(id); if(b) b.onclick=()=>{ if(!confirm("Clear everyone's votes and start a fresh round?\n\nThe issues stay; only the votes reset so the team can pick the next top 3.")) return; clearIdsVotes(); renderSegContent(i); }; };
         rv("#ids-revote"); rv("#ids-revote2"); }
       c.querySelectorAll("[data-work]").forEach(b=>b.onclick=()=>{ const x=mtgTeam().issues.find(y=>y.id===b.dataset.work); seedIdsFromNote(x); meeting.activeIssue=b.dataset.work; bumpNav(); saveL10(true); renderSegContent(i); });
@@ -12801,7 +12825,7 @@ function applyMeetingPerms(){
   const wrap=$("#l10Wrap"); if(!wrap||!meeting) return;
   try{
     if(!isFacilitator()){
-      wrap.querySelectorAll("#segContent button, #segContent select").forEach(el=>{ el.disabled=true; el.classList.add("locked"); });
+      wrap.querySelectorAll("#segContent button, #segContent select").forEach(el=>{ if(el.classList.contains("ids-vote")) return; el.disabled=true; el.classList.add("locked"); });   // ✋ IDS hand-raise votes stay open to EVERYONE (each voter owns their own byPerson box, LWW-synced like WIFLS) — only driving / delete / "Work on it" / re-vote stay facilitator-only
       wrap.querySelectorAll("#segContent input, #segContent textarea").forEach(el=>{
         if(el.hasAttribute("data-lock")||el.hasAttribute("data-rate")) return;   // note boxes + ratings stay open to everyone
         el.disabled=true; el.classList.add("locked"); });
